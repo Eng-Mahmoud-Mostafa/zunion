@@ -74,6 +74,87 @@ function stripFinancial<T extends Record<string, unknown>>(row: T, role: UserRol
   return clone as T;
 }
 
+type AppUser = {
+  id?: string;
+  username: string;
+  full_name: string;
+  email: string;
+  role: string;
+  password_hash?: string;
+  password_salt?: string;
+  is_active?: boolean;
+  must_change_password?: boolean;
+};
+
+const seededUsers: Record<string, AppUser & { password: string }> = {
+  mahmoud: { username: "mahmoud", full_name: "Mahmoud", email: "mahmoud@zunion.local", role: "Master", password: "1234" },
+  reda: { username: "reda", full_name: "Reda", email: "reda@zunion.local", role: "Master", password: "1234" },
+  hassan: { username: "hassan", full_name: "Hassan", email: "hassan@zunion.local", role: "Master", password: "1234" },
+};
+
+function passwordHash(password: string, salt: string) {
+  return hashSecret(`${salt}:${password}`);
+}
+
+async function supabaseRest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (!config.supabaseUrl || !config.supabaseServiceKey) {
+    throw new Error("Supabase server env vars are missing.");
+  }
+  const response = await fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: config.supabaseServiceKey,
+      Authorization: `Bearer ${config.supabaseServiceKey}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+      ...init.headers,
+    },
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(details || response.statusText);
+  }
+  return response.status === 204 ? ([] as T) : response.json() as Promise<T>;
+}
+
+async function loadProfile(username: string) {
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    const rows = await supabaseRest<AppUser[]>(`users_profile?username=eq.${encodeURIComponent(username)}&select=*`);
+    return rows[0] || seededUsers[username] || null;
+  }
+  return seededUsers[username] || null;
+}
+
+function makeSession(user: AppUser, stayLoggedIn = true) {
+  const maxAge = stayLoggedIn ? 14 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000;
+  return {
+    session: {
+      email: user.email,
+      username: user.username,
+      fullName: user.full_name,
+      role: user.role,
+      loggedInAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + maxAge).toISOString(),
+    },
+    maxAge,
+  };
+}
+
+app.post("/api/auth/login", async (req, res) => {
+  const parsed = z.object({ username: z.string().min(1), password: z.string().min(1), stayLoggedIn: z.boolean().optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "اسم المستخدم وكلمة المرور مطلوبان." });
+  const username = parsed.data.username.trim().toLowerCase();
+  const profile = await loadProfile(username);
+  if (!profile || profile.is_active === false) return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
+  const validPassword = profile.password_hash && profile.password_salt
+    ? profile.password_hash === passwordHash(parsed.data.password, profile.password_salt)
+    : seededUsers[username]?.password === parsed.data.password;
+  if (!validPassword) return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
+  const { session, maxAge } = makeSession(profile, parsed.data.stayLoggedIn);
+  res.cookie("zunion_app_session", JSON.stringify(session), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
+  return res.json({ ok: true, session, mustChangePassword: profile.must_change_password ?? true });
+});
+
 app.post("/api/auth/request-otp", async (req, res) => {
   const parsed = z.object({ email: z.string().email() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid email" });
@@ -128,17 +209,28 @@ app.post("/api/auth/request-password-code", async (req, res) => {
   const parsed = z.object({ username: z.string().min(1) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "اسم المستخدم مطلوب." });
   const username = parsed.data.username.trim().toLowerCase();
+  const profile = await loadProfile(username);
+  if (!profile) return res.status(404).json({ error: "المستخدم غير موجود." });
   const code = otpCode();
-  await query(
-    "insert into password_reset_codes (username, code_hash, expires_at) values ($1,$2,now() + interval '10 minutes')",
-    [username, hashSecret(code)],
-  );
+  const codeHash = hashSecret(`${username}:${code}`);
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    await supabaseRest("password_reset_codes", {
+      method: "POST",
+      body: JSON.stringify([{ username, code_hash: codeHash, expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(), used: false }]),
+    });
+  } else {
+    await query(
+      "insert into password_reset_codes (username, code_hash, expires_at) values ($1,$2,now() + interval '10 minutes')",
+      [username, codeHash],
+    );
+  }
   try {
     await sendVerificationEmail(config.resend.passwordChangeEmail, code, "كود تغيير كلمة مرور Zunion");
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر إرسال كود التحقق. تأكد من إعدادات Resend أو أضف دومين موثق." });
   }
-  await audit(null, "PASSWORD_CODE_REQUESTED", "auth", undefined, undefined, { username });
+  res.cookie("zunion_password_code", codeHash, { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge: 10 * 60 * 1000 });
+  audit(null, "PASSWORD_CODE_REQUESTED", "auth", undefined, undefined, { username }).catch(() => undefined);
   return res.json({ ok: true, devCode: config.otpDevMode ? code : undefined });
 });
 
@@ -151,22 +243,45 @@ app.post("/api/auth/change-password", async (req, res) => {
   }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "كل الحقول مطلوبة." });
   const username = parsed.data.username.trim().toLowerCase();
-  const codeHash = hashSecret(parsed.data.code);
+  const codeHash = hashSecret(`${username}:${parsed.data.code}`);
+  const profile = await loadProfile(username);
+  if (!profile) return res.status(404).json({ error: "المستخدم غير موجود." });
+  const validOldPassword = profile.password_hash && profile.password_salt
+    ? profile.password_hash === passwordHash(parsed.data.oldPassword, profile.password_salt)
+    : seededUsers[username]?.password === parsed.data.oldPassword;
+  if (!validOldPassword) return res.status(401).json({ error: "كلمة المرور القديمة غير صحيحة." });
 
-  const result = await tx(async (client) => {
-    const code = await client.query<{ id: string }>(
-      `select id from password_reset_codes
-       where username=$1 and code_hash=$2 and used_at is null and expires_at > now()
-       order by created_at desc limit 1 for update`,
-      [username, codeHash],
-    );
-    if (!code.rows[0]) return null;
-    await client.query("update password_reset_codes set used_at = now() where id = $1", [code.rows[0].id]);
-    return true;
-  });
+  let result = false;
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    const rows = await supabaseRest<Array<{ id: string }>>(`password_reset_codes?username=eq.${encodeURIComponent(username)}&code_hash=eq.${encodeURIComponent(codeHash)}&used=eq.false&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id&order=created_at.desc&limit=1`);
+    result = Boolean(rows[0]);
+    if (rows[0]) {
+      await supabaseRest(`password_reset_codes?id=eq.${rows[0].id}`, { method: "PATCH", body: JSON.stringify({ used: true }) });
+    }
+  } else {
+    result = req.cookies?.zunion_password_code === codeHash || await tx(async (client) => {
+      const code = await client.query<{ id: string }>(
+        `select id from password_reset_codes
+         where username=$1 and code_hash=$2 and used_at is null and expires_at > now()
+         order by created_at desc limit 1 for update`,
+        [username, codeHash],
+      );
+      if (!code.rows[0]) return false;
+      await client.query("update password_reset_codes set used_at = now() where id = $1", [code.rows[0].id]);
+      return true;
+    });
+  }
 
   if (!result) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
-  await audit(null, "PASSWORD_CHANGED", "auth", undefined, undefined, { username });
+  if (config.supabaseUrl && config.supabaseServiceKey && profile.id) {
+    const salt = randomToken(12);
+    await supabaseRest(`users_profile?id=eq.${profile.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ password_salt: salt, password_hash: passwordHash(parsed.data.newPassword, salt), must_change_password: false }),
+    });
+  }
+  res.clearCookie("zunion_password_code");
+  audit(null, "PASSWORD_CHANGED", "auth", undefined, undefined, { username }).catch(() => undefined);
   return res.json({ ok: true });
 });
 

@@ -5,6 +5,8 @@ export const config = {
   port: Number(process.env.PORT ?? 4000),
   appOrigin: process.env.APP_ORIGIN ?? "http://127.0.0.1:5173",
   databaseUrl: process.env.DATABASE_URL ?? "postgres://zunion:zunion@localhost:5432/zunion",
+  supabaseUrl: process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL,
+  supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY,
   cookieName: process.env.SESSION_COOKIE_NAME ?? "zunion_session",
   cookieSecret: process.env.COOKIE_SECRET ?? "dev-change-me",
   uploadDir: process.env.UPLOAD_DIR ?? "uploads",
