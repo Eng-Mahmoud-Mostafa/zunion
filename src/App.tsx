@@ -188,6 +188,24 @@ function nextOrderNumber(orders: Order[]) {
   return `${prefix}-${String(next).padStart(6, "0")}`;
 }
 
+function partyPrefix(value: string) {
+  const normalized = value.trim();
+  if (normalized.includes("أحمد") || normalized.includes("احمد")) return "A";
+  if (normalized.includes("حسن")) return "H";
+  if (normalized.includes("خليفة")) return "K";
+  return "C";
+}
+
+function nextCustomerCode(customers: Customer[], party: string) {
+  const prefix = partyPrefix(party);
+  const next = customers
+    .map((customer) => customer.client_code)
+    .filter((code) => code.startsWith(`${prefix}-`))
+    .map((code) => Number(code.split("-")[1] || 0))
+    .reduce((max, value) => Math.max(max, Number.isFinite(value) ? value : 0), 0) + 1;
+  return `${prefix}-${String(next).padStart(4, "0")}`;
+}
+
 function loadSession(): Session | null {
   try {
     const session = JSON.parse(localStorage.getItem(sessionKey) || "null") as Session | null;
@@ -789,12 +807,21 @@ function AlertItem({ alert }: { alert: Alert }) {
   );
 }
 
-function OrderForm({ initial, orderNumber, onCancel, onSave }: { initial?: Order; orderNumber?: string; onCancel?: () => void; onSave: (order: Order) => void }) {
+function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: { initial?: Order; orderNumber?: string; customers?: Customer[]; onCancel?: () => void; onSave: (order: Order) => void }) {
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), order_number: orderNumber || String(Date.now()).slice(-6) });
   const computed = calculate(form);
 
   function set<K extends keyof Order>(key: K, value: Order[K]) {
     setForm((current) => calculate({ ...current, [key]: value, updated_at: new Date().toISOString() }));
+  }
+
+  function setClientName(value: string) {
+    setForm((current) => {
+      const existing = customers.find((customer) => customer.client_name.trim().toLowerCase() === value.trim().toLowerCase() || customer.phone === current.phone);
+      const source = current.source_person || partyOptions[0];
+      const clientCode = existing?.client_code || current.client_code || nextCustomerCode(customers, source);
+      return calculate({ ...current, client_name: value, client_code: clientCode, updated_at: new Date().toISOString() });
+    });
   }
 
   function filePreview(file?: File) {
@@ -837,7 +864,7 @@ function OrderForm({ initial, orderNumber, onCancel, onSave }: { initial?: Order
   function submit(event: React.FormEvent) {
     event.preventDefault();
     const now = new Date().toISOString();
-    onSave(calculate({ ...computed, created_at: computed.created_at || now, updated_at: now }));
+    onSave(calculate({ ...computed, client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]), created_at: computed.created_at || now, updated_at: now }));
   }
 
   return (
@@ -849,8 +876,8 @@ function OrderForm({ initial, orderNumber, onCancel, onSave }: { initial?: Order
       <div className="form-grid">
         <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} />
         <PartyField value={form.source_person} onChange={(value) => set("source_person", value)} />
-        <Field label="اسم العميل" value={form.client_name} onChange={(value) => set("client_name", value)} />
-        <Field label="كود العميل" value={form.client_code} onChange={(value) => set("client_code", value)} />
+        <Field label="اسم العميل" value={form.client_name} onChange={setClientName} />
+        <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
         <Field label="رقم التليفون" value={form.phone} onChange={(value) => set("phone", value)} />
         <Field label="تاريخ التسليم" type="date" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} />
         <Field label="السعر" type="number" value={form.price} onChange={(value) => set("price", Number(value))} />
@@ -933,6 +960,10 @@ function PartyField({ value, onChange }: { value: string; onChange: (value: stri
 
 function Readonly({ label, value }: { label: string; value: number }) {
   return <label>{label}<input value={value.toLocaleString("ar-EG")} readOnly /></label>;
+}
+
+function ReadonlyText({ label, value }: { label: string; value: string }) {
+  return <label>{label}<input value={value} readOnly /></label>;
 }
 
 function Select({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
@@ -1322,20 +1353,19 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
 }
 
 function AddCustomerPage({ customers, setCustomers, session }: { customers: Customer[]; setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>; session: Session }) {
-  const nextCode = String(Math.max(100, ...customers.map((customer) => Number(customer.client_code) || 0)) + 1);
   const [party, setParty] = useState("أحمد");
   const [customParty, setCustomParty] = useState("");
   const [name, setName] = useState("");
-  const [code, setCode] = useState(nextCode);
   const [phone, setPhone] = useState("");
+  const selectedParty = party === "أخرى" ? customParty : party;
+  const code = nextCustomerCode(customers, selectedParty || party);
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    const customer: Customer = { id: createId(), source_person: party === "أخرى" ? customParty : party, client_name: name, client_code: code, phone, old_balance: 0, notes: "", created_at: new Date().toISOString() };
+    const customer: Customer = { id: createId(), source_person: selectedParty, client_name: name, client_code: code, phone, old_balance: 0, notes: "", created_at: new Date().toISOString() };
     setCustomers((current) => [customer, ...current]);
     addAudit(session, "CUSTOMER_CREATED", "customers", customer.id, undefined, customer);
     setName("");
     setPhone("");
-    setCode(String(Number(code) + 1));
   }
   return (
     <form className="panel order-form" onSubmit={submit}>
@@ -1344,7 +1374,7 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
         <Select label="طرف" value={party} options={partyOptions} onChange={setParty} />
         {party === "أخرى" && <Field label="طرف آخر" value={customParty} onChange={setCustomParty} />}
         <Field label="اسم العميل" value={name} onChange={setName} />
-        <Field label="كود العميل" value={code} onChange={setCode} />
+        <ReadonlyText label="كود العميل" value={code} />
         <Field label="تليفون" value={phone} onChange={setPhone} />
       </div>
       <button className="primary-btn">حفظ العميل</button>
@@ -1611,7 +1641,7 @@ function ZunionApp() {
         </header>
         <section className="page">
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
-          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} onSave={saveNew} />}
+          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} onSave={saveNew} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} />}
           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" />}
