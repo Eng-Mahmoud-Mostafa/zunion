@@ -9,7 +9,7 @@ export const config = {
   supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY,
   cookieName: process.env.SESSION_COOKIE_NAME ?? "zunion_session",
   cookieSecret: process.env.COOKIE_SECRET ?? "dev-change-me",
-  uploadDir: process.env.UPLOAD_DIR ?? "uploads",
+  uploadDir: process.env.UPLOAD_DIR ?? (process.env.VERCEL ? "/tmp/uploads" : "uploads"),
   otpDevMode: process.env.OTP_DEV_MODE === "true",
   resend: {
     apiKey: process.env.RESEND_API_KEY,
