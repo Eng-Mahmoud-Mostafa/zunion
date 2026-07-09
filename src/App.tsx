@@ -100,6 +100,7 @@ const sessionKey = "zunion-local-session";
 const auditKey = "zunion-local-audit-v1";
 const customersKey = "zunion-local-customers-v1";
 const financeKey = "zunion-local-finance-v1";
+const localPasswordsKey = "zunion-local-passwords-v1";
 const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
 
 const roleByEmail: Record<string, Role> = {
@@ -125,6 +126,34 @@ const localUsers: Record<string, { fullName: string; role: Role; password: strin
   "finishing 1": { fullName: "Finishing 1", role: "Finishing", password: "1234", email: "finishing1@zunion.local", mustChangePassword: true },
   "finishing 2": { fullName: "Finishing 2", role: "Finishing", password: "1234", email: "finishing2@zunion.local", mustChangePassword: true },
 };
+
+function loadLocalPasswords(): Record<string, { password: string; mustChangePassword: boolean }> {
+  try {
+    return JSON.parse(localStorage.getItem(localPasswordsKey) || "{}") as Record<string, { password: string; mustChangePassword: boolean }>;
+  } catch {
+    localStorage.removeItem(localPasswordsKey);
+    return {};
+  }
+}
+
+function getLocalUser(username: string) {
+  const base = localUsers[username];
+  if (!base) return null;
+  const saved = loadLocalPasswords()[username];
+  return {
+    ...base,
+    password: saved?.password || base.password,
+    mustChangePassword: saved?.mustChangePassword ?? base.mustChangePassword,
+  };
+}
+
+function saveLocalPassword(username: string, password: string) {
+  const current = loadLocalPasswords();
+  localStorage.setItem(localPasswordsKey, JSON.stringify({
+    ...current,
+    [username]: { password, mustChangePassword: false },
+  }));
+}
 
 const workflowStages: WorkflowStage[] = ["أوردر جديد", "يروح للتشغيل", "التشغيل", "يروح للتشطيب", "التشطيب", "الشغل جاهز", "تم التسليم"];
 const statuses: OrderStatus[] = ["جديد", "في التشغيل", "في التشطيب", "جاهز", "تم التسليم", "مشكلة جودة", "متأخر"];
@@ -454,6 +483,12 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [password, setPassword] = useState("1234");
   const [stayLoggedIn, setStayLoggedIn] = useState(true);
   const [message, setMessage] = useState("");
+  const [changeMode, setChangeMode] = useState(false);
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [issuedPasswordCode, setIssuedPasswordCode] = useState("");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -478,13 +513,116 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         return;
       }
     }
-    const user = localUsers[normalizedUsername];
+    const user = getLocalUser(normalizedUsername);
     if (!user || user.password !== password) return setMessage("اسم المستخدم أو كلمة المرور غير صحيحة.");
     const expiresAt = new Date(Date.now() + (stayLoggedIn ? 14 * 24 : 8) * 60 * 60 * 1000).toISOString();
     const session = { email: user.email, username: normalizedUsername, fullName: user.fullName, role: user.role, loggedInAt: new Date().toISOString(), expiresAt };
     localStorage.setItem(sessionKey, JSON.stringify(session));
     addAudit(session, "LOGIN", "auth", undefined, undefined, { username: normalizedUsername, role: user.role });
     onLogin(session);
+  }
+
+  async function requestPasswordCode() {
+    const normalizedUsername = username.trim().toLowerCase();
+    if (!normalizedUsername) return setMessage("اكتب اسم المستخدم أولا.");
+    if (newPassword.length < 4) return setMessage("كلمة المرور الجديدة يجب ألا تقل عن 4 أحرف.");
+    if (newPassword !== confirmPassword) return setMessage("تأكيد كلمة المرور غير مطابق.");
+
+    if (useServerAuth) {
+      try {
+        setMessage("جار إرسال كود التحقق...");
+        const response = await fetch("/api/auth/request-password-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: normalizedUsername }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "تعذر إرسال كود التحقق. تأكد من إعدادات Resend أو أضف دومين موثق.");
+        setIssuedPasswordCode("");
+        setMessage(payload.devCode ? `كود التحقق التجريبي: ${payload.devCode}` : "تم إرسال كود التحقق إلى البريد المسؤول.");
+        return;
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "تعذر إرسال كود التحقق. تأكد من إعدادات Resend أو أضف دومين موثق.");
+        return;
+      }
+    }
+
+    const user = getLocalUser(normalizedUsername);
+    if (!user || user.password !== oldPassword) return setMessage("كلمة المرور القديمة غير صحيحة.");
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    setIssuedPasswordCode(code);
+    setMessage(`كود التحقق المحلي: ${code}`);
+  }
+
+  async function changePassword(event: React.FormEvent) {
+    event.preventDefault();
+    const normalizedUsername = username.trim().toLowerCase();
+    if (newPassword.length < 4) return setMessage("كلمة المرور الجديدة يجب ألا تقل عن 4 أحرف.");
+    if (newPassword !== confirmPassword) return setMessage("تأكيد كلمة المرور غير مطابق.");
+
+    if (useServerAuth) {
+      try {
+        setMessage("جار تغيير كلمة المرور...");
+        const response = await fetch("/api/auth/change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: normalizedUsername, oldPassword, newPassword, code: verificationCode }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "تعذر تغيير كلمة المرور.");
+        setPassword(newPassword);
+        setOldPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setVerificationCode("");
+        setChangeMode(false);
+        setMessage("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
+        return;
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "تعذر تغيير كلمة المرور.");
+        return;
+      }
+    }
+
+    const user = getLocalUser(normalizedUsername);
+    if (!user || user.password !== oldPassword) return setMessage("كلمة المرور القديمة غير صحيحة.");
+    if (!issuedPasswordCode || verificationCode !== issuedPasswordCode) return setMessage("كود التحقق غير صحيح.");
+    saveLocalPassword(normalizedUsername, newPassword);
+    addAudit(null, "PASSWORD_CHANGED", "auth", normalizedUsername, undefined, { username: normalizedUsername });
+    setPassword(newPassword);
+    setOldPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setVerificationCode("");
+    setIssuedPasswordCode("");
+    setChangeMode(false);
+    setMessage("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
+  }
+
+  if (changeMode) {
+    return (
+      <main className="login-page" dir="rtl">
+        <form className="login-card" onSubmit={changePassword}>
+          <BrandLogo className="login-logo" />
+          <h1>تغيير كلمة المرور</h1>
+          <p>سيتم إرسال كود التحقق إلى بريد المسؤول المحدد في إعدادات Resend.</p>
+          <label>اسم المستخدم</label>
+          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+          <label>كلمة المرور القديمة</label>
+          <input value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} type="password" />
+          <label>كلمة المرور الجديدة</label>
+          <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" />
+          <label>تأكيد كلمة المرور الجديدة</label>
+          <input value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} type="password" />
+          <button className="ghost-btn" type="button" onClick={requestPasswordCode}>إرسال كود التحقق</button>
+          <label>كود التحقق</label>
+          <input value={verificationCode} onChange={(event) => setVerificationCode(event.target.value)} inputMode="numeric" />
+          {message && <div className="notice">{message}</div>}
+          <button className="primary-btn">حفظ كلمة المرور الجديدة</button>
+          <button className="ghost-btn" type="button" onClick={() => { setChangeMode(false); setMessage(""); }}>العودة لتسجيل الدخول</button>
+        </form>
+      </main>
+    );
   }
 
   return (
@@ -497,7 +635,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
         <label>كلمة المرور</label>
         <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" />
-        <button className="ghost-btn" type="button" onClick={() => setMessage("تغيير كلمة المرور يتم من صفحة الإعدادات أو من رابط Vercel بعد تفعيل Supabase/Resend.")}>تغيير كلمة المرور</button>
+        <button className="ghost-btn" type="button" onClick={() => { setChangeMode(true); setMessage(""); }}>تغيير كلمة المرور</button>
         <label className="check stay-check"><input type="checkbox" checked={stayLoggedIn} onChange={(event) => setStayLoggedIn(event.target.checked)} /> البقاء مسجلا لمدة 14 يوم</label>
         {message && <div className="notice">{message}</div>}
         <button className="primary-btn">دخول لوحة التحكم</button>
