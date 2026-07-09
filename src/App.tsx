@@ -489,6 +489,7 @@ function roleOrders(role: Role, orders: Order[]) {
 }
 
 const useServerAuth = import.meta.env.VITE_USE_SERVER_AUTH === "true";
+const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
 function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [username, setUsername] = useState("mahmoud");
@@ -505,7 +506,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     const normalizedUsername = username.trim().toLowerCase();
-    if (useServerAuth) {
+    if (useServerAuth || !isLocalHost) {
       setMessage("جار تسجيل الدخول...");
       try {
         const response = await fetch("/api/auth/login", {
@@ -540,7 +541,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     if (newPassword.length < 4) return setMessage("كلمة المرور الجديدة يجب ألا تقل عن 4 أحرف.");
     if (newPassword !== confirmPassword) return setMessage("تأكيد كلمة المرور غير مطابق.");
 
-    if (useServerAuth) {
+    if (useServerAuth || !isLocalHost) {
       try {
         setMessage("جار إرسال كود التحقق...");
         const response = await fetch("/api/auth/request-password-code", {

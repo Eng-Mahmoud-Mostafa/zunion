@@ -37,6 +37,15 @@ create table if not exists otp_codes (
   created_at timestamptz not null default now()
 );
 
+create table if not exists password_reset_codes (
+  id uuid primary key default gen_random_uuid(),
+  username text not null,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,

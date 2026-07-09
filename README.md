@@ -29,6 +29,8 @@ mahmoud / 1234
 For Vercel, set:
 
 ```text
+NODE_ENV=production
+OTP_DEV_MODE=false
 VITE_USE_SERVER_AUTH=true
 VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
@@ -42,6 +44,8 @@ PASSWORD_CHANGE_EMAIL=mahmoud_foly@icloud.com
 OTP_PEPPER=long-random-secret
 OTP_DEV_MODE=false
 ```
+
+If the password-change screen shows `كود التحقق المحلي`, the deployment is not using server auth. Set `VITE_USE_SERVER_AUTH=true` and `OTP_DEV_MODE=false` in Vercel, then redeploy.
 
 Only these emails are allowed:
 

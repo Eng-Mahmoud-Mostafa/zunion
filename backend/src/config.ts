@@ -11,7 +11,8 @@ export const config = {
   otpDevMode: process.env.OTP_DEV_MODE === "true",
   resend: {
     apiKey: process.env.RESEND_API_KEY,
-    from: process.env.RESEND_FROM ?? "Zunion <onboarding@resend.dev>",
+    from: process.env.RESEND_FROM ?? `Zunion <${process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev"}>`,
+    passwordChangeEmail: process.env.PASSWORD_CHANGE_EMAIL ?? "mahmoud_foly@icloud.com",
   },
   smtp: {
     host: process.env.SMTP_HOST,

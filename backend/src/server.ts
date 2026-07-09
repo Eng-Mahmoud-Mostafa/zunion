@@ -9,7 +9,7 @@ import { z } from "zod";
 import { config, roleByEmail, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { audit, canSeeFinancials, hashSecret, otpCode, randomToken, requireAuth, requireRole } from "./security.js";
-import { sendOtpEmail } from "./mailer.js";
+import { sendOtpEmail, sendVerificationEmail } from "./mailer.js";
 import { customerSchema, orderSchema, statusSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 
@@ -122,6 +122,52 @@ app.post("/api/auth/verify-otp", async (req, res) => {
   });
   await audit(result.user, "LOGIN", "auth", undefined, undefined, { email });
   return res.json({ user: result.user });
+});
+
+app.post("/api/auth/request-password-code", async (req, res) => {
+  const parsed = z.object({ username: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "اسم المستخدم مطلوب." });
+  const username = parsed.data.username.trim().toLowerCase();
+  const code = otpCode();
+  await query(
+    "insert into password_reset_codes (username, code_hash, expires_at) values ($1,$2,now() + interval '10 minutes')",
+    [username, hashSecret(code)],
+  );
+  try {
+    await sendVerificationEmail(config.resend.passwordChangeEmail, code, "كود تغيير كلمة مرور Zunion");
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر إرسال كود التحقق. تأكد من إعدادات Resend أو أضف دومين موثق." });
+  }
+  await audit(null, "PASSWORD_CODE_REQUESTED", "auth", undefined, undefined, { username });
+  return res.json({ ok: true, devCode: config.otpDevMode ? code : undefined });
+});
+
+app.post("/api/auth/change-password", async (req, res) => {
+  const parsed = z.object({
+    username: z.string().min(1),
+    oldPassword: z.string().min(1),
+    newPassword: z.string().min(4),
+    code: z.string().min(4),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "كل الحقول مطلوبة." });
+  const username = parsed.data.username.trim().toLowerCase();
+  const codeHash = hashSecret(parsed.data.code);
+
+  const result = await tx(async (client) => {
+    const code = await client.query<{ id: string }>(
+      `select id from password_reset_codes
+       where username=$1 and code_hash=$2 and used_at is null and expires_at > now()
+       order by created_at desc limit 1 for update`,
+      [username, codeHash],
+    );
+    if (!code.rows[0]) return null;
+    await client.query("update password_reset_codes set used_at = now() where id = $1", [code.rows[0].id]);
+    return true;
+  });
+
+  if (!result) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
+  await audit(null, "PASSWORD_CHANGED", "auth", undefined, undefined, { username });
+  return res.json({ ok: true });
 });
 
 app.post("/api/auth/logout", requireAuth, async (req, res) => {
