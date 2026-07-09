@@ -893,6 +893,69 @@ tr:nth-child(even) td {
 .badge-gray { background: #eef2f7; color: #475569; }
 .badge-red { background: #fff0f2; color: var(--red); }
 
+.empty-cell {
+  padding: 28px !important;
+  text-align: center;
+  color: var(--muted);
+}
+
+.screenshot-dashboard .screenshot-stats {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.dashboard-grid.three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.dashboard-table table {
+  min-width: 920px;
+}
+
+.finance-screen .stats-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.account-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.operation-screen .stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.donut-card {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+}
+
+.donut-ring {
+  width: 160px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: conic-gradient(#ef4444 0 48%, #3b82f6 48% 82%, #22c55e 82% 100%);
+  position: relative;
+}
+
+.donut-ring::after {
+  content: "";
+  position: absolute;
+  inset: 34px;
+  border-radius: 50%;
+  background: #fff;
+}
+
 .alert-item {
   grid-template-columns: 170px minmax(0, 1fr) 110px;
   border-color: #f6dc92;

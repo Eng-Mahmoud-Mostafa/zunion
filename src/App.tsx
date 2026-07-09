@@ -1,6 +1,18 @@
 import { Component, Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
 import { BrandLogo } from "./components/BrandLogo";
+import { formatDateArabic, formatMoney, formatNumber } from "./utils/formatters";
+import {
+  getDashboardStats,
+  getMonthlyFinancialStats,
+  getOperationStats,
+  getReportsData,
+  type DashboardStats,
+  type DbOrder,
+  type DbTransaction,
+  type OperationStats,
+  type ReportsData,
+} from "./services/statsService";
 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
@@ -653,45 +665,106 @@ function StatCard({ title, value, tone = "" }: { title: string; value: string | 
   );
 }
 
-function Dashboard({ orders, setView }: { orders: Order[]; setView: (view: View) => void }) {
-  const stats = useMemo(() => ({
-    total: orders.length,
-    fresh: orders.filter((order) => order.order_status === "جديد").length,
-    production: orders.filter((order) => order.order_status === "في التشغيل").length,
-    finishing: orders.filter((order) => order.order_status === "في التشطيب").length,
-    ready: orders.filter((order) => order.order_status === "جاهز").length,
-    delivered: orders.filter((order) => order.order_status === "تم التسليم").length,
-    late: orders.filter((order) => daysUntil(order.delivery_date) < 0 && order.order_status !== "تم التسليم").length,
-    today: orders.filter((order) => daysUntil(order.delivery_date) === 0 && order.order_status !== "تم التسليم").length,
-    tomorrow: orders.filter((order) => daysUntil(order.delivery_date) === 1 && order.order_status !== "تم التسليم").length,
-    money: orders.reduce((sum, order) => sum + order.net_balance, 0),
-    remaining: orders.reduce((sum, order) => sum + order.remaining, 0),
-  }), [orders]);
+function LoadingPanel() {
+  return <section className="panel"><p className="muted">جار تحميل البيانات...</p></section>;
+}
 
-  const alerts = buildAlerts(orders);
+function ErrorPanel({ message }: { message: string }) {
+  return <section className="panel"><p className="notice">{message}</p></section>;
+}
+
+function EmptyRow({ colSpan }: { colSpan: number }) {
+  return <tr><td colSpan={colSpan} className="empty-cell">لا توجد بيانات</td></tr>;
+}
+
+function orderClientName(order: DbOrder) {
+  return order.customer_name || order.client_name || "-";
+}
+
+function orderParty(order: DbOrder) {
+  return order.party || order.source_person || "-";
+}
+
+function orderPieces(order: DbOrder) {
+  return order.pieces_count ?? order.quantity ?? 0;
+}
+
+function Dashboard({ setView, canSeeFinancials }: { setView: (view: View) => void; canSeeFinancials: boolean }) {
+  const [data, setData] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    getDashboardStats()
+      .then((stats) => { if (active) setData(stats); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "تعذر تحميل بيانات Supabase."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  if (loading) return <LoadingPanel />;
+  if (error || !data) return <ErrorPanel message={error || "تعذر تحميل البيانات."} />;
 
   return (
-    <div className="stack">
+    <div className="stack screenshot-dashboard">
+      <section className="stats-grid screenshot-stats">
+        {canSeeFinancials && <StatCard title="إجمالي الإيرادات" value={formatMoney(data.incomeTotal)} />}
+        {canSeeFinancials && <StatCard title="الصافي" value={formatMoney(data.netTotal)} />}
+        {canSeeFinancials && <StatCard title="إجمالي المصروفات" value={formatMoney(data.expenseTotal)} tone="danger" />}
+        <StatCard title="أوردرات جديدة" value={formatNumber(data.newOrders)} />
+        <StatCard title="في التشغيل" value={formatNumber(data.inOperation)} />
+        <StatCard title="في التشطيب" value={formatNumber(data.inFinishing)} />
+        <StatCard title="جاهز" value={formatNumber(data.ready)} />
+      </section>
       <section className="quick-grid">
-        <button onClick={() => setView("new")}>اوردر جديد</button>
-        <button onClick={() => setView("addCustomer")}>إضافة عميل</button>
+        <button onClick={() => setView("new")}>أوردر جديد</button>
         <button onClick={() => setView("search")}>بحث</button>
-        <button onClick={() => setView("finance")}>مصروفات وإيرادات</button>
+        <button onClick={() => setView("addCustomer")}>إضافة عميل</button>
+        {canSeeFinancials && <button onClick={() => setView("finance")}>مصروفات وإيرادات</button>}
       </section>
-      <section className="stats-grid">
-        <StatCard title="إجمالي الأوردرات" value={stats.total} />
-        <StatCard title="أوردرات جديدة" value={stats.fresh} />
-        <StatCard title="في التشغيل" value={stats.production} />
-        <StatCard title="في التشطيب" value={stats.finishing} />
-        <StatCard title="جاهز" value={stats.ready} />
-        <StatCard title="تم التسليم" value={stats.delivered} />
-        <StatCard title="متأخر" value={stats.late} tone="danger" />
-        <StatCard title="إجمالي الحسابات" value={stats.money.toLocaleString("ar-EG")} />
-        <StatCard title="إجمالي المتبقي" value={stats.remaining.toLocaleString("ar-EG")} tone="danger" />
-        <StatCard title="تسليم اليوم" value={stats.today} />
-        <StatCard title="تسليم غدا" value={stats.tomorrow} />
+      <section className="dashboard-grid">
+        <div className="panel">
+          <div className="panel-head"><h2>آخر الأوردرات</h2><button className="ghost-btn compact" onClick={() => setView("search")}>عرض الكل</button></div>
+          <div className="table-wrap dashboard-table"><table><thead><tr>{["تاريخ التسليم", "أمر شغل رقم", "العميل", "الطرف", "إجمالي", "مدفوع", "متبقي", "الحالة"].map((head) => <th key={head}>{head}</th>)}</tr></thead><tbody>
+            {data.latestOrders.length === 0 && <EmptyRow colSpan={8} />}
+            {data.latestOrders.map((order) => <tr key={order.id}><td>{formatDateArabic(order.delivery_date)}</td><td>{order.order_number || "-"}</td><td>{orderClientName(order)}</td><td>{orderParty(order)}</td><td>{formatMoney(order.total)}</td><td>{formatMoney(order.paid)}</td><td>{formatMoney(order.remaining)}</td><td><span className="badge badge-blue">{order.delivery_status || order.operation_status || "-"}</span></td></tr>)}
+          </tbody></table></div>
+        </div>
+        <div className="panel">
+          <div className="panel-head"><h2>تنبيهات هامة</h2></div>
+          <div className="alerts-list">
+            {data.latestOrders.length === 0 && <p className="muted">لا توجد بيانات</p>}
+            {data.latestOrders.slice(0, 5).map((order) => <div className="alert-item" key={order.id}><strong>{order.delivery_date ? "موعد تسليم" : "أوردر"}</strong><span>{orderClientName(order)}</span><small>{formatDateArabic(order.delivery_date)}</small></div>)}
+          </div>
+        </div>
       </section>
-      <section className="panel">
+      {canSeeFinancials && <section className="dashboard-grid three">
+        <FinanceMiniTable title="آخر المصروفات" rows={data.latestExpenses} />
+        <FinanceMiniTable title="آخر الإيرادات" rows={data.latestRevenues} />
+        <div className="panel"><div className="panel-head"><h2>ملخص الشهر</h2></div><div className="donut-card"><div className="donut-ring" /><strong>{formatMoney(data.netTotal)}</strong><span>الصافي</span></div></div>
+      </section>}
+    </div>
+  );
+}
+
+function FinanceMiniTable({ title, rows }: { title: string; rows: DbTransaction[] }) {
+  return (
+    <div className="panel">
+      <div className="panel-head"><h2>{title}</h2></div>
+      <div className="table-wrap accounts-table"><table><thead><tr><th>التاريخ</th><th>البيان</th><th>القيمة</th></tr></thead><tbody>
+        {rows.length === 0 && <EmptyRow colSpan={3} />}
+        {rows.map((row) => <tr key={row.id}><td>{formatDateArabic(row.date || row.created_at)}</td><td>{row.description || row.expense_type || "-"}</td><td>{formatMoney(row.amount ?? row.value ?? row.total)}</td></tr>)}
+      </tbody></table></div>
+    </div>
+  );
+}
+
+function LegacyDashboardAlerts({ orders, setView }: { orders: Order[]; setView: (view: View) => void }) {
+  const alerts = buildAlerts(orders);
+  return (
+    <section className="panel">
         <div className="panel-head">
           <h2>تنبيهات التسليم</h2>
           <button className="ghost-btn compact" onClick={() => setView("alerts")}>عرض الكل</button>
@@ -701,7 +774,6 @@ function Dashboard({ orders, setView }: { orders: Order[]; setView: (view: View)
           {alerts.slice(0, 8).map((alert, index) => <AlertItem key={`${alert.order.id}-${index}`} alert={alert} />)}
         </div>
       </section>
-    </div>
   );
 }
 
@@ -871,6 +943,9 @@ function Textarea({ label, value, onChange }: { label: string; value: string; on
 }
 
 function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" }) {
+  const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
+  const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
+  const [remoteError, setRemoteError] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
   const [date, setDate] = useState("");
@@ -878,6 +953,52 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
   const [qualityOnly, setQualityOnly] = useState(false);
   const [editing, setEditing] = useState<Order | null>(null);
   const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    if (!queue) return;
+    let active = true;
+    setRemoteLoading(true);
+    getOperationStats()
+      .then((stats) => { if (active) setRemoteOps(stats); })
+      .catch((err) => { if (active) setRemoteError(err instanceof Error ? err.message : "تعذر تحميل بيانات التشغيل."); })
+      .finally(() => { if (active) setRemoteLoading(false); });
+    return () => { active = false; };
+  }, [queue]);
+
+  if (queue) {
+    if (remoteLoading) return <LoadingPanel />;
+    if (remoteError || !remoteOps) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
+    const filteredRemote = remoteOps.orders.filter((order) => {
+      const text = `${order.order_number || ""} ${orderClientName(order)} ${order.phone || ""} ${order.service_type || order.order_type || ""}`.toLowerCase();
+      return (!query || text.includes(query.toLowerCase()))
+        && (!status || [order.operation_status, order.finishing_status, order.delivery_status].includes(status))
+        && (!date || order.delivery_date === date);
+    });
+    const pagesRemote = Math.max(1, Math.ceil(filteredRemote.length / 8));
+    const visibleRemote = filteredRemote.slice((page - 1) * 8, page * 8);
+    return (
+      <div className="stack operation-screen">
+        <section className="stats-grid">
+          <StatCard title="قيد التشغيل" value={formatNumber(remoteOps.inOperation)} tone="danger" />
+          <StatCard title="قيد التشطيب" value={formatNumber(remoteOps.inFinishing)} />
+          <StatCard title="جاهز للإرسال" value={formatNumber(remoteOps.readyToSend)} />
+          <StatCard title="تسليم اليوم" value={formatNumber(remoteOps.deliveryToday)} />
+        </section>
+        <section className="panel filters">
+          <Field label="تاريخ التسليم" type="date" value={date} onChange={setDate} />
+          <Field label="رقم الأوردر" value={query} onChange={setQuery} />
+          <Select label="الحالة" value={status} options={["", "قيد التشغيل", "قيد التشطيب", "جاهز للإرسال", "مكتمل", "جديدة"]} onChange={setStatus} />
+          <button className="primary-btn" onClick={() => setPage(1)}>بحث</button>
+          <button className="ghost-btn" onClick={() => { setQuery(""); setStatus(""); setDate(""); }}>مسح الفلاتر</button>
+        </section>
+        <section className="table-wrap accounts-table"><table><thead><tr>{["رقم الأوردر", "اسم العميل", "تاريخ التسليم", "عدد القطع", "حالة التشغيل", "حالة التشطيب", "حالة تسليم"].map((head) => <th key={head}>{head}</th>)}</tr></thead><tbody>
+          {visibleRemote.length === 0 && <EmptyRow colSpan={7} />}
+          {visibleRemote.map((order) => <tr key={order.id}><td>{order.order_number || "-"}</td><td>{orderClientName(order)}</td><td>{formatDateArabic(order.delivery_date)}</td><td>{formatNumber(orderPieces(order))}</td><td><span className="badge badge-blue">{order.operation_status || "-"}</span></td><td><span className="badge badge-green">{order.finishing_status || "-"}</span></td><td><span className="badge badge-amber">{order.delivery_status || "-"}</span></td></tr>)}
+        </tbody></table></section>
+        <div className="pagination"><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}>السابق</button><span>{page} / {pagesRemote}</span><button disabled={page === pagesRemote} onClick={() => setPage((value) => value + 1)}>التالي</button></div>
+      </div>
+    );
+  }
 
   const baseOrders = useMemo(() => {
     if (queue === "worker") return orders.filter((order) => ["يروح للتشغيل", "التشغيل"].includes(order.workflow_stage));
@@ -1234,52 +1355,79 @@ function SearchPage({ orders, setOrders, session }: { orders: Order[]; setOrders
   return <OrdersPage orders={orders} setOrders={setOrders} session={session} />;
 }
 
-function FinancePage({ records, setRecords, session }: { records: FinanceRecord[]; setRecords: React.Dispatch<React.SetStateAction<FinanceRecord[]>>; session: Session }) {
+function FinancePage({ session }: { session: Session }) {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [type, setType] = useState("");
-  const [quantity, setQuantity] = useState(1);
-  const [price, setPrice] = useState(0);
-  const [fromName, setFromName] = useState("");
-  const [value, setValue] = useState(0);
-  const [reason, setReason] = useState("");
-  const current = records.filter((record) => record.month === month);
-  const expenses = current.filter((record) => record.kind === "expense").reduce((sum, record) => sum + record.total, 0);
-  const incomes = current.filter((record) => record.kind === "income").reduce((sum, record) => sum + record.value, 0);
-  function addExpense(event: React.FormEvent) {
-    event.preventDefault();
-    const record: FinanceRecord = { id: createId(), kind: "expense", month, type, quantity, price, total: quantity * price, from_name: "", value: 0, reason: "", created_at: new Date().toISOString() };
-    setRecords((items) => [record, ...items]);
-    addAudit(session, "EXPENSE_ADDED", "expenses", record.id, undefined, record);
-  }
-  function addIncome(event: React.FormEvent) {
-    event.preventDefault();
-    const record: FinanceRecord = { id: createId(), kind: "income", month, type: "", quantity: 0, price: 0, total: 0, from_name: fromName, value, reason, created_at: new Date().toISOString() };
-    setRecords((items) => [record, ...items]);
-    addAudit(session, "INCOME_ADDED", "incomes", record.id, undefined, record);
-  }
+  const [account, setAccount] = useState("");
+  const [data, setData] = useState<{ incomeTotal: number; expenseTotal: number; netTotal: number; transactions: DbTransaction[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [year, selectedMonth] = month.split("-").map(Number);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    getMonthlyFinancialStats(selectedMonth, year, account)
+      .then((stats) => { if (active) setData(stats); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "تعذر تحميل البيانات."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [account, selectedMonth, year]);
+
+  if (loading) return <LoadingPanel />;
+  if (error || !data) return <ErrorPanel message={error || "تعذر تحميل البيانات."} />;
+
   return (
-    <div className="stack">
+    <div className="stack finance-screen">
       <section className="panel">
         <div className="panel-head"><h2>مصروفات وإيرادات</h2><input type="month" value={month} onChange={(event) => { setMonth(event.target.value); addAudit(session, "MONTH_OPENED", "monthly_periods", event.target.value); }} /></div>
-        <div className="stats-grid"><StatCard title="إجمالي المصروفات" value={expenses} /><StatCard title="إجمالي الإيرادات" value={incomes} /><StatCard title="صافي الشهر" value={incomes - expenses} /></div>
+        <div className="stats-grid"><StatCard title="الإيرادات" value={formatMoney(data.incomeTotal)} /><StatCard title="الصافي" value={formatMoney(data.netTotal)} /><StatCard title="المصروفات" value={formatMoney(data.expenseTotal)} tone="danger" /></div>
       </section>
-      <form className="panel form-grid" onSubmit={addExpense}>
-        <h2>إضافة مصروف</h2><Field label="النوع" value={type} onChange={setType} /><Field label="العدد" type="number" value={quantity} onChange={(v) => setQuantity(Number(v))} /><Field label="السعر" type="number" value={price} onChange={(v) => setPrice(Number(v))} /><Readonly label="الإجمالي" value={quantity * price} /><button className="primary-btn">حفظ مصروف</button>
-      </form>
-      <form className="panel form-grid" onSubmit={addIncome}>
-        <h2>إضافة إيراد</h2><Field label="من" value={fromName} onChange={setFromName} /><Field label="القيمة" type="number" value={value} onChange={(v) => setValue(Number(v))} /><Field label="بسبب" value={reason} onChange={setReason} /><button className="primary-btn">حفظ إيراد</button>
-      </form>
-      <section className="table-wrap accounts-table"><table><thead><tr><th>النوع</th><th>الشهر</th><th>القيمة</th><th>السبب/النوع</th><th>التاريخ</th></tr></thead><tbody>{current.map((record) => <tr key={record.id}><td>{record.kind === "expense" ? "مصروف" : "إيراد"}</td><td>{record.month}</td><td>{record.kind === "expense" ? record.total : record.value}</td><td>{record.kind === "expense" ? record.type : record.reason}</td><td>{new Date(record.created_at).toLocaleDateString("ar-EG")}</td></tr>)}</tbody></table></section>
+      <section className="panel account-buttons">
+        {["سامح", "احمد", "شيكات", "بنك"].map((name) => <button key={name} className={account === name ? "primary-btn" : "ghost-btn"} onClick={() => setAccount(account === name ? "" : name)}>{name}</button>)}
+      </section>
+      <section className="table-wrap accounts-table"><table><thead><tr>{["التاريخ", "نوع المصروف", "البيان", "المبلغ", "الحساب / الوجهة", "التاريخ"].map((head) => <th key={head}>{head}</th>)}</tr></thead><tbody>
+        {data.transactions.length === 0 && <EmptyRow colSpan={6} />}
+        {data.transactions.map((record) => <tr key={record.id}><td>{formatDateArabic(record.date)}</td><td>{record.transaction_type || record.kind || "-"}</td><td>{record.description || "-"}</td><td>{formatMoney(record.amount ?? record.value ?? record.total)}</td><td>{record.account_destination || "-"}</td><td>{formatDateArabic(record.created_at)}</td></tr>)}
+      </tbody></table></section>
     </div>
   );
 }
 
-function ReportsPage({ orders, records }: { orders: Order[]; records: FinanceRecord[] }) {
-  const orderTotal = orders.reduce((sum, order) => sum + order.total, 0);
-  const remaining = orders.reduce((sum, order) => sum + order.remaining, 0);
-  const expenses = records.filter((record) => record.kind === "expense").reduce((sum, record) => sum + record.total, 0);
-  const incomes = records.filter((record) => record.kind === "income").reduce((sum, record) => sum + record.value, 0);
-  return <section className="panel"><h2>التقارير</h2><div className="stats-grid"><StatCard title="إجمالي الأوردرات" value={orderTotal} /><StatCard title="المتبقي" value={remaining} /><StatCard title="المصروفات" value={expenses} /><StatCard title="الإيرادات" value={incomes} /><StatCard title="الصافي" value={incomes - expenses} /></div></section>;
+function ReportsPage() {
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [data, setData] = useState<ReportsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [year, selectedMonth] = month.split("-").map(Number);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    getReportsData(selectedMonth, year)
+      .then((stats) => { if (active) setData(stats); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "تعذر تحميل التقارير."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [selectedMonth, year]);
+
+  if (loading) return <LoadingPanel />;
+  if (error || !data) return <ErrorPanel message={error || "تعذر تحميل البيانات."} />;
+
+  return (
+    <div className="stack">
+      <section className="panel">
+        <div className="panel-head"><h2>التقارير</h2><input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></div>
+        <div className="stats-grid"><StatCard title="الإيرادات" value={formatMoney(data.incomeTotal)} /><StatCard title="المصروفات" value={formatMoney(data.expenseTotal)} tone="danger" /><StatCard title="الصافي" value={formatMoney(data.netTotal)} /></div>
+      </section>
+      <section className="panel dashboard-grid">
+        <div className="donut-card"><div className="donut-ring" /><strong>{formatMoney(data.netTotal)}</strong><span>الصافي</span></div>
+        <div className="table-wrap accounts-table"><table><thead><tr><th>الشهر</th><th>إيرادات</th><th>مصروفات</th><th>صافي</th></tr></thead><tbody>
+          {data.monthlyRows.length === 0 && <EmptyRow colSpan={4} />}
+          {data.monthlyRows.map((row) => <tr key={row.month}><td>{row.month}</td><td>{formatMoney(row.income)}</td><td>{formatMoney(row.expense)}</td><td>{formatMoney(row.net)}</td></tr>)}
+        </tbody></table></div>
+      </section>
+    </div>
+  );
 }
 
 function AuditLog() {
@@ -1461,15 +1609,15 @@ function ZunionApp() {
           <BrandLogo className="top-logo" />
         </header>
         <section className="page">
-          {view === "dashboard" && <Dashboard orders={visibleOrders} setView={setView} />}
+          {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} onSave={saveNew} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} />}
           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" />}
           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
-          {view === "finance" && <FinancePage records={financeRecords} setRecords={setFinanceRecords} session={session} />}
-          {view === "reports" && <ReportsPage orders={orders} records={financeRecords} />}
+          {view === "finance" && (canManageFinancials(session.role) ? <FinancePage session={session} /> : <ErrorPanel message="ليس لديك صلاحية للوصول لهذه الصفحة" />)}
+          {view === "reports" && (canManageFinancials(session.role) ? <ReportsPage /> : <ErrorPanel message="ليس لديك صلاحية للوصول لهذه الصفحة" />)}
           {view === "import" && <ImportExport orders={orders} setOrders={setOrders} session={session} />}
           {view === "audit" && <AuditLog />}
           {view === "settings" && <SettingsPage />}
