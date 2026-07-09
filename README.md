@@ -89,4 +89,9 @@ npm run build
 
 ## Vercel
 
-This is a React + Vite project. `vercel.json` sets the build command, output folder, and SPA rewrite. Do not deploy it as Next.js.
+This repo is configured for Vercel Services:
+
+- `frontend`: root project, Vite, mounted at `/`
+- `backend`: `backend/`, mounted at `/api`
+
+In Vercel Project Settings, set Framework Preset to `Services`, then redeploy. Do not deploy it as Next.js.

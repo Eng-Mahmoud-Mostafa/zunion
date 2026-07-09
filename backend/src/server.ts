@@ -21,6 +21,26 @@ app.use(cors({ origin: config.appOrigin, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
+const serviceRoutedPrefixes = [
+  "/auth",
+  "/orders",
+  "/customers",
+  "/search",
+  "/monthly-periods",
+  "/expenses",
+  "/incomes",
+  "/reports",
+  "/dashboard",
+  "/audit",
+];
+
+app.use((req, _res, next) => {
+  if (req.path === "/health" || serviceRoutedPrefixes.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`))) {
+    req.url = `/api${req.url}`;
+  }
+  next();
+});
+
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 const otpRate = new Map<string, number[]>();
