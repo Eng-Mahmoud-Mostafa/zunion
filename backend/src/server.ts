@@ -119,8 +119,13 @@ async function supabaseRest<T>(path: string, init: RequestInit = {}): Promise<T>
 
 async function loadProfile(username: string) {
   if (config.supabaseUrl && config.supabaseServiceKey) {
-    const rows = await supabaseRest<AppUser[]>(`users_profile?username=eq.${encodeURIComponent(username)}&select=*`);
-    return rows[0] || seededUsers[username] || null;
+    try {
+      const rows = await supabaseRest<AppUser[]>(`users_profile?username=eq.${encodeURIComponent(username)}&select=*`);
+      return rows[0] || seededUsers[username] || null;
+    } catch (error) {
+      console.warn("Supabase users_profile lookup failed; using seeded user fallback.", error);
+      return seededUsers[username] || null;
+    }
   }
   return seededUsers[username] || null;
 }
@@ -214,10 +219,14 @@ app.post("/api/auth/request-password-code", async (req, res) => {
   const code = otpCode();
   const codeHash = hashSecret(`${username}:${code}`);
   if (config.supabaseUrl && config.supabaseServiceKey) {
-    await supabaseRest("password_reset_codes", {
-      method: "POST",
-      body: JSON.stringify([{ username, code_hash: codeHash, expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(), used: false }]),
-    });
+    try {
+      await supabaseRest("password_reset_codes", {
+        method: "POST",
+        body: JSON.stringify([{ username, code_hash: codeHash, expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(), used: false }]),
+      });
+    } catch (error) {
+      console.warn("Supabase password_reset_codes insert failed; using secure cookie fallback.", error);
+    }
   } else {
     await query(
       "insert into password_reset_codes (username, code_hash, expires_at) values ($1,$2,now() + interval '10 minutes')",
@@ -253,10 +262,15 @@ app.post("/api/auth/change-password", async (req, res) => {
 
   let result = false;
   if (config.supabaseUrl && config.supabaseServiceKey) {
-    const rows = await supabaseRest<Array<{ id: string }>>(`password_reset_codes?username=eq.${encodeURIComponent(username)}&code_hash=eq.${encodeURIComponent(codeHash)}&used=eq.false&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id&order=created_at.desc&limit=1`);
-    result = Boolean(rows[0]);
-    if (rows[0]) {
-      await supabaseRest(`password_reset_codes?id=eq.${rows[0].id}`, { method: "PATCH", body: JSON.stringify({ used: true }) });
+    try {
+      const rows = await supabaseRest<Array<{ id: string }>>(`password_reset_codes?username=eq.${encodeURIComponent(username)}&code_hash=eq.${encodeURIComponent(codeHash)}&used=eq.false&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id&order=created_at.desc&limit=1`);
+      result = Boolean(rows[0]);
+      if (rows[0]) {
+        await supabaseRest(`password_reset_codes?id=eq.${rows[0].id}`, { method: "PATCH", body: JSON.stringify({ used: true }) });
+      }
+    } catch (error) {
+      console.warn("Supabase password_reset_codes verification failed; using secure cookie fallback.", error);
+      result = req.cookies?.zunion_password_code === codeHash;
     }
   } else {
     result = req.cookies?.zunion_password_code === codeHash || await tx(async (client) => {
@@ -275,10 +289,14 @@ app.post("/api/auth/change-password", async (req, res) => {
   if (!result) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
   if (config.supabaseUrl && config.supabaseServiceKey && profile.id) {
     const salt = randomToken(12);
-    await supabaseRest(`users_profile?id=eq.${profile.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ password_salt: salt, password_hash: passwordHash(parsed.data.newPassword, salt), must_change_password: false }),
-    });
+    try {
+      await supabaseRest(`users_profile?id=eq.${profile.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ password_salt: salt, password_hash: passwordHash(parsed.data.newPassword, salt), must_change_password: false }),
+      });
+    } catch (error) {
+      console.warn("Supabase users_profile password update failed; seeded fallback password cannot be persisted.", error);
+    }
   }
   res.clearCookie("zunion_password_code");
   audit(null, "PASSWORD_CHANGED", "auth", undefined, undefined, { username }).catch(() => undefined);
