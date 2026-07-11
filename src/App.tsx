@@ -1,5 +1,31 @@
 import { Component, Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
+import {
+  ArrowDownCircle,
+  ArrowUpDown,
+  BadgeInfo,
+  Banknote,
+  CircleDollarSign,
+  ClipboardList,
+  Cog,
+  FilePlus,
+  Image,
+  KeyRound,
+  Landmark,
+  PackagePlus,
+  Paintbrush,
+  Plus,
+  Receipt,
+  Search,
+  Send,
+  Truck,
+  UserPlus,
+  Users,
+  Wallet,
+  WalletCards,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
 import { formatDateArabic, formatMoney, formatNumber } from "./utils/formatters";
 import {
@@ -676,12 +702,53 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   );
 }
 
-function StatCard({ title, value, tone = "" }: { title: string; value: string | number; tone?: string }) {
+function cardIconFor(title: string): LucideIcon {
+  if (title.includes("إيراد") || title.includes("الإيرادات")) return Banknote;
+  if (title.includes("مصروف")) return Receipt;
+  if (title.includes("الصافي")) return CircleDollarSign;
+  if (title.includes("أوردر") || title.includes("اوردر")) return ClipboardList;
+  if (title.includes("تشغيل")) return Cog;
+  if (title.includes("تشطيب")) return Paintbrush;
+  if (title.includes("جاهز") || title.includes("إرسال")) return Send;
+  if (title.includes("تسليم")) return Truck;
+  if (title.includes("مستخدم")) return Users;
+  if (title.includes("مرور")) return KeyRound;
+  if (title.includes("حساب")) return WalletCards;
+  if (title.includes("شعار")) return Image;
+  if (title.includes("عميل")) return UserPlus;
+  if (title.includes("بحث")) return Search;
+  if (title.includes("منتج")) return PackagePlus;
+  return Wallet;
+}
+
+function StatCard({ title, value, tone = "", icon: Icon }: { title: string; value: ReactNode; tone?: string; icon?: LucideIcon }) {
+  const CardIcon = Icon || cardIconFor(title);
+  const valueText = typeof value === "string" || typeof value === "number" ? String(value) : "";
+  const isLong = valueText.length > 14;
   return (
-    <div className={`stat-card ${tone}`}>
-      <span>{title}</span>
-      <strong>{value}</strong>
+    <div className={`stat-card ${tone} ${isLong ? "long-value" : ""}`}>
+      <div className="stat-text">
+        <span>{title}</span>
+        <strong>{value}</strong>
+      </div>
+      <div className="stat-icon" aria-hidden="true">
+        <CardIcon size={24} strokeWidth={2.4} />
+      </div>
     </div>
+  );
+}
+
+function ActionCard({ title, onClick, icon: Icon }: { title: string; onClick: () => void; icon?: LucideIcon }) {
+  const CardIcon = Icon || cardIconFor(title);
+  return (
+    <button className="action-card" onClick={onClick} type="button">
+      <span className="action-copy">
+        <strong>{title}</strong>
+      </span>
+      <span className="action-icon" aria-hidden="true">
+        <CardIcon size={26} strokeWidth={2.5} />
+      </span>
+    </button>
   );
 }
 
@@ -739,10 +806,10 @@ function Dashboard({ setView, canSeeFinancials }: { setView: (view: View) => voi
         <StatCard title="جاهز" value={formatNumber(data.ready)} />
       </section>
       <section className="quick-grid">
-        <button onClick={() => setView("new")}>أوردر جديد</button>
-        <button onClick={() => setView("search")}>بحث</button>
-        <button onClick={() => setView("addCustomer")}>إضافة عميل</button>
-        {canSeeFinancials && <button onClick={() => setView("finance")}>مصروفات وإيرادات</button>}
+        <ActionCard title="أوردر جديد" icon={FilePlus} onClick={() => setView("new")} />
+        <ActionCard title="بحث" icon={Search} onClick={() => setView("search")} />
+        <ActionCard title="إضافة عميل" icon={UserPlus} onClick={() => setView("addCustomer")} />
+        {canSeeFinancials && <ActionCard title="مصروفات وإيرادات" icon={ArrowUpDown} onClick={() => setView("finance")} />}
       </section>
       <section className="dashboard-grid">
         <div className="panel">
@@ -1680,10 +1747,10 @@ function SettingsPage() {
           <span className="badge badge-red">Master فقط</span>
         </div>
         <div className="stats-grid">
-          <StatCard title="عدد المستخدمين" value={users.length} />
-          <StatCard title="كلمة المرور الافتراضية" value="1234" />
-          <StatCard title="حسابات" value="سامح / أحمد / شيكات / بنك" />
-          <StatCard title="الشعار" value="src/assets/logo.png" />
+          <StatCard title="عدد المستخدمين" value={users.length} icon={Users} />
+          <StatCard title="كلمة المرور الافتراضية" value="1234" icon={KeyRound} />
+          <StatCard title="حسابات" icon={WalletCards} value={<span className="account-pills"><i>سامح</i><i>أحمد</i><i>شيكات</i><i>بنك</i></span>} />
+          <StatCard title="الشعار" icon={Image} value={<span className="logo-preview-value"><BrandLogo /><small>src/assets/logo.png</small></span>} />
         </div>
       </section>
       <section className="panel">
