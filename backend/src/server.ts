@@ -146,6 +146,27 @@ function makeSession(user: AppUser, stayLoggedIn = true) {
   };
 }
 
+function loadAppSessionCookie(req: express.Request) {
+  const raw = req.cookies.zunion_app_session;
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const session = JSON.parse(raw) as { role?: string; expiresAt?: string };
+    if (!session.expiresAt || new Date(session.expiresAt).getTime() <= Date.now()) return null;
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+function requireFinanceSession(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const session = loadAppSessionCookie(req);
+  if (!session) return res.status(401).json({ error: "يجب تسجيل الدخول أولا." });
+  if (!["Master", "Helper", "Operator"].includes(String(session.role || ""))) {
+    return res.status(403).json({ error: "ليس لديك صلاحية لحفظ المعاملات المالية." });
+  }
+  return next();
+}
+
 app.post("/api/auth/login", async (req, res) => {
   const parsed = z.object({ username: z.string().min(1), password: z.string().min(1), stayLoggedIn: z.boolean().optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "اسم المستخدم وكلمة المرور مطلوبان." });
@@ -669,7 +690,7 @@ const financeTransactionBody = z.object({
   account_destination: z.string().optional().default(""),
 });
 
-app.post("/api/finance/transactions", async (req, res) => {
+app.post("/api/finance/transactions", requireFinanceSession, async (req, res) => {
   const parsed = financeTransactionBody.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: "بيانات المعاملة غير صحيحة." });
