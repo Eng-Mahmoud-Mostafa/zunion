@@ -7,6 +7,7 @@ import {
   getMonthlyFinancialStats,
   getOperationStats,
   getReportsData,
+  createTransaction,
   type DashboardStats,
   type DbOrder,
   type DbTransaction,
@@ -1424,6 +1425,161 @@ function FinancePage({ session }: { session: Session }) {
   );
 }
 
+function FinancePageModern({ session }: { session: Session }) {
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [account, setAccount] = useState("");
+  const [transactionType, setTransactionType] = useState<"مصروف" | "إيراد">("مصروف");
+  const [formDate, setFormDate] = useState(new Date().toISOString().slice(0, 10));
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState(0);
+  const [expenseType, setExpenseType] = useState("");
+  const [selectedAccount, setSelectedAccount] = useState("سامح");
+  const [data, setData] = useState<{ incomeTotal: number; expenseTotal: number; netTotal: number; transactions: DbTransaction[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [year, selectedMonth] = month.split("-").map(Number);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    getMonthlyFinancialStats(selectedMonth, year, account)
+      .then((stats) => { if (active) setData(stats); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "تعذر تحميل البيانات."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [account, selectedMonth, year, reloadKey]);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setNotice("");
+    setError("");
+    try {
+      await createTransaction({
+        transaction_type: transactionType,
+        date: formDate,
+        description,
+        amount: Number(amount || 0),
+        expense_type: expenseType || transactionType,
+        account_destination: selectedAccount,
+        added_by: session.username || session.fullName || session.email,
+      });
+      addAudit(session, transactionType === "مصروف" ? "EXPENSE_ADDED" : "INCOME_ADDED", "transactions", undefined, undefined, { transactionType, amount, selectedAccount });
+      setDescription("");
+      setAmount(0);
+      setExpenseType("");
+      setNotice("تم حفظ المعاملة بنجاح");
+      setReloadKey((key) => key + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تعذر حفظ المعاملة.");
+    }
+  }
+
+  if (loading) return <LoadingPanel />;
+  if (!data) return <ErrorPanel message={error || "تعذر تحميل البيانات."} />;
+
+  return (
+    <div className="stack finance-screen finance-modern">
+      <section className="finance-hero">
+        <div className="finance-title">
+          <h2>مصروفات وإيرادات</h2>
+          <span>فتح شهر</span>
+        </div>
+        <div className="finance-month">
+          <select value={String(selectedMonth)} onChange={(event) => {
+            const nextMonth = String(event.target.value).padStart(2, "0");
+            setMonth(`${year}-${nextMonth}`);
+            addAudit(session, "MONTH_OPENED", "monthly_periods", `${year}-${nextMonth}`);
+          }}>
+            {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{new Date(2026, value - 1, 1).toLocaleDateString("ar-EG", { month: "long" })}</option>)}
+          </select>
+          <select value={String(year)} onChange={(event) => {
+            const nextYear = event.target.value;
+            setMonth(`${nextYear}-${String(selectedMonth).padStart(2, "0")}`);
+            addAudit(session, "MONTH_OPENED", "monthly_periods", `${nextYear}-${selectedMonth}`);
+          }}>
+            {[2025, 2026, 2027].map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </div>
+        <div className="finance-stat-row">
+          <StatCard title="الإيرادات" value={formatMoney(data.incomeTotal)} />
+          <StatCard title="الصافي" value={formatMoney(data.netTotal)} />
+          <StatCard title="المصروفات" value={formatMoney(data.expenseTotal)} tone="danger" />
+        </div>
+      </section>
+
+      <section className="panel finance-form-card">
+        <div className="panel-head">
+          <h2>إضافة معاملة جديدة</h2>
+          <div className="finance-type-actions">
+            <button type="button" className={transactionType === "مصروف" ? "primary-btn compact" : "ghost-btn compact"} onClick={() => setTransactionType("مصروف")}>إضافة مصروف</button>
+            <button type="button" className={transactionType === "إيراد" ? "success-btn compact" : "ghost-btn compact"} onClick={() => setTransactionType("إيراد")}>إضافة إيراد</button>
+          </div>
+        </div>
+        <form onSubmit={submit} className="finance-form">
+          <label>نوع المصروف
+            <select value={expenseType} onChange={(event) => setExpenseType(event.target.value)}>
+              <option value="">اختر نوع المصروف</option>
+              <option value="سامح">سامح</option>
+              <option value="كاش">كاش</option>
+              <option value="احمد">احمد</option>
+              <option value="رضا">رضا</option>
+              <option value="كريم">كريم</option>
+              <option value="إيراد">إيراد</option>
+            </select>
+          </label>
+          <label>المبلغ *
+            <input type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(Number(event.target.value))} placeholder="0.00" required />
+          </label>
+          <label>البيان / الوصف
+            <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="اكتب البيان أو الوصف" />
+          </label>
+          <label>التاريخ *
+            <input type="date" value={formDate} onChange={(event) => setFormDate(event.target.value)} required />
+          </label>
+          <div className="finance-account-select">
+            <span>الحساب / الوجهة *</span>
+            <div className="account-buttons">
+              {["سامح", "احمد", "شيكات", "بنك"].map((name) => (
+                <button key={name} type="button" className={selectedAccount === name ? "account-active" : ""} onClick={() => setSelectedAccount(name)}>{name}</button>
+              ))}
+            </div>
+          </div>
+          <div className="finance-save-row">
+            <button className="primary-btn" type="submit">حفظ المعاملة</button>
+            <button className="ghost-btn" type="button" onClick={() => { setDescription(""); setAmount(0); setExpenseType(""); }}>إلغاء</button>
+          </div>
+        </form>
+        {notice && <p className="success-note">{notice}</p>}
+        {error && <p className="notice">{error}</p>}
+      </section>
+
+      <section className="finance-toolbar">
+        <button className="primary-btn compact" type="button" onClick={() => setAccount("")}>بحث</button>
+        {["سامح", "احمد", "شيكات", "بنك"].map((name) => <button key={name} className={account === name ? "account-filter active" : "account-filter"} onClick={() => setAccount(account === name ? "" : name)}>{name}</button>)}
+      </section>
+
+      <section className="table-wrap accounts-table finance-table">
+        <table>
+          <thead><tr>{["التاريخ", "نوع المصروف", "البيان", "المبلغ", "الحساب / الوجهة", "اسم العميل", "رقم التفصيل", "المضاف", "التاريخ"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <tbody>
+            {data.transactions.length === 0 && <EmptyRow colSpan={9} />}
+            {data.transactions.map((record) => <tr key={record.id}><td>{formatDateArabic(record.date)}</td><td>{record.expense_type || record.transaction_type || record.kind || "-"}</td><td>{record.description || "-"}</td><td className={String(record.transaction_type || record.kind).includes("مصروف") ? "danger-text" : ""}>{formatMoney(record.amount ?? record.value ?? record.total)}</td><td><span className="mini-pill">{record.account_destination || "-"}</span></td><td>{record.customer_name || "-"}</td><td>{record.detail_number || "-"}</td><td>{record.added_by || "-"}</td><td>{formatDateArabic(record.created_at)}</td></tr>)}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="finance-bottom-totals">
+        <StatCard title="إجمالي الإيرادات" value={formatMoney(data.incomeTotal)} />
+        <StatCard title="الصافي" value={formatMoney(data.netTotal)} />
+        <StatCard title="إجمالي المصروفات" value={formatMoney(data.expenseTotal)} tone="danger" />
+      </section>
+    </div>
+  );
+}
+
 function ReportsPage() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [data, setData] = useState<ReportsData | null>(null);
@@ -1647,7 +1803,7 @@ function ZunionApp() {
           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" />}
           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
-          {view === "finance" && (canManageFinancials(session.role) ? <FinancePage session={session} /> : <ErrorPanel message="ليس لديك صلاحية للوصول لهذه الصفحة" />)}
+          {view === "finance" && (canManageFinancials(session.role) ? <FinancePageModern session={session} /> : <ErrorPanel message="ليس لديك صلاحية للوصول لهذه الصفحة" />)}
           {view === "reports" && (canManageFinancials(session.role) ? <ReportsPage /> : <ErrorPanel message="ليس لديك صلاحية للوصول لهذه الصفحة" />)}
           {view === "import" && <ImportExport orders={orders} setOrders={setOrders} session={session} />}
           {view === "audit" && <AuditLog />}
@@ -1666,3 +1822,4 @@ export default function App() {
     </AppErrorBoundary>
   );
 }
+

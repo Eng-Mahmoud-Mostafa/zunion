@@ -35,6 +35,9 @@ export type DbTransaction = {
   total?: number | null;
   expense_type: string | null;
   account_destination: string | null;
+  customer_name?: string | null;
+  detail_number?: string | number | null;
+  added_by?: string | null;
   created_at: string | null;
 };
 
@@ -163,6 +166,32 @@ export async function getMonthlyFinancialStats(month: number, year: number, acco
     netTotal: incomeTotal - expenseTotal,
     transactions: filtered,
   };
+}
+
+export async function createTransaction(input: {
+  transaction_type: string;
+  date: string;
+  description: string;
+  amount: number;
+  expense_type: string;
+  account_destination: string;
+  added_by?: string;
+}) {
+  const { data, error } = await supabase
+    .from("transactions")
+    .insert({
+      transaction_type: input.transaction_type,
+      date: input.date,
+      description: input.description,
+      amount: input.amount,
+      expense_type: input.expense_type,
+      account_destination: input.account_destination,
+      added_by: input.added_by,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as DbTransaction;
 }
 
 export async function getOperationStats(): Promise<OperationStats> {
