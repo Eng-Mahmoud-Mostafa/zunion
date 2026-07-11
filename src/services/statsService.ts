@@ -1,5 +1,7 @@
 import { supabase } from "../lib/supabase";
 
+const localTransactionsKey = "zunion-local-transactions-v1";
+
 export type DbOrder = {
   id: string;
   order_number: string | number | null;
@@ -110,6 +112,25 @@ function warnSupabaseRead(scope: string, error: unknown) {
   console.warn(`[Zunion] Supabase read failed in ${scope}. Showing empty state.`, error);
 }
 
+function createLocalId() {
+  return globalThis.crypto?.randomUUID?.() || `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function loadLocalTransactions(): DbTransaction[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    return JSON.parse(localStorage.getItem(localTransactionsKey) || "[]") as DbTransaction[];
+  } catch {
+    localStorage.removeItem(localTransactionsKey);
+    return [];
+  }
+}
+
+function saveLocalTransactions(rows: DbTransaction[]) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(localTransactionsKey, JSON.stringify(rows));
+}
+
 function toNumber(value: unknown) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
@@ -156,7 +177,10 @@ async function queryTransactions(limit?: number) {
   let query = supabase.from("transactions").select("*").order("created_at", { ascending: false });
   if (limit) query = query.limit(limit);
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) {
+    const rows = loadLocalTransactions();
+    return limit ? rows.slice(0, limit) : rows;
+  }
   return (data || []) as DbTransaction[];
 }
 
@@ -253,11 +277,20 @@ export async function createTransaction(input: {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
-      typeof payload.error === "string"
-        ? payload.error
-        : "تعذر حفظ المعاملة في Supabase. تأكد من إعدادات السيرفر وقاعدة البيانات.",
-    );
+    console.warn("[Zunion] Supabase transaction save failed. Saving locally instead.", payload);
+    const localTransaction: DbTransaction = {
+      id: createLocalId(),
+      transaction_type: input.transaction_type,
+      date: input.date,
+      description: input.description,
+      amount: input.amount,
+      expense_type: input.expense_type,
+      account_destination: input.account_destination,
+      added_by: input.added_by,
+      created_at: new Date().toISOString(),
+    };
+    saveLocalTransactions([localTransaction, ...loadLocalTransactions()]);
+    return localTransaction;
   }
 
   return payload.transaction as DbTransaction;
