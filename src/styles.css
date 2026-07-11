@@ -1256,3 +1256,333 @@ tr:nth-child(even) td {
     display: block;
   }
 }
+
+/* Global usable desktop layout override.
+   This block intentionally comes last to neutralize older duplicated layout rules. */
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  background: var(--bg);
+}
+
+.app {
+  display: block !important;
+  width: 100% !important;
+  min-height: 100vh;
+  max-width: 100%;
+  direction: rtl;
+  overflow-x: hidden !important;
+}
+
+.sidebar {
+  position: fixed !important;
+  top: 0;
+  right: 0;
+  left: auto;
+  z-index: 50;
+  width: 260px !important;
+  min-width: 260px !important;
+  max-width: 260px !important;
+  height: 100vh !important;
+  padding: 14px 12px 18px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+}
+
+.sidebar-logo {
+  width: min(220px, 100%) !important;
+  height: 100px !important;
+  max-height: 100px;
+  margin: 0 auto 14px !important;
+  border-radius: 14px;
+  padding: 14px 18px;
+}
+
+.sidebar button {
+  width: 100%;
+  min-height: 0 !important;
+  height: 50px;
+  max-height: 52px;
+  padding: 0 18px !important;
+  gap: 12px;
+  font-size: 18px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.content {
+  width: calc(100% - 260px) !important;
+  max-width: calc(100% - 260px);
+  min-width: 0 !important;
+  min-height: 100vh;
+  margin-right: 260px;
+  margin-left: 0;
+  overflow-x: hidden !important;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 0 !important;
+  height: 88px;
+  max-height: 88px;
+  padding: 16px 24px !important;
+  overflow: hidden;
+}
+
+.topbar h1 {
+  max-width: 100%;
+  font-size: clamp(26px, 2.4vw, 34px);
+  line-height: 1.15;
+}
+
+.topbar p {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.page {
+  width: 100%;
+  max-width: 100%;
+  padding: 20px 24px 24px !important;
+  overflow-x: hidden !important;
+}
+
+.stack,
+.panel,
+.stat-card,
+.quick-grid button,
+.finance-hero,
+.finance-form-card,
+.table-wrap {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.panel {
+  padding: 20px !important;
+  border-radius: 16px;
+}
+
+.stats-grid,
+.quick-grid,
+.finance-stat-row,
+.finance-bottom-totals,
+.operation-screen .stats-grid,
+.finance-screen .stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.finance-stat-row,
+.finance-bottom-totals,
+.finance-screen .stats-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stat-card {
+  min-height: 0 !important;
+  height: auto;
+  max-height: 120px;
+  padding: 18px 20px !important;
+  overflow: hidden;
+}
+
+.stat-card strong {
+  font-size: clamp(22px, 2vw, 30px);
+}
+
+.stat-card::before {
+  width: 52px;
+  height: 52px;
+}
+
+.quick-grid button {
+  min-height: 88px !important;
+  height: auto;
+  padding: 16px 18px !important;
+  font-size: 17px;
+}
+
+.form-grid,
+.filters,
+.form-grid.two,
+.line-item,
+.finance-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+input,
+select,
+textarea {
+  min-height: 0 !important;
+  height: 46px;
+  max-width: 100%;
+  padding: 0 14px;
+  font-size: 15px;
+  border-radius: 10px;
+}
+
+textarea {
+  height: auto;
+  min-height: 92px !important;
+  padding-top: 12px;
+}
+
+.table-wrap,
+.table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  border-radius: 14px;
+}
+
+table {
+  width: 100%;
+  min-width: 900px !important;
+  max-width: none;
+  border-collapse: separate;
+}
+
+th,
+td {
+  padding: 9px 10px;
+  height: 44px;
+  text-align: center;
+}
+
+.finance-hero {
+  grid-template-columns: minmax(220px, .8fr) minmax(220px, .9fr) minmax(0, 1.6fr);
+  gap: 14px;
+  padding: 18px !important;
+}
+
+.finance-title h2 {
+  font-size: clamp(24px, 2.2vw, 30px);
+}
+
+.finance-month {
+  grid-template-columns: minmax(0, 1fr) 104px;
+}
+
+.finance-account-select .account-buttons,
+.account-buttons {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dashboard-grid,
+.dashboard-grid.three {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, .6fr);
+}
+
+.dashboard-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.donut-card {
+  min-height: 220px;
+}
+
+.donut-ring {
+  width: 138px;
+}
+
+@media (max-width: 1200px) {
+  .stats-grid,
+  .quick-grid,
+  .finance-stat-row,
+  .finance-bottom-totals,
+  .operation-screen .stats-grid,
+  .finance-screen .stats-grid,
+  .dashboard-grid,
+  .dashboard-grid.three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-grid,
+  .filters,
+  .form-grid.two,
+  .line-item,
+  .finance-form,
+  .finance-hero {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 220px !important;
+    min-width: 220px !important;
+    max-width: 220px !important;
+  }
+
+  .content {
+    width: calc(100% - 220px) !important;
+    max-width: calc(100% - 220px);
+    margin-right: 220px;
+  }
+
+  .sidebar button {
+    font-size: 16px;
+    padding: 0 14px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: static !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: auto !important;
+    max-height: 220px;
+  }
+
+  .content {
+    width: 100% !important;
+    max-width: 100%;
+    margin-right: 0;
+  }
+
+  .topbar {
+    height: auto;
+    max-height: none;
+  }
+
+  .page {
+    padding: 14px !important;
+  }
+
+  .stats-grid,
+  .quick-grid,
+  .finance-stat-row,
+  .finance-bottom-totals,
+  .operation-screen .stats-grid,
+  .finance-screen .stats-grid,
+  .dashboard-grid,
+  .dashboard-grid.three,
+  .form-grid,
+  .filters,
+  .form-grid.two,
+  .line-item,
+  .finance-form,
+  .finance-hero,
+  .finance-month,
+  .finance-account-select .account-buttons,
+  .account-buttons {
+    grid-template-columns: 1fr;
+  }
+}
