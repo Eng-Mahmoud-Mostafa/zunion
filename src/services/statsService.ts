@@ -72,6 +72,44 @@ export type ReportsData = {
 const incomeValues = new Set(["إيراد", "الايراد", "الإيراد", "income"]);
 const expenseValues = new Set(["مصروف", "مصروفات", "expense"]);
 
+function emptyDashboardStats(): DashboardStats {
+  return {
+    incomeTotal: 0,
+    expenseTotal: 0,
+    netTotal: 0,
+    newOrders: 0,
+    inOperation: 0,
+    inFinishing: 0,
+    ready: 0,
+    latestOrders: [],
+    latestExpenses: [],
+    latestRevenues: [],
+  };
+}
+
+function emptyOperationStats(): OperationStats {
+  return {
+    inOperation: 0,
+    inFinishing: 0,
+    readyToSend: 0,
+    deliveryToday: 0,
+    orders: [],
+  };
+}
+
+function emptyReportsData(): ReportsData {
+  return {
+    incomeTotal: 0,
+    expenseTotal: 0,
+    netTotal: 0,
+    monthlyRows: [],
+  };
+}
+
+function warnSupabaseRead(scope: string, error: unknown) {
+  console.warn(`[Zunion] Supabase read failed in ${scope}. Showing empty state.`, error);
+}
+
 function toNumber(value: unknown) {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
@@ -123,49 +161,79 @@ async function queryTransactions(limit?: number) {
 }
 
 export async function getLatestOrders(limit = 5) {
-  return queryOrders(limit);
+  try {
+    return await queryOrders(limit);
+  } catch (error) {
+    warnSupabaseRead("getLatestOrders", error);
+    return [];
+  }
 }
 
 export async function getLatestExpenses(limit = 5) {
-  const rows = await queryTransactions();
-  return rows.filter(isExpense).slice(0, limit);
+  try {
+    const rows = await queryTransactions();
+    return rows.filter(isExpense).slice(0, limit);
+  } catch (error) {
+    warnSupabaseRead("getLatestExpenses", error);
+    return [];
+  }
 }
 
 export async function getLatestRevenues(limit = 5) {
-  const rows = await queryTransactions();
-  return rows.filter(isIncome).slice(0, limit);
+  try {
+    const rows = await queryTransactions();
+    return rows.filter(isIncome).slice(0, limit);
+  } catch (error) {
+    warnSupabaseRead("getLatestRevenues", error);
+    return [];
+  }
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
-  const [orders, transactions] = await Promise.all([queryOrders(5), queryTransactions()]);
-  const allOrders = await queryOrders();
-  const incomeTotal = transactions.filter(isIncome).reduce((sum, row) => sum + transactionAmount(row), 0);
-  const expenseTotal = transactions.filter(isExpense).reduce((sum, row) => sum + transactionAmount(row), 0);
-  return {
-    incomeTotal,
-    expenseTotal,
-    netTotal: incomeTotal - expenseTotal,
-    newOrders: allOrders.filter((order) => ["جديد", "أوردر جديد"].includes(String(order.operation_status || order.order_status || "").trim())).length,
-    inOperation: allOrders.filter((order) => String(order.operation_status || "").trim() === "قيد التشغيل").length,
-    inFinishing: allOrders.filter((order) => String(order.finishing_status || "").trim() === "قيد التشطيب").length,
-    ready: allOrders.filter((order) => ["جاهز", "جاهز للإرسال"].includes(String(order.delivery_status || order.finishing_status || "").trim())).length,
-    latestOrders: orders,
-    latestExpenses: transactions.filter(isExpense).slice(0, 5),
-    latestRevenues: transactions.filter(isIncome).slice(0, 5),
-  };
+  try {
+    const [orders, transactions] = await Promise.all([queryOrders(5), queryTransactions()]);
+    const allOrders = await queryOrders();
+    const incomeTotal = transactions.filter(isIncome).reduce((sum, row) => sum + transactionAmount(row), 0);
+    const expenseTotal = transactions.filter(isExpense).reduce((sum, row) => sum + transactionAmount(row), 0);
+    return {
+      incomeTotal,
+      expenseTotal,
+      netTotal: incomeTotal - expenseTotal,
+      newOrders: allOrders.filter((order) => ["جديد", "أوردر جديد"].includes(String(order.operation_status || order.order_status || "").trim())).length,
+      inOperation: allOrders.filter((order) => String(order.operation_status || "").trim() === "قيد التشغيل").length,
+      inFinishing: allOrders.filter((order) => String(order.finishing_status || "").trim() === "قيد التشطيب").length,
+      ready: allOrders.filter((order) => ["جاهز", "جاهز للإرسال"].includes(String(order.delivery_status || order.finishing_status || "").trim())).length,
+      latestOrders: orders,
+      latestExpenses: transactions.filter(isExpense).slice(0, 5),
+      latestRevenues: transactions.filter(isIncome).slice(0, 5),
+    };
+  } catch (error) {
+    warnSupabaseRead("getDashboardStats", error);
+    return emptyDashboardStats();
+  }
 }
 
 export async function getMonthlyFinancialStats(month: number, year: number, accountDestination = "") {
-  const rows = (await queryTransactions()).filter((row) => inMonth(row, month, year));
-  const filtered = accountDestination ? rows.filter((row) => row.account_destination === accountDestination) : rows;
-  const incomeTotal = filtered.filter(isIncome).reduce((sum, row) => sum + transactionAmount(row), 0);
-  const expenseTotal = filtered.filter(isExpense).reduce((sum, row) => sum + transactionAmount(row), 0);
-  return {
-    incomeTotal,
-    expenseTotal,
-    netTotal: incomeTotal - expenseTotal,
-    transactions: filtered,
-  };
+  try {
+    const rows = (await queryTransactions()).filter((row) => inMonth(row, month, year));
+    const filtered = accountDestination ? rows.filter((row) => row.account_destination === accountDestination) : rows;
+    const incomeTotal = filtered.filter(isIncome).reduce((sum, row) => sum + transactionAmount(row), 0);
+    const expenseTotal = filtered.filter(isExpense).reduce((sum, row) => sum + transactionAmount(row), 0);
+    return {
+      incomeTotal,
+      expenseTotal,
+      netTotal: incomeTotal - expenseTotal,
+      transactions: filtered,
+    };
+  } catch (error) {
+    warnSupabaseRead("getMonthlyFinancialStats", error);
+    return {
+      incomeTotal: 0,
+      expenseTotal: 0,
+      netTotal: 0,
+      transactions: [],
+    };
+  }
 }
 
 export async function createTransaction(input: {
@@ -186,42 +254,53 @@ export async function createTransaction(input: {
       amount: input.amount,
       expense_type: input.expense_type,
       account_destination: input.account_destination,
-      added_by: input.added_by,
     })
     .select()
     .single();
-  if (error) throw error;
+  if (error) {
+    throw new Error("تعذر حفظ المعاملة في Supabase. تأكد من تشغيل schema.sql وسياسات RLS.");
+  }
   return data as DbTransaction;
 }
 
 export async function getOperationStats(): Promise<OperationStats> {
-  const orders = await queryOrders();
-  return {
-    inOperation: orders.filter((order) => String(order.operation_status || "").trim() === "قيد التشغيل").length,
-    inFinishing: orders.filter((order) => String(order.finishing_status || "").trim() === "قيد التشطيب").length,
-    readyToSend: orders.filter((order) => String(order.finishing_status || order.delivery_status || "").trim() === "جاهز للإرسال").length,
-    deliveryToday: orders.filter((order) => order.delivery_date === todayIso()).length,
-    orders,
-  };
+  try {
+    const orders = await queryOrders();
+    return {
+      inOperation: orders.filter((order) => String(order.operation_status || "").trim() === "قيد التشغيل").length,
+      inFinishing: orders.filter((order) => String(order.finishing_status || "").trim() === "قيد التشطيب").length,
+      readyToSend: orders.filter((order) => String(order.finishing_status || order.delivery_status || "").trim() === "جاهز للإرسال").length,
+      deliveryToday: orders.filter((order) => order.delivery_date === todayIso()).length,
+      orders,
+    };
+  } catch (error) {
+    warnSupabaseRead("getOperationStats", error);
+    return emptyOperationStats();
+  }
 }
 
 export async function getReportsData(month: number, year: number): Promise<ReportsData> {
-  const rows = await queryTransactions();
-  const selected = rows.filter((row) => inMonth(row, month, year));
-  const incomeTotal = selected.filter(isIncome).reduce((sum, row) => sum + transactionAmount(row), 0);
-  const expenseTotal = selected.filter(isExpense).reduce((sum, row) => sum + transactionAmount(row), 0);
-  const grouped = rows.reduce<Record<string, { month: string; income: number; expense: number; net: number }>>((acc, row) => {
-    const key = monthKey(row);
-    acc[key] ||= { month: key, income: 0, expense: 0, net: 0 };
-    if (isIncome(row)) acc[key].income += transactionAmount(row);
-    if (isExpense(row)) acc[key].expense += transactionAmount(row);
-    acc[key].net = acc[key].income - acc[key].expense;
-    return acc;
-  }, {});
-  return {
-    incomeTotal,
-    expenseTotal,
-    netTotal: incomeTotal - expenseTotal,
-    monthlyRows: Object.values(grouped).sort((a, b) => a.month.localeCompare(b.month)),
-  };
+  try {
+    const rows = await queryTransactions();
+    const selected = rows.filter((row) => inMonth(row, month, year));
+    const incomeTotal = selected.filter(isIncome).reduce((sum, row) => sum + transactionAmount(row), 0);
+    const expenseTotal = selected.filter(isExpense).reduce((sum, row) => sum + transactionAmount(row), 0);
+    const grouped = rows.reduce<Record<string, { month: string; income: number; expense: number; net: number }>>((acc, row) => {
+      const key = monthKey(row);
+      acc[key] ||= { month: key, income: 0, expense: 0, net: 0 };
+      if (isIncome(row)) acc[key].income += transactionAmount(row);
+      if (isExpense(row)) acc[key].expense += transactionAmount(row);
+      acc[key].net = acc[key].income - acc[key].expense;
+      return acc;
+    }, {});
+    return {
+      incomeTotal,
+      expenseTotal,
+      netTotal: incomeTotal - expenseTotal,
+      monthlyRows: Object.values(grouped).sort((a, b) => a.month.localeCompare(b.month)),
+    };
+  } catch (error) {
+    warnSupabaseRead("getReportsData", error);
+    return emptyReportsData();
+  }
 }
