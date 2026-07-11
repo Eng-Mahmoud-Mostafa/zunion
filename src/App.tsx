@@ -12,6 +12,7 @@ import {
   Image,
   KeyRound,
   Landmark,
+  Menu,
   PackagePlus,
   Paintbrush,
   Plus,
@@ -24,6 +25,7 @@ import {
   Wallet,
   WalletCards,
   Wrench,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
@@ -43,7 +45,7 @@ import {
 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
-type View = "dashboard" | "orders" | "new" | "addCustomer" | "search" | "worker" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
+type View = "dashboard" | "orders" | "new" | "addCustomer" | "addProduct" | "search" | "worker" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
 type Role = "Master" | "Operator" | "Supervisor" | "Finishing" | "Helper" | "Worker" | "Finish";
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string };
 type OrderItem = {
@@ -80,6 +82,13 @@ type FinanceRecord = {
   from_name: string;
   value: number;
   reason: string;
+  created_at: string;
+};
+type Product = {
+  id: string;
+  name: string;
+  details: string;
+  price: number;
   created_at: string;
 };
 type AuditEntry = {
@@ -139,6 +148,7 @@ const sessionKey = "zunion-local-session";
 const auditKey = "zunion-local-audit-v1";
 const customersKey = "zunion-local-customers-v1";
 const financeKey = "zunion-local-finance-v1";
+const productsKey = "zunion-local-products-v1";
 const localPasswordsKey = "zunion-local-passwords-v1";
 const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
 
@@ -1811,12 +1821,143 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { message: str
   }
 }
 
+function AddProductPage({ products, setProducts, session }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; session: Session }) {
+  const [name, setName] = useState("");
+  const [details, setDetails] = useState("");
+  const [price, setPrice] = useState(0);
+
+  function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    const product: Product = { id: createId(), name: name.trim(), details, price: Number(price || 0), created_at: new Date().toISOString() };
+    setProducts((current) => [product, ...current]);
+    addAudit(session, "PRODUCT_CREATED", "products", product.id, undefined, product);
+    setName("");
+    setDetails("");
+    setPrice(0);
+  }
+
+  return (
+    <div className="stack">
+      <section className="panel">
+        <div className="panel-head"><h2>إضافة منتج</h2></div>
+        <form className="order-form compact-form" onSubmit={save}>
+          <label>اسم المنتج<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+          <label>الوصف<input value={details} onChange={(event) => setDetails(event.target.value)} /></label>
+          <label>السعر<input type="number" value={price} onChange={(event) => setPrice(Number(event.target.value))} /></label>
+          <button className="primary-btn" type="submit">حفظ المنتج</button>
+        </form>
+      </section>
+      <section className="table-wrap accounts-table">
+        <table>
+          <thead><tr><th>اسم المنتج</th><th>الوصف</th><th>السعر</th><th>تاريخ الإضافة</th></tr></thead>
+          <tbody>
+            {products.length === 0 && <EmptyRow colSpan={4} />}
+            {products.map((product) => <tr key={product.id}><td>{product.name}</td><td>{product.details || "-"}</td><td>{formatMoney(product.price)}</td><td>{formatDateArabic(product.created_at)}</td></tr>)}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  );
+}
+
+type SidebarSubItemConfig = {
+  id: View;
+  label: string;
+  visible: boolean;
+  icon?: LucideIcon;
+};
+
+type SidebarSectionConfig = {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  items: SidebarSubItemConfig[];
+};
+
+function SidebarSubItem({ item, active, onSelect }: { item: SidebarSubItemConfig; active: boolean; onSelect: (view: View) => void }) {
+  const Icon = item.icon;
+  return (
+    <button type="button" className={`sidebar-subitem${active ? " active" : ""}`} onClick={() => onSelect(item.id)}>
+      {Icon && <Icon size={16} />}
+      <span>{item.label}</span>
+    </button>
+  );
+}
+
+function SidebarSection({ section, activeView, open, onToggle, onSelect }: { section: SidebarSectionConfig; activeView: View; open: boolean; onToggle: () => void; onSelect: (view: View) => void }) {
+  const Icon = section.icon;
+  const hasActiveItem = section.items.some((item) => item.id === activeView);
+  return (
+    <div className={`sidebar-section${open ? " open" : ""}${hasActiveItem ? " has-active" : ""}`}>
+      <button type="button" className="sidebar-parent" onClick={onToggle} aria-expanded={open}>
+        <span className="sidebar-parent-copy"><Icon size={22} /><span>{section.label}</span></span>
+        <span className="sidebar-toggle">{open ? "−" : "+"}</span>
+      </button>
+      <div className="sidebar-submenu">
+        <div className="sidebar-submenu-inner">
+          {section.items.map((item) => <SidebarSubItem key={item.id} item={item} active={item.id === activeView} onSelect={onSelect} />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSection, onSelect, onLogout, onCloseDrawer }: {
+  sections: SidebarSectionConfig[];
+  activeView: View;
+  openSection: string;
+  drawerOpen: boolean;
+  onToggleSection: (sectionId: string) => void;
+  onSelect: (view: View) => void;
+  onLogout: () => void;
+  onCloseDrawer: () => void;
+}) {
+  return (
+    <>
+      <aside className={`sidebar${drawerOpen ? " drawer-open" : ""}`}>
+        <button type="button" className="sidebar-close" aria-label="إغلاق القائمة" onClick={onCloseDrawer}><X size={22} /></button>
+        <BrandLogo className="sidebar-logo" />
+        <nav className="sidebar-menu" aria-label="القائمة الرئيسية">
+          {sections.map((section) => (
+            <SidebarSection
+              key={section.id}
+              section={section}
+              activeView={activeView}
+              open={openSection === section.id}
+              onToggle={() => onToggleSection(section.id)}
+              onSelect={onSelect}
+            />
+          ))}
+        </nav>
+        <button className="sidebar-logout" type="button" onClick={onLogout}>تسجيل الخروج</button>
+      </aside>
+      <button type="button" className="sidebar-overlay" aria-label="إغلاق القائمة" onClick={onCloseDrawer} />
+    </>
+  );
+}
+
+const knownViews: View[] = ["dashboard", "orders", "new", "addCustomer", "addProduct", "search", "worker", "finish", "customers", "finance", "reports", "audit", "import", "alerts", "settings"];
+
+function viewFromHash(): View {
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  return knownViews.includes(raw as View) ? raw as View : "dashboard";
+}
+
 function ZunionApp() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
-  const [view, setView] = useState<View>("dashboard");
+  const [view, setViewState] = useState<View>(() => viewFromHash());
+  const [openSection, setOpenSection] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { orders, setOrders } = useOrders();
   const { items: customers, setItems: setCustomers } = useStoredList<Customer>(customersKey, []);
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
+  const { items: products, setItems: setProducts } = useStoredList<Product>(productsKey, []);
+
+  function setView(nextView: View) {
+    setViewState(nextView);
+    window.history.replaceState(null, "", `#${nextView}`);
+  }
 
   function saveNew(order: Order) {
     setOrders((current) => [order, ...current]);
@@ -1824,38 +1965,114 @@ function ZunionApp() {
     setView("search");
   }
 
-  if (!session) return <Login onLogin={setSession} />;
+  const currentRole = session?.role ?? "Master";
+  const visibleOrders = roleOrders(currentRole, orders);
+  const isMaster = currentRole === "Master";
+  const isOperator = currentRole === "Operator" || currentRole === "Helper";
+  const isSupervisor = currentRole === "Supervisor" || currentRole === "Worker";
+  const isFinishing = currentRole === "Finishing" || currentRole === "Finish";
+  const sidebarSections = useMemo<SidebarSectionConfig[]>(() => {
+    const sections: SidebarSectionConfig[] = [
+      {
+        id: "home",
+        label: "الرئيسية",
+        icon: ClipboardList,
+        items: [
+          { id: "search", label: "متابعة أوردرات", visible: !isFinishing, icon: ClipboardList },
+          { id: "new", label: "أوردر جديد", visible: isMaster || isOperator, icon: FilePlus },
+          { id: "addCustomer", label: "إضافة عميل", visible: isMaster || isOperator, icon: UserPlus },
+          { id: "addProduct", label: "إضافة منتج", visible: isMaster || isOperator, icon: PackagePlus },
+        ],
+      },
+      {
+        id: "search",
+        label: "بحث",
+        icon: Search,
+        items: [
+          { id: "search", label: "بحث", visible: !isFinishing, icon: Search },
+          { id: "customers", label: "العملاء", visible: isMaster || isOperator || isSupervisor, icon: Users },
+        ],
+      },
+      {
+        id: "finance",
+        label: "مصروفات وإيرادات",
+        icon: ArrowUpDown,
+        items: [
+          { id: "finance", label: "مصروفات وإيرادات", visible: isMaster || isOperator, icon: WalletCards },
+          { id: "reports", label: "التقارير", visible: isMaster || isOperator, icon: BadgeInfo },
+          { id: "import", label: "الاستيراد والتصدير", visible: isMaster, icon: ArrowUpDown },
+        ],
+      },
+      {
+        id: "operation",
+        label: "التشغيل",
+        icon: Cog,
+        items: [
+          { id: "worker", label: "التشغيل", visible: isMaster || isOperator || isSupervisor, icon: Cog },
+          { id: "alerts", label: "التنبيهات", visible: true, icon: BadgeInfo },
+        ],
+      },
+      {
+        id: "finishing",
+        label: "التشطيب",
+        icon: Wrench,
+        items: [
+          { id: "finish", label: "التشطيب", visible: isMaster || isFinishing, icon: Wrench },
+        ],
+      },
+      {
+        id: "system",
+        label: "الإعدادات",
+        icon: Cog,
+        items: [
+          { id: "audit", label: "سجل العمليات", visible: isMaster, icon: ClipboardList },
+          { id: "settings", label: "الإعدادات", visible: isMaster, icon: Cog },
+        ],
+      },
+    ];
+    return sections
+      .map((section) => ({ ...section, items: section.items.filter((item) => item.visible) }))
+      .filter((section) => section.items.length > 0);
+  }, [isFinishing, isMaster, isOperator, isSupervisor]);
 
-  const visibleOrders = roleOrders(session.role, orders);
-  const isMaster = session.role === "Master";
-  const isOperator = session.role === "Operator" || session.role === "Helper";
-  const isSupervisor = session.role === "Supervisor" || session.role === "Worker";
-  const isFinishing = session.role === "Finishing" || session.role === "Finish";
-  const nav = [
-    ["dashboard", "الرئيسية", true],
-    ["new", "أوردر جديد", isMaster || isOperator],
-    ["addCustomer", "إضافة عميل", isMaster || isOperator],
-    ["search", "بحث", !isFinishing],
-    ["finance", "مصروفات وإيرادات", isMaster || isOperator],
-    ["worker", "التشغيل", isMaster || isOperator || isSupervisor],
-    ["finish", "التشطيب", isMaster || isFinishing],
-    ["customers", "العملاء", isMaster || isOperator || isSupervisor],
-    ["reports", "التقارير", isMaster || isOperator],
-    ["import", "الاستيراد والتصدير", isMaster],
-    ["alerts", "التنبيهات", true],
-    ["audit", "سجل العمليات", isMaster],
-    ["settings", "الإعدادات", isMaster],
-  ] as const;
+  useEffect(() => {
+    const activeSection = sidebarSections.find((section) => section.items.some((item) => item.id === view));
+    if (activeSection) setOpenSection(activeSection.id);
+    else if (view === "dashboard") setOpenSection("home");
+  }, [sidebarSections, view]);
+
+  function selectSidebarView(nextView: View) {
+    setView(nextView);
+    setDrawerOpen(false);
+  }
+
+  function toggleSidebarSection(sectionId: string) {
+    setOpenSection((current) => current === sectionId ? "" : sectionId);
+  }
+
+  function logout() {
+    localStorage.removeItem(sessionKey);
+    addAudit(session, "LOGOUT", "auth");
+    setSession(null);
+  }
+
+  if (!session) return <Login onLogin={setSession} />;
 
   return (
     <div className="app" dir="rtl">
-      <aside className="sidebar">
-        <BrandLogo className="sidebar-logo" />
-        {nav.filter((item) => item[2]).map(([id, label]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}>{label}</button>)}
-        <button onClick={() => { localStorage.removeItem(sessionKey); addAudit(session, "LOGOUT", "auth"); setSession(null); }}>تسجيل الخروج</button>
-      </aside>
+      <Sidebar
+        sections={sidebarSections}
+        activeView={view}
+        openSection={openSection}
+        drawerOpen={drawerOpen}
+        onToggleSection={toggleSidebarSection}
+        onSelect={selectSidebarView}
+        onLogout={logout}
+        onCloseDrawer={() => setDrawerOpen(false)}
+      />
       <main className="content">
         <header className="topbar">
+          <button type="button" className="hamburger-btn" aria-label="فتح القائمة" onClick={() => setDrawerOpen(true)}><Menu size={24} /></button>
           <div>
             <h1>نظام Zunion لإدارة الأوردرات</h1>
             <p>{session.fullName || session.username || session.email} - {session.role}</p>
@@ -1866,6 +2083,7 @@ function ZunionApp() {
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} onSave={saveNew} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
+          {view === "addProduct" && <AddProductPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} />}
           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" />}
           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" />}

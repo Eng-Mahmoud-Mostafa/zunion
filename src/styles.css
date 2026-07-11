@@ -1810,3 +1810,240 @@ td {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Collapsible RTL sidebar */
+.app {
+  --sidebar-width: 300px;
+}
+
+.sidebar {
+  width: var(--sidebar-width) !important;
+  min-width: var(--sidebar-width) !important;
+  max-width: var(--sidebar-width) !important;
+  padding: 14px 14px 18px !important;
+  gap: 12px !important;
+  scrollbar-width: none;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.content {
+  width: calc(100% - var(--sidebar-width)) !important;
+  max-width: calc(100% - var(--sidebar-width));
+  margin-right: var(--sidebar-width);
+}
+
+.sidebar-close,
+.hamburger-btn {
+  display: none;
+}
+
+.sidebar-menu {
+  display: grid;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.sidebar-menu button::before,
+.sidebar-logout::before,
+.sidebar-close::before {
+  display: none !important;
+  content: none !important;
+}
+
+.sidebar-section {
+  display: grid;
+  gap: 0;
+}
+
+.sidebar button.sidebar-parent {
+  height: 58px;
+  max-height: none;
+  border-radius: 12px;
+  padding: 0 16px !important;
+  justify-content: space-between;
+  background: transparent;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.sidebar-section.has-active > .sidebar-parent,
+.sidebar-section.open > .sidebar-parent {
+  background: var(--red);
+  box-shadow: 0 14px 30px rgba(217, 4, 22, .28);
+}
+
+.sidebar-parent-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sidebar-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.sidebar-submenu {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows .24s ease, opacity .2s ease, padding .24s ease;
+}
+
+.sidebar-section.open .sidebar-submenu {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  padding-top: 8px;
+}
+
+.sidebar-submenu-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  gap: 8px;
+  padding-inline: 8px 4px;
+}
+
+.sidebar button.sidebar-subitem {
+  height: 40px;
+  max-height: none;
+  min-height: 40px !important;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .96);
+  color: var(--red);
+  padding: 0 14px !important;
+  justify-content: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.sidebar button.sidebar-subitem:hover {
+  border-color: #fff;
+  background: #fff;
+  transform: translateX(-2px);
+}
+
+.sidebar button.sidebar-subitem.active {
+  border-color: var(--red);
+  background: var(--red);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(217, 4, 22, .25);
+}
+
+.sidebar button.sidebar-logout {
+  margin-top: auto;
+  height: 52px;
+  border-top: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 12px;
+  justify-content: center;
+  font-size: 17px;
+}
+
+.sidebar button.sidebar-logout:hover {
+  background: rgba(255, 255, 255, .1);
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .app {
+    --sidebar-width: 300px;
+  }
+
+  .content {
+    width: 100% !important;
+    max-width: 100%;
+    margin-right: 0;
+  }
+
+  .sidebar {
+    position: fixed !important;
+    top: 0;
+    right: 0;
+    width: min(320px, 86vw) !important;
+    min-width: 0 !important;
+    max-width: min(320px, 86vw) !important;
+    height: 100vh !important;
+    transform: translateX(110%);
+    transition: transform .25s ease;
+    z-index: 80;
+  }
+
+  .sidebar.drawer-open {
+    transform: translateX(0);
+  }
+
+  .sidebar.drawer-open + .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    border: 0;
+    background: rgba(0, 11, 25, .58);
+  }
+
+  .sidebar-close {
+    display: inline-grid !important;
+    place-items: center;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    width: 38px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    background: rgba(255, 255, 255, .12) !important;
+    color: #fff !important;
+  }
+
+  .hamburger-btn {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--ink);
+  }
+
+  .topbar {
+    display: flex;
+    flex-direction: row !important;
+    align-items: center !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar {
+    height: auto;
+    max-height: none;
+    min-height: 76px;
+    padding: 12px 14px !important;
+  }
+
+  .topbar h1 {
+    font-size: 21px;
+  }
+
+  .topbar p {
+    font-size: 13px;
+  }
+}
