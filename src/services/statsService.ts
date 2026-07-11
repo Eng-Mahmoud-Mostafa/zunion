@@ -245,22 +245,22 @@ export async function createTransaction(input: {
   account_destination: string;
   added_by?: string;
 }) {
-  const { data, error } = await supabase
-    .from("transactions")
-    .insert({
-      transaction_type: input.transaction_type,
-      date: input.date,
-      description: input.description,
-      amount: input.amount,
-      expense_type: input.expense_type,
-      account_destination: input.account_destination,
-    })
-    .select()
-    .single();
-  if (error) {
-    throw new Error("تعذر حفظ المعاملة في Supabase. تأكد من تشغيل schema.sql وسياسات RLS.");
+  const response = await fetch("/api/finance/transactions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      typeof payload.error === "string"
+        ? payload.error
+        : "تعذر حفظ المعاملة في Supabase. تأكد من إعدادات السيرفر وقاعدة البيانات.",
+    );
   }
-  return data as DbTransaction;
+
+  return payload.transaction as DbTransaction;
 }
 
 export async function getOperationStats(): Promise<OperationStats> {

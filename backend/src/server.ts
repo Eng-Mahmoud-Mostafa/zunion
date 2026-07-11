@@ -32,6 +32,7 @@ const serviceRoutedPrefixes = [
   "/reports",
   "/dashboard",
   "/audit",
+  "/finance",
 ];
 
 app.use((req, _res, next) => {
@@ -657,6 +658,45 @@ app.get("/api/dashboard/alerts", requireAuth, async (req, res) => {
 app.get("/api/audit", requireAuth, requireRole("Master"), async (_req, res) => {
   const { rows } = await query("select * from audit_logs order by created_at desc limit 500");
   res.json({ audit: rows });
+});
+
+const financeTransactionBody = z.object({
+  transaction_type: z.string().min(1),
+  date: z.string().min(1),
+  description: z.string().optional().default(""),
+  amount: z.coerce.number().min(0),
+  expense_type: z.string().optional().default(""),
+  account_destination: z.string().optional().default(""),
+});
+
+app.post("/api/finance/transactions", async (req, res) => {
+  const parsed = financeTransactionBody.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "بيانات المعاملة غير صحيحة." });
+  }
+
+  const transaction = parsed.data;
+  try {
+    const rows = await supabaseRest<unknown[]>("transactions", {
+      method: "POST",
+      body: JSON.stringify([
+        {
+          transaction_type: transaction.transaction_type,
+          date: transaction.date,
+          description: transaction.description,
+          amount: transaction.amount,
+          expense_type: transaction.expense_type,
+          account_destination: transaction.account_destination,
+        },
+      ]),
+    });
+    return res.status(201).json({ transaction: rows[0] ?? null });
+  } catch (error) {
+    console.error("Finance transaction insert failed", error);
+    return res.status(500).json({
+      error: "تعذر حفظ المعاملة في Supabase. تأكد من تشغيل schema.sql أو إعدادات جدول transactions.",
+    });
+  }
 });
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
