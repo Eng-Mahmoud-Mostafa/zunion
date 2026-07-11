@@ -1,6 +1,7 @@
 import { supabase } from "../lib/supabase";
 
 const localTransactionsKey = "zunion-local-transactions-v1";
+const localOrdersKey = "zunion-local-orders-v2";
 
 export type DbOrder = {
   id: string;
@@ -23,6 +24,8 @@ export type DbOrder = {
   finishing_status: string | null;
   delivery_status: string | null;
   order_status?: string | null;
+  work_stage?: string | null;
+  workStage?: string | null;
   created_at: string | null;
 };
 
@@ -126,6 +129,26 @@ function loadLocalTransactions(): DbTransaction[] {
   }
 }
 
+function loadLocalOrders(): DbOrder[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const rows = JSON.parse(localStorage.getItem(localOrdersKey) || "[]") as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      ...row,
+      customer_name: row.client_name ?? row.customer_name ?? null,
+      phone: row.phone ?? null,
+      party: row.source_person ?? row.party ?? null,
+      service_type: row.order_type ?? row.service_type ?? null,
+      pieces_count: row.quantity ?? row.pieces_count ?? null,
+      workStage: row.workStage ?? row.work_stage ?? null,
+      work_stage: row.workStage ?? row.work_stage ?? null,
+    })) as DbOrder[];
+  } catch {
+    localStorage.removeItem(localOrdersKey);
+    return [];
+  }
+}
+
 function saveLocalTransactions(rows: DbTransaction[]) {
   if (typeof localStorage === "undefined") return;
   localStorage.setItem(localTransactionsKey, JSON.stringify(rows));
@@ -165,7 +188,13 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function orderStage(row: DbOrder) {
+  return String(row.workStage || row.work_stage || row.order_status || "").trim();
+}
+
 async function queryOrders(limit?: number) {
+  const localRows = loadLocalOrders();
+  if (localRows.length) return limit ? localRows.slice(0, limit) : localRows;
   let query = supabase.from("orders").select("*").order("created_at", { ascending: false });
   if (limit) query = query.limit(limit);
   const { data, error } = await query;
@@ -174,6 +203,8 @@ async function queryOrders(limit?: number) {
 }
 
 async function queryTransactions(limit?: number) {
+  const localRows = loadLocalTransactions();
+  if (localRows.length) return limit ? localRows.slice(0, limit) : localRows;
   let query = supabase.from("transactions").select("*").order("created_at", { ascending: false });
   if (limit) query = query.limit(limit);
   const { data, error } = await query;
@@ -223,10 +254,10 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       incomeTotal,
       expenseTotal,
       netTotal: incomeTotal - expenseTotal,
-      newOrders: allOrders.filter((order) => ["جديد", "أوردر جديد"].includes(String(order.operation_status || order.order_status || "").trim())).length,
-      inOperation: allOrders.filter((order) => String(order.operation_status || "").trim() === "قيد التشغيل").length,
-      inFinishing: allOrders.filter((order) => String(order.finishing_status || "").trim() === "قيد التشطيب").length,
-      ready: allOrders.filter((order) => ["جاهز", "جاهز للإرسال"].includes(String(order.delivery_status || order.finishing_status || "").trim())).length,
+      newOrders: allOrders.filter((order) => ["new", "جديد", "أوردر جديد"].includes(orderStage(order))).length,
+      inOperation: allOrders.filter((order) => orderStage(order) === "operation" || String(order.operation_status || "").trim() === "قيد التشغيل").length,
+      inFinishing: allOrders.filter((order) => orderStage(order) === "finishing" || String(order.finishing_status || "").trim() === "قيد التشطيب").length,
+      ready: allOrders.filter((order) => orderStage(order) === "completed" || ["جاهز", "جاهز للإرسال"].includes(String(order.delivery_status || order.finishing_status || "").trim())).length,
       latestOrders: orders,
       latestExpenses: transactions.filter(isExpense).slice(0, 5),
       latestRevenues: transactions.filter(isIncome).slice(0, 5),
@@ -300,9 +331,9 @@ export async function getOperationStats(): Promise<OperationStats> {
   try {
     const orders = await queryOrders();
     return {
-      inOperation: orders.filter((order) => String(order.operation_status || "").trim() === "قيد التشغيل").length,
-      inFinishing: orders.filter((order) => String(order.finishing_status || "").trim() === "قيد التشطيب").length,
-      readyToSend: orders.filter((order) => String(order.finishing_status || order.delivery_status || "").trim() === "جاهز للإرسال").length,
+      inOperation: orders.filter((order) => orderStage(order) === "operation" || String(order.operation_status || "").trim() === "قيد التشغيل").length,
+      inFinishing: orders.filter((order) => orderStage(order) === "finishing" || String(order.finishing_status || "").trim() === "قيد التشطيب").length,
+      readyToSend: orders.filter((order) => orderStage(order) === "completed" || String(order.finishing_status || order.delivery_status || "").trim() === "جاهز للإرسال").length,
       deliveryToday: orders.filter((order) => order.delivery_date === todayIso()).length,
       orders,
     };

@@ -40,11 +40,24 @@ create table if not exists public.orders (
   operation_status text,
   finishing_status text,
   delivery_status text,
+  work_stage text not null default 'new' check (work_stage in ('new', 'operation', 'finishing', 'completed', 'cancelled')),
   notes text,
   created_by uuid references public.users_profile(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.orders add column if not exists work_stage text not null default 'new';
+alter table public.orders drop constraint if exists orders_work_stage_check;
+alter table public.orders add constraint orders_work_stage_check check (work_stage in ('new', 'operation', 'finishing', 'completed', 'cancelled'));
+update public.orders
+set work_stage = case
+  when operation_status in ('تشغيل', 'التشغيل', 'قيد التشغيل') or delivery_status in ('في التشغيل') then 'operation'
+  when finishing_status in ('تشطيب', 'التشطيب', 'قيد التشطيب') or delivery_status in ('في التشطيب') then 'finishing'
+  when delivery_status in ('مكتمل', 'تم التسليم', 'جاهز') then 'completed'
+  when work_stage in ('operation', 'finishing', 'completed', 'cancelled') then work_stage
+  else 'new'
+end;
 
 create table if not exists public.transactions (
   id uuid primary key default gen_random_uuid(),

@@ -45,6 +45,7 @@ import {
 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
+type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
 type View = "dashboard" | "orders" | "new" | "addCustomer" | "addProduct" | "search" | "worker" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
 type Role = "Master" | "Operator" | "Supervisor" | "Finishing" | "Helper" | "Worker" | "Finish";
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string };
@@ -134,6 +135,7 @@ type Order = {
   production_notes: string;
   finishing_notes: string;
   order_status: OrderStatus;
+  workStage: WorkStage;
   workflow_stage: WorkflowStage;
   client_message: string;
   notes: string;
@@ -206,6 +208,38 @@ function saveLocalPassword(username: string, password: string) {
 
 const workflowStages: WorkflowStage[] = ["أوردر جديد", "يروح للتشغيل", "التشغيل", "يروح للتشطيب", "التشطيب", "الشغل جاهز", "تم التسليم"];
 const statuses: OrderStatus[] = ["جديد", "في التشغيل", "في التشطيب", "جاهز", "تم التسليم", "مشكلة جودة", "متأخر"];
+const workStageLabels: Record<WorkStage, string> = {
+  new: "أوردر جديد",
+  operation: "التشغيل",
+  finishing: "التشطيب",
+  completed: "مكتمل",
+  cancelled: "ملغي",
+};
+const workStageOptions = Object.keys(workStageLabels) as WorkStage[];
+
+function normalizeWorkStage(value: unknown): WorkStage {
+  const raw = String(value ?? "").trim();
+  const normalized = raw.toLowerCase();
+  if (["new", "operation", "finishing", "completed", "cancelled"].includes(normalized)) return normalized as WorkStage;
+  if (["NEW"].includes(raw) || raw === "أوردر جديد" || raw === "جديد") return "new";
+  if (["SENT_TO_WORKER", "WORKER_STARTED", "WORKER_DONE"].includes(raw) || raw === "تشغيل" || raw === "التشغيل" || raw === "يروح للتشغيل" || raw === "في التشغيل") return "operation";
+  if (["SENT_TO_FINISH", "FINISH_STARTED", "FINISH_DONE"].includes(raw) || raw === "تشطيب" || raw === "التشطيب" || raw === "يروح للتشطيب" || raw === "في التشطيب") return "finishing";
+  if (["READY", "CUSTOMER_MESSAGED", "DELIVERED"].includes(raw) || raw === "مكتمل" || raw === "تم التسليم" || raw === "الشغل جاهز" || raw === "جاهز") return "completed";
+  if (["CANCELLED"].includes(raw) || raw === "ملغي" || raw === "إلغاء" || raw === "الغاء") return "cancelled";
+  return "new";
+}
+
+function stageLabel(stage: WorkStage) {
+  return workStageLabels[stage];
+}
+
+function stageToStatus(stage: WorkStage): OrderStatus {
+  if (stage === "operation") return "في التشغيل";
+  if (stage === "finishing") return "في التشطيب";
+  if (stage === "completed") return "تم التسليم";
+  if (stage === "cancelled") return "متأخر";
+  return "جديد";
+}
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `order-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -311,6 +345,7 @@ const arabicColumns: Record<keyof Order, string> = {
   production_notes: "ملاحظات التشغيل",
   finishing_notes: "ملاحظات التشطيب",
   order_status: "الحالة",
+  workStage: "مرحلة الشغل",
   workflow_stage: "مرحلة الشغل",
   client_message: "الرسالة",
   notes: "ملاحظات",
@@ -349,6 +384,7 @@ const emptyOrder: Order = {
   production_notes: "",
   finishing_notes: "",
   order_status: "جديد",
+  workStage: "new",
   workflow_stage: "أوردر جديد",
   client_message: "",
   notes: "",
@@ -377,6 +413,7 @@ const demoOrders: Order[] = [
     logo_place: "الصدر",
     logo_status: "موجود",
     order_status: "في التشغيل",
+    workStage: "operation",
     workflow_stage: "التشغيل",
     operation_status: "جاري التشغيل",
     notes: "هنسلم بكره ان شاء الله",
@@ -414,6 +451,7 @@ const demoOrders: Order[] = [
     logo_place: "أمام",
     logo_status: "غير موجود",
     order_status: "جاهز",
+    workStage: "completed",
     workflow_stage: "الشغل جاهز",
     finishing_status: "تم التشطيب",
     created_at: new Date().toISOString(),
@@ -428,11 +466,12 @@ function isoOffset(days: number) {
 }
 
 function calculate(order: Order): Order {
+  const workStage = normalizeWorkStage(order.workStage ?? order.workflow_stage ?? order.order_status);
   const items = (order.items || []).map((item) => ({ ...item, total: Number(item.quantity || 0) * Number(item.price || 0) }));
   const lineTotal = items.reduce((sum, item) => sum + item.total, 0);
   const total = lineTotal || Number(order.price || 0) * Number(order.quantity || 0);
   const remaining = total - Number(order.paid || 0);
-  return { ...order, items, total, remaining, net_balance: remaining + Number(order.old_balance || 0) };
+  return { ...order, workStage, workflow_stage: stageLabel(workStage) as WorkflowStage, items, total, remaining, net_balance: remaining + Number(order.old_balance || 0) };
 }
 
 function orderForStorage(order: Order): Order {
@@ -453,7 +492,7 @@ function useOrders() {
     try {
       const stored = localStorage.getItem(storageKey);
       const parsed = stored ? JSON.parse(stored) as Order[] : demoOrders;
-      return parsed.map(orderForStorage);
+      return parsed.map((order) => calculate(orderForStorage(order)));
     } catch {
       localStorage.removeItem(storageKey);
       return demoOrders;
@@ -526,10 +565,10 @@ function canManageFinancials(role: Role) {
 
 function canEditOrder(role: Role, order?: Order) {
   if (role === "Master") return true;
-  if (role === "Operator") return !order || ["أوردر جديد", "يروح للتشغيل", "التشغيل"].includes(order.workflow_stage);
-  if (role === "Supervisor") return Boolean(order && ["يروح للتشغيل", "التشغيل"].includes(order.workflow_stage));
-  if (role === "Finishing") return Boolean(order && ["يروح للتشطيب", "التشطيب", "الشغل جاهز"].includes(order.workflow_stage));
-  if (role === "Helper") return !order || ["أوردر جديد", "يروح للتشغيل"].includes(order.workflow_stage);
+  if (role === "Operator") return !order || ["new", "operation"].includes(order.workStage);
+  if (role === "Supervisor") return Boolean(order && order.workStage === "operation");
+  if (role === "Finishing") return Boolean(order && ["finishing", "completed"].includes(order.workStage));
+  if (role === "Helper") return !order || ["new", "operation"].includes(order.workStage);
   return false;
 }
 
@@ -538,8 +577,8 @@ function canDeleteOrder(role: Role) {
 }
 
 function roleOrders(role: Role, orders: Order[]) {
-  if (role === "Operator" || role === "Supervisor" || role === "Worker") return orders.filter((order) => ["يروح للتشغيل", "التشغيل"].includes(order.workflow_stage));
-  if (role === "Finishing" || role === "Finish") return orders.filter((order) => ["يروح للتشطيب", "التشطيب", "الشغل جاهز"].includes(order.workflow_stage));
+  if (role === "Operator" || role === "Supervisor" || role === "Worker") return orders.filter((order) => order.workStage === "operation");
+  if (role === "Finishing" || role === "Finish") return orders.filter((order) => order.workStage === "finishing");
   return orders;
 }
 
@@ -967,7 +1006,7 @@ function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: {
         <Readonly label="صافي حساب العميل" value={computed.net_balance} />
         <Field label="النوع" value={form.order_type} onChange={(value) => set("order_type", value)} />
         <Select label="لوجو موجود/غير موجود" value={form.logo_status} options={["موجود", "غير موجود"]} onChange={(value) => set("logo_status", value)} />
-        <Select label="مرحلة الشغل" value={form.workflow_stage} options={workflowStages} onChange={(value) => set("workflow_stage", value as WorkflowStage)} />
+        <StageSelect label="مرحلة الشغل" value={form.workStage} onChange={(value) => set("workStage", value)} />
         <Select label="الحالة" value={form.order_status} options={statuses} onChange={(value) => set("order_status", value as OrderStatus)} />
         <Field label="التشغيل" value={form.operation_status} onChange={(value) => set("operation_status", value)} />
         <Field label="التشطيب" value={form.finishing_status} onChange={(value) => set("finishing_status", value)} />
@@ -1048,6 +1087,17 @@ function Select({ label, value, options, onChange }: { label: string; value: str
   return <label>{label}<select value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option}>{option}</option>)}</select></label>;
 }
 
+function StageSelect({ label, value, onChange }: { label: string; value: WorkStage; onChange: (value: WorkStage) => void }) {
+  return (
+    <label>
+      {label}
+      <select value={value} onChange={(event) => onChange(event.target.value as WorkStage)}>
+        {workStageOptions.map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}
+      </select>
+    </label>
+  );
+}
+
 function Textarea({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return <label>{label}<textarea rows={3} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
@@ -1075,7 +1125,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
     return () => { active = false; };
   }, [queue]);
 
-  if (queue) {
+  if (queue && remoteOps && remoteOps.orders.length > 0 && orders.length === 0) {
     if (remoteLoading) return <LoadingPanel />;
     if (remoteError || !remoteOps) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
     const filteredRemote = remoteOps.orders.filter((order) => {
@@ -1111,8 +1161,8 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
   }
 
   const baseOrders = useMemo(() => {
-    if (queue === "worker") return orders.filter((order) => ["يروح للتشغيل", "التشغيل"].includes(order.workflow_stage));
-    if (queue === "finish") return orders.filter((order) => ["يروح للتشطيب", "التشطيب", "الشغل جاهز"].includes(order.workflow_stage));
+    if (queue === "worker") return orders.filter((order) => order.workStage === "operation");
+    if (queue === "finish") return orders.filter((order) => order.workStage === "finishing");
     return roleOrders(session.role, orders);
   }, [orders, queue, session.role]);
 
@@ -1138,9 +1188,10 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
   }
 
   function changeStatus(order: Order, orderStatus: OrderStatus) {
-    const next = { ...order, order_status: orderStatus, updated_at: new Date().toISOString() };
+    const nextStage = ["مشكلة جودة", "متأخر"].includes(orderStatus) ? order.workStage : normalizeWorkStage(orderStatus);
+    const next = calculate({ ...order, workStage: nextStage, order_status: orderStatus, updated_at: new Date().toISOString() });
     setOrders((current) => current.map((item) => item.id === order.id ? next : item));
-    addAudit(session, "STATUS_CHANGED", "orders", order.id, { order_status: order.order_status }, { order_status: orderStatus });
+    addAudit(session, "STATUS_CHANGED", "orders", order.id, { order_status: order.order_status, workStage: order.workStage }, { order_status: orderStatus, workStage: next.workStage });
   }
 
   function transition(order: Order, label: string, patch: Partial<Order>) {
@@ -1286,20 +1337,20 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
                 <td>{order.notes}</td>
                 <td className="actions">
                   <button onClick={() => printOrder(order)}>طباعة</button>
-                  {(session.role === "Master" || session.role === "Helper") && order.workflow_stage === "أوردر جديد" && <button onClick={() => transition(order, "SENT_TO_WORKER", { workflow_stage: "يروح للتشغيل", order_status: "في التشغيل" })}>يروح التشغيل</button>}
-                  {(session.role === "Master" || session.role === "Worker") && order.workflow_stage === "يروح للتشغيل" && <button onClick={() => transition(order, "WORKER_STARTED", { workflow_stage: "التشغيل", operation_status: "بدأ التشغيل", order_status: "في التشغيل" })}>بدء التشغيل</button>}
-                  {(session.role === "Master" || session.role === "Worker") && order.workflow_stage === "التشغيل" && <button onClick={() => transition(order, "WORKER_DONE", { operation_status: "تم التشغيل" })}>تم التشغيل</button>}
-                  {(session.role === "Master" || session.role === "Worker") && ["التشغيل", "يروح للتشغيل"].includes(order.workflow_stage) && <button onClick={() => transition(order, "SENT_TO_FINISH", { workflow_stage: "يروح للتشطيب", order_status: "في التشطيب" })}>يروح التشطيب</button>}
-                  {(session.role === "Master" || session.role === "Finish") && order.workflow_stage === "يروح للتشطيب" && <button onClick={() => transition(order, "FINISH_STARTED", { workflow_stage: "التشطيب", finishing_status: "بدأ التشطيب", order_status: "في التشطيب" })}>بدء التشطيب</button>}
-                  {(session.role === "Master" || session.role === "Finish") && order.workflow_stage === "التشطيب" && <button onClick={() => transition(order, "FINISH_DONE", { finishing_status: "تم التشطيب" })}>تم التشطيب</button>}
-                  {(session.role === "Master" || session.role === "Finish") && ["التشطيب", "يروح للتشطيب"].includes(order.workflow_stage) && <button onClick={() => transition(order, "READY", { workflow_stage: "الشغل جاهز", order_status: "جاهز" })}>جاهز</button>}
+                  {(session.role === "Master" || session.role === "Helper") && order.workStage === "new" && <button onClick={() => transition(order, "SENT_TO_WORKER", { workStage: "operation", order_status: "في التشغيل" })}>يروح التشغيل</button>}
+                  {(session.role === "Master" || session.role === "Worker") && order.workStage === "operation" && <button onClick={() => transition(order, "WORKER_STARTED", { workStage: "operation", operation_status: "بدأ التشغيل", order_status: "في التشغيل" })}>بدء التشغيل</button>}
+                  {(session.role === "Master" || session.role === "Worker") && order.workStage === "operation" && <button onClick={() => transition(order, "WORKER_DONE", { operation_status: "تم التشغيل" })}>تم التشغيل</button>}
+                  {(session.role === "Master" || session.role === "Worker") && order.workStage === "operation" && <button onClick={() => transition(order, "SENT_TO_FINISH", { workStage: "finishing", order_status: "في التشطيب" })}>يروح التشطيب</button>}
+                  {(session.role === "Master" || session.role === "Finish") && order.workStage === "finishing" && <button onClick={() => transition(order, "FINISH_STARTED", { workStage: "finishing", finishing_status: "بدأ التشطيب", order_status: "في التشطيب" })}>بدء التشطيب</button>}
+                  {(session.role === "Master" || session.role === "Finish") && order.workStage === "finishing" && <button onClick={() => transition(order, "FINISH_DONE", { finishing_status: "تم التشطيب" })}>تم التشطيب</button>}
+                  {(session.role === "Master" || session.role === "Finish") && order.workStage === "finishing" && <button onClick={() => transition(order, "READY", { workStage: "completed", order_status: "جاهز" })}>جاهز</button>}
                   {(session.role === "Master" || session.role === "Helper") && order.order_status === "جاهز" && <button onClick={() => {
                     const message = order.client_message || `أوردر ${order.order_number} جاهز للاستلام`;
                     navigator.clipboard?.writeText(message).catch(() => undefined);
                     transition(order, "CUSTOMER_MESSAGED", { order_status: "جاهز", client_message: message });
                     alert(message);
                   }}>رسالة للعميل</button>}
-                  {(session.role === "Master" || session.role === "Helper") && order.order_status !== "تم التسليم" && <button onClick={() => transition(order, "DELIVERED", { workflow_stage: "تم التسليم", order_status: "تم التسليم" })}>تم التسليم</button>}
+                  {(session.role === "Master" || session.role === "Helper") && order.order_status !== "تم التسليم" && <button onClick={() => transition(order, "DELIVERED", { workStage: "completed", order_status: "تم التسليم" })}>تم التسليم</button>}
                   {canEditOrder(session.role, order) && <button onClick={() => setEditing(order)}>تعديل</button>}
                   <select value={order.order_status} onChange={(event) => changeStatus(order, event.target.value as OrderStatus)}>
                     {statuses.map((item) => <option key={item}>{item}</option>)}
@@ -1732,6 +1783,7 @@ function rowToOrder(row: Record<string, string | number>): Order {
     operation_status: String(pick("التشغيل", "operation_status")),
     finishing_status: String(pick("التشطيب", "finishing_status")),
     order_status: (String(pick("الحالة", "order_status") || "جديد") as OrderStatus),
+    workStage: normalizeWorkStage(pick("مرحلة الشغل", "workStage", "workflow_stage", "الحالة", "order_status")),
     client_message: String(pick("الرسالة", "client_message")),
     notes: String(pick("ملاحظات", "notes")),
     created_at: now,
@@ -1954,6 +2006,12 @@ function ZunionApp() {
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
   const { items: products, setItems: setProducts } = useStoredList<Product>(productsKey, []);
 
+  useEffect(() => {
+    const syncViewFromHash = () => setViewState(viewFromHash());
+    window.addEventListener("hashchange", syncViewFromHash);
+    return () => window.removeEventListener("hashchange", syncViewFromHash);
+  }, []);
+
   function setView(nextView: View) {
     setViewState(nextView);
     window.history.replaceState(null, "", `#${nextView}`);
@@ -2081,6 +2139,7 @@ function ZunionApp() {
         </header>
         <section className="page">
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
+          {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} onSave={saveNew} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <AddProductPage products={products} setProducts={setProducts} session={session} />}

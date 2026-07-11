@@ -63,9 +63,18 @@ function param(value: string | string[] | undefined) {
 }
 
 function orderVisibility(role: UserRole) {
-  if (role === "Worker") return " where status in ('SENT_TO_WORKER','WORKER_STARTED','WORKER_DONE')";
-  if (role === "Finish") return " where status in ('SENT_TO_FINISH','FINISH_STARTED','FINISH_DONE','READY')";
+  if (role === "Worker") return " where work_stage = 'operation'";
+  if (role === "Finish") return " where work_stage = 'finishing'";
   return "";
+}
+
+function workStageFromStatus(status: string) {
+  if (status === "NEW") return "new";
+  if (["SENT_TO_WORKER", "WORKER_STARTED", "WORKER_DONE"].includes(status)) return "operation";
+  if (["SENT_TO_FINISH", "FINISH_STARTED", "FINISH_DONE"].includes(status)) return "finishing";
+  if (["READY", "CUSTOMER_MESSAGED", "DELIVERED"].includes(status)) return "completed";
+  if (status === "CANCELLED") return "cancelled";
+  return "new";
 }
 
 function stripFinancial<T extends Record<string, unknown>>(row: T, role: UserRole): T {
@@ -336,7 +345,7 @@ app.get("/api/auth/me", requireAuth, (req, res) => res.json({ user: req.user }))
 
 app.get("/api/orders", requireAuth, async (req, res) => {
   const where = orderVisibility(req.user!.role);
-  const { search = "", status = "", delivery_date = "", source_party = "" } = req.query as Record<string, string>;
+  const { search = "", status = "", workStage = "", delivery_date = "", source_party = "" } = req.query as Record<string, string>;
   const filters: string[] = [];
   const params: unknown[] = [];
   if (where) filters.push(where.replace(" where ", ""));
@@ -347,6 +356,10 @@ app.get("/api/orders", requireAuth, async (req, res) => {
   if (status) {
     params.push(status);
     filters.push(`status = $${params.length}`);
+  }
+  if (workStage) {
+    params.push(workStage);
+    filters.push(`work_stage = $${params.length}`);
   }
   if (delivery_date) {
     params.push(delivery_date);
@@ -376,13 +389,13 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper"), async (req
     const result = await client.query<{ id: string }>(
       `insert into orders (
         order_number, customer_id, source_party, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
-        delivery_date, type, quantity, price, paid, old_account, status, notes, message_text, quality_notes,
+        delivery_date, type, quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
         damaged_pieces, production_notes, finishing_notes, created_by, updated_by
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20) returning id`,
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$21) returning id`,
       [
         nextOrderNumber(), customerId, order.source_party, order.customer_name_snapshot, order.customer_code_snapshot,
         order.phone_snapshot, order.delivery_date || null, order.type, order.quantity, order.price, order.paid,
-        order.old_account, order.status, order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
+        order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
         order.production_notes, order.finishing_notes, req.user!.id,
       ],
     );
@@ -412,10 +425,10 @@ app.put("/api/orders/:id", requireAuth, async (req, res) => {
   const order = parsed.data;
   await query(
     `update orders set source_party=$1, customer_name_snapshot=$2, customer_code_snapshot=$3, phone_snapshot=$4,
-     delivery_date=$5, type=$6, quantity=$7, price=$8, paid=$9, old_account=$10, status=$11, notes=$12,
-     message_text=$13, quality_notes=$14, damaged_pieces=$15, production_notes=$16, finishing_notes=$17, updated_by=$18
-     where id=$19`,
-    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.quantity, order.price, order.paid, order.old_account, order.status, order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, req.user!.id, id],
+     delivery_date=$5, type=$6, quantity=$7, price=$8, paid=$9, old_account=$10, status=$11, work_stage=$12, notes=$13,
+     message_text=$14, quality_notes=$15, damaged_pieces=$16, production_notes=$17, finishing_notes=$18, updated_by=$19
+     where id=$20`,
+    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, req.user!.id, id],
   );
   await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, order);
   res.json({ ok: true });
@@ -435,9 +448,9 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
     (role === "Finish" && ["FINISH_STARTED", "FINISH_DONE", "READY"].includes(parsed.data.status));
   if (!allowed) return res.status(403).json({ message: "Forbidden status transition" });
   await query(
-    `update orders set status=$1, production_notes=coalesce($2, production_notes), finishing_notes=coalesce($3, finishing_notes),
-     damaged_pieces=coalesce($4, damaged_pieces), updated_by=$5 where id=$6`,
-    [parsed.data.status, parsed.data.production_notes ?? null, parsed.data.finishing_notes ?? null, parsed.data.damaged_pieces ?? null, req.user!.id, id],
+    `update orders set status=$1, work_stage=$2, production_notes=coalesce($3, production_notes), finishing_notes=coalesce($4, finishing_notes),
+     damaged_pieces=coalesce($5, damaged_pieces), updated_by=$6 where id=$7`,
+    [parsed.data.status, parsed.data.workStage ?? workStageFromStatus(parsed.data.status), parsed.data.production_notes ?? null, parsed.data.finishing_notes ?? null, parsed.data.damaged_pieces ?? null, req.user!.id, id],
   );
   await audit(req.user!, "STATUS_CHANGED", "orders", id, { status: oldOrder.status }, parsed.data);
   res.json({ ok: true });

@@ -14,6 +14,8 @@ export const orderStatuses = [
   "CANCELLED",
 ] as const;
 
+export const workStages = ["new", "operation", "finishing", "completed", "cancelled"] as const;
+
 export const orderSchema = z.object({
   source_party: z.string().min(1),
   customer_name_snapshot: z.string().min(1),
@@ -26,6 +28,7 @@ export const orderSchema = z.object({
   paid: z.coerce.number().min(0).default(0),
   old_account: z.coerce.number().default(0),
   status: z.enum(orderStatuses).default("NEW"),
+  workStage: z.enum(workStages).default("new"),
   notes: z.string().optional().default(""),
   message_text: z.string().optional().default(""),
   quality_notes: z.string().optional().default(""),
@@ -36,6 +39,7 @@ export const orderSchema = z.object({
 
 export const statusSchema = z.object({
   status: z.enum(orderStatuses),
+  workStage: z.enum(workStages).optional(),
   production_notes: z.string().optional(),
   finishing_notes: z.string().optional(),
   damaged_pieces: z.coerce.number().int().min(0).optional(),

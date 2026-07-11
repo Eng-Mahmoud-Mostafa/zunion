@@ -85,6 +85,7 @@ create table if not exists orders (
   old_account numeric not null default 0,
   net_account numeric not null default 0,
   status order_status not null default 'NEW',
+  work_stage text not null default 'new' check (work_stage in ('new', 'operation', 'finishing', 'completed', 'cancelled')),
   notes text,
   message_text text,
   quality_notes text,
@@ -96,6 +97,20 @@ create table if not exists orders (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table orders add column if not exists work_stage text not null default 'new';
+alter table orders drop constraint if exists orders_work_stage_check;
+alter table orders add constraint orders_work_stage_check check (work_stage in ('new', 'operation', 'finishing', 'completed', 'cancelled'));
+update orders
+set work_stage = case
+  when status = 'NEW' then 'new'
+  when status in ('SENT_TO_WORKER', 'WORKER_STARTED', 'WORKER_DONE') then 'operation'
+  when status in ('SENT_TO_FINISH', 'FINISH_STARTED', 'FINISH_DONE') then 'finishing'
+  when status in ('READY', 'CUSTOMER_MESSAGED', 'DELIVERED') then 'completed'
+  when status = 'CANCELLED' then 'cancelled'
+  else 'new'
+end
+where work_stage is null or work_stage = 'new';
 
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
