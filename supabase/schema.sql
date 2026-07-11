@@ -48,7 +48,7 @@ create table if not exists public.orders (
 
 create table if not exists public.transactions (
   id uuid primary key default gen_random_uuid(),
-  transaction_type text not null check (transaction_type in ('الإيراد', 'مصروف', 'income', 'expense')),
+  transaction_type text not null check (transaction_type in ('إيراد', 'الإيراد', 'مصروف', 'income', 'expense')),
   date date not null default current_date,
   description text,
   amount numeric not null default 0,

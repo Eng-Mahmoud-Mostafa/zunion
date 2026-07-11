@@ -690,6 +690,13 @@ const financeTransactionBody = z.object({
   account_destination: z.string().optional().default(""),
 });
 
+function normalizeTransactionType(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "income" || value.includes("إيراد")) return "income";
+  if (normalized === "expense" || value.includes("مصروف")) return "expense";
+  return value;
+}
+
 app.post("/api/finance/transactions", requireFinanceSession, async (req, res) => {
   const parsed = financeTransactionBody.safeParse(req.body);
   if (!parsed.success) {
@@ -702,7 +709,7 @@ app.post("/api/finance/transactions", requireFinanceSession, async (req, res) =>
       method: "POST",
       body: JSON.stringify([
         {
-          transaction_type: transaction.transaction_type,
+          transaction_type: normalizeTransactionType(transaction.transaction_type),
           date: transaction.date,
           description: transaction.description,
           amount: transaction.amount,
