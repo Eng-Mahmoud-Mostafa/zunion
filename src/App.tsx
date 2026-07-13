@@ -90,6 +90,9 @@ type Product = {
   name: string;
   details: string;
   price: number;
+  active?: boolean;
+  materials?: string[];
+  operationMethods?: string[];
   created_at: string;
 };
 type AuditEntry = {
@@ -122,6 +125,15 @@ type Order = {
   old_balance: number;
   net_balance: number;
   order_type: string;
+  productId?: string;
+  productName?: string;
+  paymentMethod?: string;
+  customPaymentMethod?: string;
+  customParty?: string;
+  materialsStatus?: "available" | "unavailable" | "";
+  operationMethods?: string[];
+  logoFileName?: string;
+  workOrderFileName?: string;
   details: string;
   logo_place: string;
   items: OrderItem[];
@@ -208,6 +220,18 @@ function saveLocalPassword(username: string, password: string) {
 
 const workflowStages: WorkflowStage[] = ["أوردر جديد", "يروح للتشغيل", "التشغيل", "يروح للتشطيب", "التشطيب", "الشغل جاهز", "تم التسليم"];
 const statuses: OrderStatus[] = ["جديد", "في التشغيل", "في التشطيب", "جاهز", "تم التسليم", "مشكلة جودة", "متأخر"];
+const paymentMethods = [
+  { value: "cash", label: "نقدي" },
+  { value: "bank_transfer", label: "تحويل بنكي" },
+  { value: "instapay", label: "إنستاباي" },
+  { value: "wallet", label: "محفظة إلكترونية" },
+  { value: "deferred", label: "آجل" },
+  { value: "other", label: "أخرى" },
+] as const;
+const materialsOptions = [
+  { value: "available", label: "موجود" },
+  { value: "unavailable", label: "غير موجود" },
+] as const;
 const workStageLabels: Record<WorkStage, string> = {
   new: "أوردر جديد",
   operation: "التشغيل",
@@ -315,7 +339,7 @@ function addAudit(session: Session | null, action: string, entityType: string, e
   localStorage.setItem(auditKey, JSON.stringify([entry, ...loadAudit()].slice(0, 500)));
 }
 
-const arabicColumns: Record<keyof Order, string> = {
+const arabicColumns: Partial<Record<keyof Order, string>> = {
   id: "ID",
   created_by: "بواسطة",
   order_number: "رقم الأوردر",
@@ -358,7 +382,7 @@ const emptyOrder: Order = {
   id: "",
   created_by: "",
   order_number: "",
-  source_person: "",
+  source_person: partyOptions[0],
   client_name: "",
   client_code: "",
   phone: "",
@@ -371,6 +395,15 @@ const emptyOrder: Order = {
   old_balance: 0,
   net_balance: 0,
   order_type: "",
+  productId: "",
+  productName: "",
+  paymentMethod: "cash",
+  customPaymentMethod: "",
+  customParty: "",
+  materialsStatus: "available",
+  operationMethods: [""],
+  logoFileName: "",
+  workOrderFileName: "",
   details: "",
   logo_place: "",
   items: [],
@@ -477,8 +510,8 @@ function calculate(order: Order): Order {
 function orderForStorage(order: Order): Order {
   return {
     ...order,
-    logo_image_url: order.logo_image_url.startsWith("blob:") || order.logo_image_url.startsWith("data:") ? "" : order.logo_image_url,
-    work_order_image_url: order.work_order_image_url.startsWith("blob:") || order.work_order_image_url.startsWith("data:") ? "" : order.work_order_image_url,
+    logo_image_url: order.logo_image_url.startsWith("blob:") ? "" : order.logo_image_url,
+    work_order_image_url: order.work_order_image_url.startsWith("blob:") ? "" : order.work_order_image_url,
     items: (order.items || []).map((item) => ({
       ...item,
       product_image_url: item.product_image_url.startsWith("blob:") || item.product_image_url.startsWith("data:") ? "" : item.product_image_url,
@@ -924,9 +957,15 @@ function AlertItem({ alert }: { alert: Alert }) {
   );
 }
 
-function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: { initial?: Order; orderNumber?: string; customers?: Customer[]; onCancel?: () => void; onSave: (order: Order) => void }) {
+function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void }) {
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), order_number: orderNumber || String(Date.now()).slice(-6) });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
   const computed = calculate(form);
+  const activeProducts = products.filter((product) => product.active !== false);
+  const selectedProduct = products.find((product) => product.id === form.productId);
+  const visibleProducts = activeProducts.filter((product) => `${product.name} ${product.details}`.toLowerCase().includes(productSearch.trim().toLowerCase()));
 
   function set<K extends keyof Order>(key: K, value: Order[K]) {
     setForm((current) => calculate({ ...current, [key]: value, updated_at: new Date().toISOString() }));
@@ -939,6 +978,61 @@ function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: {
       const clientCode = existing?.client_code || current.client_code || nextCustomerCode(customers, source);
       return calculate({ ...current, client_name: value, client_code: clientCode, updated_at: new Date().toISOString() });
     });
+  }
+
+  function selectCustomer(value: string) {
+    const existing = customers.find((customer) => customer.id === value);
+    if (!existing) {
+      setClientName(value);
+      return;
+    }
+    setForm((current) => calculate({
+      ...current,
+      client_name: existing.client_name,
+      client_code: existing.client_code,
+      phone: existing.phone,
+      source_person: existing.source_person || current.source_person,
+      old_balance: existing.old_balance || current.old_balance,
+      updated_at: new Date().toISOString(),
+    }));
+  }
+
+  function selectProduct(productId: string) {
+    const product = activeProducts.find((item) => item.id === productId);
+    if (!product) {
+      set("productId", "");
+      set("productName", "");
+      set("order_type", "");
+      return;
+    }
+    setForm((current) => {
+      const nextMethods = current.operationMethods?.some((method) => method.trim())
+        ? current.operationMethods
+        : (product.operationMethods?.length ? product.operationMethods : current.operationMethods);
+      return calculate({
+        ...current,
+        productId: product.id,
+        productName: product.name,
+        order_type: product.name,
+        price: current.price > 0 ? current.price : Number(product.price || 0),
+        operationMethods: nextMethods?.length ? nextMethods : [""],
+        updated_at: new Date().toISOString(),
+      });
+    });
+  }
+
+  function setOperationMethod(index: number, value: string) {
+    set("operationMethods", (form.operationMethods?.length ? form.operationMethods : [""]).map((method, currentIndex) => currentIndex === index ? value : method));
+  }
+
+  function addOperationMethod() {
+    set("operationMethods", [...(form.operationMethods?.length ? form.operationMethods : [""]), ""]);
+  }
+
+  function removeOperationMethod(index: number) {
+    const methods = form.operationMethods?.length ? form.operationMethods : [""];
+    if (methods.length === 1) return;
+    set("operationMethods", methods.filter((_, currentIndex) => currentIndex !== index));
   }
 
   function filePreview(file?: File) {
@@ -956,11 +1050,25 @@ function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: {
   }
 
   function upload(key: "logo_image_url" | "work_order_image_url", file?: File) {
+    if (key === "logo_image_url" && file?.type === "application/pdf") {
+      alert("الملف المرفوع غير مدعوم");
+      return;
+    }
     const previewUrl = filePreview(file);
-    if (!previewUrl) return;
+    if (!previewUrl || !file) return;
     const previous = form[key];
     if (previous.startsWith("blob:")) URL.revokeObjectURL(previous);
-    set(key, previewUrl as Order[typeof key]);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((current) => calculate({
+        ...current,
+        [key]: String(reader.result || previewUrl),
+        [key === "logo_image_url" ? "logoFileName" : "workOrderFileName"]: file.name,
+        updated_at: new Date().toISOString(),
+      }));
+    };
+    reader.onerror = () => set(key, previewUrl as Order[typeof key]);
+    reader.readAsDataURL(file);
   }
 
   function addItem() {
@@ -980,8 +1088,48 @@ function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: {
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (saving) return;
+    const nextErrors: Record<string, string> = {};
+    const methods = (form.operationMethods || []).map((method) => method.trim()).filter(Boolean);
+    const total = Number(form.quantity || 0) * Number(form.price || 0);
+    const paid = Number(form.paid || 0);
+    if (!form.order_number.trim()) nextErrors.order_number = "رقم الأوردر مطلوب";
+    if (!form.client_name.trim()) nextErrors.client_name = "اسم العميل مطلوب";
+    if (!form.source_person.trim()) nextErrors.source_person = "الطرف مطلوب";
+    if (!form.productId && !form.productName && !form.order_type) nextErrors.productId = "يجب اختيار نوع المنتج";
+    if (Number(form.quantity || 0) < 1) nextErrors.quantity = "العدد يجب أن يكون 1 على الأقل";
+    if (Number(form.price || 0) < 0) nextErrors.price = "السعر لا يمكن أن يكون بالسالب";
+    if (paid < 0) nextErrors.paid = "المدفوع لا يمكن أن يكون بالسالب";
+    if (paid > total) nextErrors.paid = "المدفوع لا يمكن أن يكون أكبر من الإجمالي";
+    if (!form.paymentMethod) nextErrors.paymentMethod = "طريقة الدفع مطلوبة";
+    if (form.paymentMethod === "other" && !form.customPaymentMethod?.trim()) nextErrors.customPaymentMethod = "اكتب طريقة الدفع";
+    if (!form.delivery_date) nextErrors.delivery_date = "تاريخ التسليم مطلوب";
+    if (!form.materialsStatus) nextErrors.materialsStatus = "يجب تحديد حالة الخامات";
+    if (methods.length === 0) nextErrors.operationMethods = "يجب إضافة طريقة تشغيل واحدة على الأقل";
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors);
+      return;
+    }
+    setErrors({});
+    setSaving(true);
     const now = new Date().toISOString();
-    onSave(calculate({ ...computed, client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]), created_at: computed.created_at || now, updated_at: now }));
+    const selectedName = selectedProduct?.name || form.productName || form.order_type;
+    onSave(calculate({
+      ...computed,
+      productId: form.productId,
+      productName: selectedName,
+      order_type: selectedName,
+      client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
+      operationMethods: methods,
+      workStage: "new",
+      workflow_stage: "أوردر جديد",
+      order_status: "جديد",
+      operation_status: "not_started",
+      finishing_status: "not_started",
+      created_at: computed.created_at || now,
+      updated_at: now,
+    }));
+    window.setTimeout(() => setSaving(false), 300);
   }
 
   return (
@@ -990,7 +1138,109 @@ function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: {
         <h2>{initial ? "تعديل أوردر" : "إضافة أوردر جديد"}</h2>
         {onCancel && <button type="button" className="ghost-btn compact" onClick={onCancel}>إلغاء</button>}
       </div>
-      <div className="form-grid">
+      <section className="form-section">
+        <h3>بيانات الأوردر</h3>
+        <div className="form-grid">
+          <label>رقم الأوردر<input value={form.order_number} readOnly /></label>
+          <label>
+            اسم العميل
+            <input list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} />
+            <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
+            <ErrorText message={errors.client_name} />
+          </label>
+          <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
+          <label>
+            طرف
+            <select value={partyOptions.includes(form.source_person) ? form.source_person : "other"} onChange={(event) => {
+              if (event.target.value === "other") {
+                setForm((current) => calculate({ ...current, source_person: current.customParty || "", customParty: current.customParty || "", updated_at: new Date().toISOString() }));
+              } else {
+                setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
+              }
+            }}>
+              {partyOptions.filter((option) => option !== "أخرى").map((option) => <option key={option} value={option}>{option}</option>)}
+              <option value="other">أخرى</option>
+            </select>
+            {!partyOptions.includes(form.source_person) && <input placeholder="اكتب الطرف" value={form.customParty || form.source_person} onChange={(event) => setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: event.target.value, updated_at: new Date().toISOString() }))} />}
+            <ErrorText message={errors.source_person} />
+          </label>
+          <label>
+            نوع المنتج
+            <input placeholder="ابحث عن المنتج" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} />
+            <select value={form.productId || ""} onChange={(event) => selectProduct(event.target.value)}>
+              <option value="">{activeProducts.length ? "اختر نوع المنتج" : "لا توجد منتجات مضافة"}</option>
+              {visibleProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
+              {selectedProduct && selectedProduct.active !== false && !visibleProducts.some((product) => product.id === selectedProduct.id) && <option value={selectedProduct.id}>{selectedProduct.name}</option>}
+              {selectedProduct && selectedProduct.active === false && <option value={selectedProduct.id}>{selectedProduct.name}</option>}
+            </select>
+            {canAddProduct && <button type="button" className="ghost-btn compact add-product-inline" onClick={onAddProduct}>إضافة منتج جديد</button>}
+            <ErrorText message={errors.productId} />
+          </label>
+          <label>العدد<input type="number" min={1} value={form.quantity} onChange={(event) => set("quantity", Number(event.target.value))} /><ErrorText message={errors.quantity} /></label>
+          <label>تاريخ التسليم<input type="date" value={form.delivery_date} onChange={(event) => set("delivery_date", event.target.value)} /><ErrorText message={errors.delivery_date} /></label>
+          <label>
+            الخامات
+            <select value={form.materialsStatus || ""} onChange={(event) => set("materialsStatus", event.target.value as Order["materialsStatus"])}>
+              <option value="">اختر حالة الخامات</option>
+              {materialsOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+            <ErrorText message={errors.materialsStatus} />
+          </label>
+        </div>
+      </section>
+      <section className="form-section">
+        <h3>البيانات المالية</h3>
+        <div className="form-grid">
+          <label>السعر<input type="number" min={0} step="0.01" value={form.price} onChange={(event) => set("price", Number(event.target.value))} /><ErrorText message={errors.price} /></label>
+          <Readonly label="الإجمالي" value={computed.total} />
+          <label>المدفوع<input type="number" min={0} step="0.01" value={form.paid} onChange={(event) => set("paid", Number(event.target.value))} /><ErrorText message={errors.paid} /></label>
+          <label>
+            طريقة الدفع
+            <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)}>
+              {paymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
+            </select>
+            <ErrorText message={errors.paymentMethod} />
+          </label>
+          {form.paymentMethod === "other" && <label>اكتب طريقة الدفع<input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} /><ErrorText message={errors.customPaymentMethod} /></label>}
+          <Readonly label="المتبقي" value={computed.remaining} />
+        </div>
+      </section>
+      <section className="form-section">
+        <div className="panel-head">
+          <h3>طريقة التشغيل</h3>
+          <button type="button" className="ghost-btn compact" onClick={addOperationMethod}>+</button>
+        </div>
+        <div className="operation-methods">
+          {(form.operationMethods?.length ? form.operationMethods : [""]).map((method, index) => (
+            <label key={index}>
+              طريقة تشغيل {index + 1}
+              <div className="operation-method-row">
+                <input value={method} onChange={(event) => setOperationMethod(index, event.target.value)} />
+                <button type="button" className="ghost-btn compact" disabled={(form.operationMethods?.length || 1) === 1} onClick={() => removeOperationMethod(index)}>حذف</button>
+              </div>
+            </label>
+          ))}
+        </div>
+        <ErrorText message={errors.operationMethods} />
+      </section>
+      <section className="form-section">
+        <h3>المرفقات</h3>
+        <div className="form-grid two">
+          <label>
+            رفع صورة اللوجو
+            <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => upload("logo_image_url", event.target.files?.[0])} />
+            {form.logoFileName && <small>{form.logoFileName}</small>}
+            {form.logo_image_url && <img className="upload-preview" src={form.logo_image_url} alt="logo preview" />}
+          </label>
+          <label>
+            رفع صورة أمر الشغل
+            <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => upload("work_order_image_url", event.target.files?.[0])} />
+            {form.workOrderFileName && <small>{form.workOrderFileName}</small>}
+            {form.work_order_image_url && (form.workOrderFileName?.toLowerCase().endsWith(".pdf") ? <span className="file-preview-link">PDF: {form.workOrderFileName}</span> : <img className="upload-preview" src={form.work_order_image_url} alt="work order preview" />)}
+          </label>
+        </div>
+      </section>
+      <div className="form-grid" hidden>
         <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} />
         <PartyField value={form.source_person} onChange={(value) => set("source_person", value)} />
         <Field label="اسم العميل" value={form.client_name} onChange={setClientName} />
@@ -1022,7 +1272,7 @@ function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: {
           {form.work_order_image_url && <a className="file-preview-link" href={form.work_order_image_url} target="_blank">Preview work order</a>}
         </label>
       </div>
-      <section className="line-items">
+      <section className="line-items" hidden>
         <div className="panel-head">
           <h3>المنتجات</h3>
           <button type="button" className="ghost-btn compact" onClick={addItem}>+ إضافة منتج</button>
@@ -1045,7 +1295,7 @@ function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: {
           </div>
         ))}
       </section>
-      <div className="form-grid two">
+      <div className="form-grid two" hidden>
         <Textarea label="الجودة" value={form.quality_notes} onChange={(value) => set("quality_notes", value)} />
         <Textarea label="ملاحظات التشغيل" value={form.production_notes} onChange={(value) => set("production_notes", value)} />
         <Textarea label="ملاحظات التشطيب" value={form.finishing_notes} onChange={(value) => set("finishing_notes", value)} />
@@ -1053,13 +1303,17 @@ function OrderForm({ initial, orderNumber, customers = [], onCancel, onSave }: {
         <Textarea label="ملاحظات" value={form.notes} onChange={(value) => set("notes", value)} />
         <Textarea label="ملاحظات داخلية" value={form.internal_notes} onChange={(value) => set("internal_notes", value)} />
       </div>
-      <button className="primary-btn">حفظ الأوردر</button>
+      <button className="primary-btn" disabled={saving}>{saving ? "جاري الحفظ..." : "حفظ الأوردر"}</button>
     </form>
   );
 }
 
 function Field({ label, value, onChange, type = "text" }: { label: string; value: string | number; onChange: (value: string) => void; type?: string }) {
   return <label>{label}<input type={type} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+}
+
+function ErrorText({ message }: { message?: string }) {
+  return message ? <small className="field-error">{message}</small> : null;
 }
 
 function PartyField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
@@ -1881,7 +2135,7 @@ function AddProductPage({ products, setProducts, session }: { products: Product[
   function save(event: React.FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;
-    const product: Product = { id: createId(), name: name.trim(), details, price: Number(price || 0), created_at: new Date().toISOString() };
+    const product: Product = { id: createId(), name: name.trim(), details, price: Number(price || 0), active: true, created_at: new Date().toISOString() };
     setProducts((current) => [product, ...current]);
     addAudit(session, "PRODUCT_CREATED", "products", product.id, undefined, product);
     setName("");
@@ -2140,7 +2394,7 @@ function ZunionApp() {
         <section className="page">
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} />}
-          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} onSave={saveNew} />}
+          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <AddProductPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} />}

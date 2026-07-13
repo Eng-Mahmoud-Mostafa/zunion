@@ -77,6 +77,12 @@ create table if not exists orders (
   phone_snapshot text not null,
   delivery_date date,
   type text,
+  product_id uuid,
+  product_name_snapshot text,
+  payment_method text not null default 'cash',
+  custom_payment_method text,
+  materials_status text not null default 'available',
+  operation_methods jsonb not null default '[]'::jsonb,
   quantity integer not null default 1,
   price numeric not null default 0,
   total numeric not null default 0,
@@ -99,6 +105,12 @@ create table if not exists orders (
 );
 
 alter table orders add column if not exists work_stage text not null default 'new';
+alter table orders add column if not exists product_id uuid;
+alter table orders add column if not exists product_name_snapshot text;
+alter table orders add column if not exists payment_method text not null default 'cash';
+alter table orders add column if not exists custom_payment_method text;
+alter table orders add column if not exists materials_status text not null default 'available';
+alter table orders add column if not exists operation_methods jsonb not null default '[]'::jsonb;
 alter table orders drop constraint if exists orders_work_stage_check;
 alter table orders add constraint orders_work_stage_check check (work_stage in ('new', 'operation', 'finishing', 'completed', 'cancelled'));
 update orders

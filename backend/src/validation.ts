@@ -15,15 +15,23 @@ export const orderStatuses = [
 ] as const;
 
 export const workStages = ["new", "operation", "finishing", "completed", "cancelled"] as const;
+export const paymentMethods = ["cash", "bank_transfer", "instapay", "wallet", "deferred", "other"] as const;
+export const materialsStatuses = ["available", "unavailable"] as const;
 
 export const orderSchema = z.object({
   source_party: z.string().min(1),
   customer_name_snapshot: z.string().min(1),
   customer_code_snapshot: z.string().optional().default(""),
-  phone_snapshot: z.string().min(1),
+  phone_snapshot: z.string().optional().default(""),
   delivery_date: z.string().optional().nullable(),
   type: z.string().optional().default(""),
-  quantity: z.coerce.number().int().min(0).default(1),
+  productId: z.string().uuid().optional(),
+  productName: z.string().optional().default(""),
+  paymentMethod: z.enum(paymentMethods).default("cash"),
+  customPaymentMethod: z.string().optional().default(""),
+  materialsStatus: z.enum(materialsStatuses).default("available"),
+  operationMethods: z.array(z.string().trim().min(1)).min(1).default(["not_started"]),
+  quantity: z.coerce.number().int().min(1).default(1),
   price: z.coerce.number().min(0).default(0),
   paid: z.coerce.number().min(0).default(0),
   old_account: z.coerce.number().default(0),
@@ -35,6 +43,14 @@ export const orderSchema = z.object({
   damaged_pieces: z.coerce.number().int().min(0).default(0),
   production_notes: z.string().optional().default(""),
   finishing_notes: z.string().optional().default(""),
+}).superRefine((order, ctx) => {
+  const total = order.quantity * order.price;
+  if (order.paid > total) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["paid"], message: "المدفوع لا يمكن أن يكون أكبر من الإجمالي" });
+  }
+  if (order.paymentMethod === "other" && !order.customPaymentMethod.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["customPaymentMethod"], message: "اكتب طريقة الدفع" });
+  }
 });
 
 export const statusSchema = z.object({

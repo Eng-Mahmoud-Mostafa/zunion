@@ -389,13 +389,16 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper"), async (req
     const result = await client.query<{ id: string }>(
       `insert into orders (
         order_number, customer_id, source_party, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
-        delivery_date, type, quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
+        delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, operation_methods,
+        quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
         damaged_pieces, production_notes, finishing_notes, created_by, updated_by
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$21) returning id`,
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27) returning id`,
       [
         nextOrderNumber(), customerId, order.source_party, order.customer_name_snapshot, order.customer_code_snapshot,
-        order.phone_snapshot, order.delivery_date || null, order.type, order.quantity, order.price, order.paid,
-        order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
+        order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
+        order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus, JSON.stringify(order.operationMethods),
+        order.quantity, order.price, order.paid,
+        order.old_account, "NEW", "new", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
         order.production_notes, order.finishing_notes, req.user!.id,
       ],
     );
@@ -425,10 +428,11 @@ app.put("/api/orders/:id", requireAuth, async (req, res) => {
   const order = parsed.data;
   await query(
     `update orders set source_party=$1, customer_name_snapshot=$2, customer_code_snapshot=$3, phone_snapshot=$4,
-     delivery_date=$5, type=$6, quantity=$7, price=$8, paid=$9, old_account=$10, status=$11, work_stage=$12, notes=$13,
-     message_text=$14, quality_notes=$15, damaged_pieces=$16, production_notes=$17, finishing_notes=$18, updated_by=$19
-     where id=$20`,
-    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, req.user!.id, id],
+     delivery_date=$5, type=$6, product_id=$7, product_name_snapshot=$8, payment_method=$9, custom_payment_method=$10,
+     materials_status=$11, operation_methods=$12, quantity=$13, price=$14, paid=$15, old_account=$16, status=$17, work_stage=$18, notes=$19,
+     message_text=$20, quality_notes=$21, damaged_pieces=$22, production_notes=$23, finishing_notes=$24, updated_by=$25
+     where id=$26`,
+    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus, JSON.stringify(order.operationMethods), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, req.user!.id, id],
   );
   await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, order);
   res.json({ ok: true });
