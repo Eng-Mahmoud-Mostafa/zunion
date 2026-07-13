@@ -17,6 +17,22 @@ export const orderStatuses = [
 export const workStages = ["new", "operation", "finishing", "completed", "cancelled"] as const;
 export const paymentMethods = ["cash", "bank_transfer", "instapay", "wallet", "deferred", "other"] as const;
 export const materialsStatuses = ["available", "unavailable"] as const;
+export const productStatuses = ["active", "inactive"] as const;
+
+export const productSchema = z.object({
+  productName: z.string().trim().min(1, "اسم المنتج مطلوب"),
+  details: z.string().optional().default(""),
+  logoPlacement: z.string().optional().default(""),
+  defaultQuantity: z.coerce.number().int().min(1, "العدد يجب أن يكون 1 على الأقل").default(1),
+  defaultPrice: z.coerce.number().min(0, "السعر لا يمكن أن يكون بالسالب").default(0),
+  quality: z.string().optional().default(""),
+  status: z.enum(productStatuses, { message: "حالة المنتج غير صحيحة" }).default("active"),
+  productImage: z.string().optional().default(""),
+  logoImage: z.string().optional().default(""),
+}).transform((product) => ({
+  ...product,
+  defaultTotal: product.defaultQuantity * product.defaultPrice,
+}));
 
 export const orderSchema = z.object({
   source_party: z.string().min(1),

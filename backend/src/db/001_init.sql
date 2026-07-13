@@ -67,6 +67,36 @@ create table if not exists customers (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists products (
+  id uuid primary key default gen_random_uuid(),
+  product_name text not null,
+  details text,
+  logo_placement text,
+  default_quantity integer not null default 1 check (default_quantity >= 1),
+  default_price numeric not null default 0 check (default_price >= 0),
+  default_total numeric generated always as (default_quantity * default_price) stored,
+  quality text,
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  product_image text,
+  logo_image text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table products add column if not exists logo_placement text;
+alter table products add column if not exists default_quantity integer not null default 1;
+alter table products add column if not exists default_price numeric not null default 0;
+alter table products add column if not exists quality text;
+alter table products add column if not exists status text not null default 'active';
+alter table products add column if not exists product_image text;
+alter table products add column if not exists logo_image text;
+alter table products drop constraint if exists products_status_check;
+alter table products add constraint products_status_check check (status in ('active', 'inactive'));
+alter table products drop constraint if exists products_default_quantity_check;
+alter table products add constraint products_default_quantity_check check (default_quantity >= 1);
+alter table products drop constraint if exists products_default_price_check;
+alter table products add constraint products_default_price_check check (default_price >= 0);
+
 create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   order_number text unique not null,
@@ -241,6 +271,9 @@ $$;
 
 drop trigger if exists set_customers_updated_at on customers;
 create trigger set_customers_updated_at before update on customers for each row execute function set_updated_at();
+
+drop trigger if exists set_products_updated_at on products;
+create trigger set_products_updated_at before update on products for each row execute function set_updated_at();
 
 drop trigger if exists set_orders_updated_at on orders;
 create trigger set_orders_updated_at before update on orders for each row execute function set_updated_at();

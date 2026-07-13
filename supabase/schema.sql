@@ -23,6 +23,36 @@ create table if not exists public.customers (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.products (
+  id uuid primary key default gen_random_uuid(),
+  product_name text not null,
+  details text,
+  logo_placement text,
+  default_quantity integer not null default 1 check (default_quantity >= 1),
+  default_price numeric not null default 0 check (default_price >= 0),
+  default_total numeric generated always as (default_quantity * default_price) stored,
+  quality text,
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  product_image text,
+  logo_image text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.products add column if not exists logo_placement text;
+alter table public.products add column if not exists default_quantity integer not null default 1;
+alter table public.products add column if not exists default_price numeric not null default 0;
+alter table public.products add column if not exists quality text;
+alter table public.products add column if not exists status text not null default 'active';
+alter table public.products add column if not exists product_image text;
+alter table public.products add column if not exists logo_image text;
+alter table public.products drop constraint if exists products_status_check;
+alter table public.products add constraint products_status_check check (status in ('active', 'inactive'));
+alter table public.products drop constraint if exists products_default_quantity_check;
+alter table public.products add constraint products_default_quantity_check check (default_quantity >= 1);
+alter table public.products drop constraint if exists products_default_price_check;
+alter table public.products add constraint products_default_price_check check (default_price >= 0);
+
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
   order_number bigint unique,
@@ -129,8 +159,14 @@ create trigger set_orders_updated_at
   before update on public.orders
   for each row execute function public.set_updated_at();
 
+drop trigger if exists set_products_updated_at on public.products;
+create trigger set_products_updated_at
+  before update on public.products
+  for each row execute function public.set_updated_at();
+
 alter table public.users_profile enable row level security;
 alter table public.customers enable row level security;
+alter table public.products enable row level security;
 alter table public.orders enable row level security;
 alter table public.transactions enable row level security;
 alter table public.operation_logs enable row level security;
@@ -141,7 +177,7 @@ do $$
 declare
   table_name text;
 begin
-  foreach table_name in array array['customers', 'orders', 'transactions', 'operation_logs', 'company_settings']
+  foreach table_name in array array['customers', 'products', 'orders', 'transactions', 'operation_logs', 'company_settings']
   loop
     execute format('drop policy if exists "server authenticated read %1$s" on public.%1$I', table_name);
     execute format('create policy "server authenticated read %1$s" on public.%1$I for select to authenticated using (true)', table_name);
@@ -155,8 +191,8 @@ begin
 end $$;
 
 revoke all on public.users_profile, public.password_reset_codes from anon, authenticated;
-grant select, insert, update, delete on public.customers, public.orders, public.transactions, public.operation_logs, public.company_settings to authenticated;
-revoke all on public.customers, public.orders, public.transactions, public.operation_logs, public.company_settings from anon;
+grant select, insert, update, delete on public.customers, public.products, public.orders, public.transactions, public.operation_logs, public.company_settings to authenticated;
+revoke all on public.customers, public.products, public.orders, public.transactions, public.operation_logs, public.company_settings from anon;
 
 insert into storage.buckets (id, name, public)
 values ('order-files', 'order-files', false)

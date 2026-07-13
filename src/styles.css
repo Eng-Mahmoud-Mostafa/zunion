@@ -410,6 +410,21 @@ textarea:focus {
   margin-top: 8px;
 }
 
+.table-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #f8fafc;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .line-items {
   display: grid;
   gap: 12px;

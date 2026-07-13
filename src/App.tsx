@@ -91,6 +91,16 @@ type Product = {
   details: string;
   price: number;
   active?: boolean;
+  status?: "active" | "inactive";
+  logoPlacement?: string;
+  defaultQuantity?: number;
+  defaultPrice?: number;
+  defaultTotal?: number;
+  quality?: string;
+  productImage?: string;
+  logoImage?: string;
+  productImageName?: string;
+  logoImageName?: string;
   materials?: string[];
   operationMethods?: string[];
   created_at: string;
@@ -505,6 +515,30 @@ function calculate(order: Order): Order {
   const total = lineTotal || Number(order.price || 0) * Number(order.quantity || 0);
   const remaining = total - Number(order.paid || 0);
   return { ...order, workStage, workflow_stage: stageLabel(workStage) as WorkflowStage, items, total, remaining, net_balance: remaining + Number(order.old_balance || 0) };
+}
+
+function normalizeProduct(product: Product): Product {
+  const defaultQuantity = Math.max(1, Number(product.defaultQuantity ?? 1) || 1);
+  const defaultPrice = Math.max(0, Number(product.defaultPrice ?? product.price ?? 0) || 0);
+  const status = product.status ?? (product.active === false ? "inactive" : "active");
+  return {
+    ...product,
+    name: product.name || "",
+    details: product.details || "",
+    price: defaultPrice,
+    active: status === "active",
+    status,
+    logoPlacement: product.logoPlacement || "",
+    defaultQuantity,
+    defaultPrice,
+    defaultTotal: defaultQuantity * defaultPrice,
+    quality: product.quality || "",
+    productImage: product.productImage || "",
+    logoImage: product.logoImage || "",
+    productImageName: product.productImageName || "",
+    logoImageName: product.logoImageName || "",
+    operationMethods: product.operationMethods || [],
+  };
 }
 
 function orderForStorage(order: Order): Order {
@@ -963,8 +997,9 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   const [saving, setSaving] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const computed = calculate(form);
-  const activeProducts = products.filter((product) => product.active !== false);
-  const selectedProduct = products.find((product) => product.id === form.productId);
+  const normalizedProducts = products.map(normalizeProduct);
+  const activeProducts = normalizedProducts.filter((product) => product.status === "active");
+  const selectedProduct = normalizedProducts.find((product) => product.id === form.productId);
   const visibleProducts = activeProducts.filter((product) => `${product.name} ${product.details}`.toLowerCase().includes(productSearch.trim().toLowerCase()));
 
   function set<K extends keyof Order>(key: K, value: Order[K]) {
@@ -1008,13 +1043,16 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     setForm((current) => {
       const nextMethods = current.operationMethods?.some((method) => method.trim())
         ? current.operationMethods
-        : (product.operationMethods?.length ? product.operationMethods : current.operationMethods);
+        : (product.logoPlacement ? [product.logoPlacement] : (product.operationMethods?.length ? product.operationMethods : current.operationMethods));
       return calculate({
         ...current,
         productId: product.id,
         productName: product.name,
         order_type: product.name,
-        price: current.price > 0 ? current.price : Number(product.price || 0),
+        quantity: current.quantity && current.quantity !== 1 ? current.quantity : product.defaultQuantity || 1,
+        price: current.price > 0 ? current.price : Number(product.defaultPrice ?? product.price ?? 0),
+        logo_place: current.logo_place || product.logoPlacement || "",
+        quality_notes: current.quality_notes || product.quality || "",
         operationMethods: nextMethods?.length ? nextMethods : [""],
         updated_at: new Date().toISOString(),
       });
@@ -2167,6 +2205,144 @@ function AddProductPage({ products, setProducts, session }: { products: Product[
   );
 }
 
+function ProductManagerPage({ products, setProducts, session }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; session: Session }) {
+  const normalizedProducts = products.map(normalizeProduct);
+  const emptyProductForm: Product = normalizeProduct({ id: "", name: "", details: "", price: 0, active: true, status: "active", created_at: "" });
+  const [form, setForm] = useState<Product>(emptyProductForm);
+  const [editingId, setEditingId] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const total = Number(form.defaultQuantity || 1) * Number(form.defaultPrice || 0);
+
+  function setProduct<K extends keyof Product>(key: K, value: Product[K]) {
+    setForm((current) => normalizeProduct({ ...current, [key]: value, price: key === "defaultPrice" ? Number(value || 0) : current.price }));
+  }
+
+  function imagePreview(file?: File, key?: "productImage" | "logoImage") {
+    if (!file || !key) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setErrors((current) => ({ ...current, [key]: key === "productImage" ? "صيغة صورة المنتج غير مدعومة" : "صيغة ملف اللوجو غير مدعومة" }));
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setErrors((current) => ({ ...current, [key]: "حجم الملف أكبر من 10MB" }));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setErrors((current) => ({ ...current, [key]: "" }));
+      setForm((current) => normalizeProduct({
+        ...current,
+        [key]: String(reader.result || ""),
+        [key === "productImage" ? "productImageName" : "logoImageName"]: file.name,
+      }));
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function validate() {
+    const nextErrors: Record<string, string> = {};
+    const trimmedName = form.name.trim();
+    if (!trimmedName) nextErrors.name = "اسم المنتج مطلوب";
+    if (normalizedProducts.some((product) => product.id !== editingId && product.name.trim().toLowerCase() === trimmedName.toLowerCase())) nextErrors.name = "اسم المنتج موجود بالفعل";
+    if (Number(form.defaultQuantity || 0) < 1) nextErrors.defaultQuantity = "العدد يجب أن يكون 1 على الأقل";
+    if (Number(form.defaultPrice || 0) < 0) nextErrors.defaultPrice = "السعر لا يمكن أن يكون بالسالب";
+    if (!["active", "inactive"].includes(form.status || "")) nextErrors.status = "حالة المنتج غير صحيحة";
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  }
+
+  function resetForm() {
+    setForm(emptyProductForm);
+    setEditingId("");
+    setErrors({});
+  }
+
+  function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (saving || !validate()) return;
+    setSaving(true);
+    const now = new Date().toISOString();
+    const product = normalizeProduct({
+      ...form,
+      id: editingId || createId(),
+      name: form.name.trim(),
+      details: form.details.trim(),
+      price: Number(form.defaultPrice || 0),
+      defaultQuantity: Number(form.defaultQuantity || 1),
+      defaultPrice: Number(form.defaultPrice || 0),
+      defaultTotal: total,
+      active: form.status !== "inactive",
+      created_at: form.created_at || now,
+    });
+    setProducts((current) => editingId ? current.map((item) => item.id === editingId ? product : item) : [product, ...current]);
+    addAudit(session, editingId ? "PRODUCT_UPDATED" : "PRODUCT_CREATED", "products", product.id, editingId ? normalizedProducts.find((item) => item.id === editingId) : undefined, product);
+    resetForm();
+    window.setTimeout(() => setSaving(false), 300);
+  }
+
+  function editProduct(product: Product) {
+    const normalized = normalizeProduct(product);
+    setForm(normalized);
+    setEditingId(normalized.id);
+    setErrors({});
+  }
+
+  function toggleStatus(product: Product) {
+    const normalized = normalizeProduct(product);
+    const next = normalizeProduct({ ...normalized, status: normalized.status === "active" ? "inactive" : "active" });
+    setProducts((current) => current.map((item) => item.id === product.id ? next : item));
+    addAudit(session, "PRODUCT_STATUS_CHANGED", "products", product.id, { status: normalized.status }, { status: next.status });
+  }
+
+  return (
+    <div className="stack">
+      <section className="panel">
+        <div className="panel-head"><h2>إضافة منتج</h2></div>
+        <form className="order-form compact-form" onSubmit={save}>
+          <div className="form-grid">
+            <label>اسم المنتج<input value={form.name} onChange={(event) => setProduct("name", event.target.value)} /><ErrorText message={errors.name} /></label>
+            <label>التفاصيل<input value={form.details} onChange={(event) => setProduct("details", event.target.value)} /></label>
+            <label>مكان اللوجو<input value={form.logoPlacement || ""} onChange={(event) => setProduct("logoPlacement", event.target.value)} /></label>
+            <label>العدد<input type="number" min={1} value={form.defaultQuantity || 1} onChange={(event) => setProduct("defaultQuantity", Number(event.target.value))} /><ErrorText message={errors.defaultQuantity} /></label>
+            <label>السعر<input type="number" min={0} step="0.01" value={form.defaultPrice || 0} onChange={(event) => setProduct("defaultPrice", Number(event.target.value))} /><ErrorText message={errors.defaultPrice} /></label>
+            <Readonly label="الإجمالي" value={total} />
+            <label>الجودة<input value={form.quality || ""} onChange={(event) => setProduct("quality", event.target.value)} /></label>
+            <label>الحالة<select value={form.status || "active"} onChange={(event) => setProduct("status", event.target.value as Product["status"])}><option value="active">نشط</option><option value="inactive">غير نشط</option></select><ErrorText message={errors.status} /></label>
+            <label>صورة المنتج<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => imagePreview(event.target.files?.[0], "productImage")} />{form.productImageName && <small>{form.productImageName}</small>}{form.productImage && <img className="upload-preview" src={form.productImage} alt="product preview" />}<ErrorText message={errors.productImage} /></label>
+            <label>اللوجو<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => imagePreview(event.target.files?.[0], "logoImage")} />{form.logoImageName && <small>{form.logoImageName}</small>}{form.logoImage && <img className="upload-preview" src={form.logoImage} alt="logo preview" />}<ErrorText message={errors.logoImage} /></label>
+          </div>
+          <div className="form-actions">
+            <button className="primary-btn" type="submit" disabled={saving}>{saving ? "جاري الحفظ..." : "حفظ المنتج"}</button>
+            {editingId && <button className="ghost-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}
+          </div>
+        </form>
+      </section>
+      <section className="table-wrap accounts-table">
+        <table>
+          <thead><tr>{["اسم المنتج", "التفاصيل", "مكان اللوجو", "العدد", "السعر", "الإجمالي", "الجودة", "الحالة", "صورة المنتج", "تاريخ الإضافة", "الإجراءات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <tbody>
+            {normalizedProducts.length === 0 && <EmptyRow colSpan={11} />}
+            {normalizedProducts.map((product) => <tr key={product.id}>
+              <td>{product.name}</td>
+              <td>{product.details || "-"}</td>
+              <td>{product.logoPlacement || "-"}</td>
+              <td>{product.defaultQuantity}</td>
+              <td>{formatMoney(product.defaultPrice)}</td>
+              <td>{formatMoney(product.defaultTotal)}</td>
+              <td>{product.quality || "-"}</td>
+              <td><span className={product.status === "active" ? "badge badge-green" : "badge badge-amber"}>{product.status === "active" ? "نشط" : "غير نشط"}</span></td>
+              <td>{product.productImage ? <img className="table-thumb" src={product.productImage} alt={product.name} /> : "لا توجد صورة"}</td>
+              <td>{formatDateArabic(product.created_at)}</td>
+              <td className="actions"><button onClick={() => editProduct(product)}>تعديل</button><button onClick={() => toggleStatus(product)}>{product.status === "active" ? "تعطيل" : "تنشيط"}</button></td>
+            </tr>)}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  );
+}
+
 type SidebarSubItemConfig = {
   id: View;
   label: string;
@@ -2396,7 +2572,7 @@ function ZunionApp() {
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
-          {view === "addProduct" && <AddProductPage products={products} setProducts={setProducts} session={session} />}
+          {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} />}
           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" />}
           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" />}
