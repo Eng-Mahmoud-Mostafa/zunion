@@ -679,12 +679,12 @@ function printDocument(title: string, body: string, session?: Session | null, or
       body{font-family:Tahoma,Arial,sans-serif;color:#111827;margin:0;direction:rtl}
       .print-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #ed1c24;padding-bottom:12px;margin-bottom:16px}
       .print-head img{width:190px;height:auto;object-fit:contain}
-      h1{margin:0;color:#111827;font-size:24px}.meta{color:#4b5563;font-size:12px;margin-top:6px}
+      h1{margin:0;color:#ed1c24;font-size:24px}.meta{color:#ed1c24;font-size:12px;margin-top:6px}
       table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}thead{display:table-header-group}tr{break-inside:avoid}
-      th,td{border:1px solid #d1d5db;padding:7px;text-align:right;vertical-align:top}th{background:#f8fafc;color:#111827;font-weight:800}td,.record-value{color:#ed1c24}
+      th,td{border:1px solid #d1d5db;padding:7px;text-align:right;vertical-align:top}th{background:#f8fafc;color:#ed1c24;font-weight:800}td,.record-value{color:#000}
       .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.box{border:1px solid #d1d5db;border-radius:6px;padding:9px;break-inside:avoid}
-      .box strong{display:block;color:#111827;font-size:12px;margin-bottom:4px}.section-title{color:#111827;margin:18px 0 8px}
-      .email-text{display:block;width:100%;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;direction:ltr;text-align:left}
+      .box strong{display:block;color:#ed1c24;font-size:12px;margin-bottom:4px}.section-title{color:#ed1c24;margin:18px 0 8px}
+      .email-text{display:block;width:100%;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;direction:ltr;text-align:left;color:#000}
       .toolbar{margin-bottom:12px}.toolbar button{background:#ed1c24;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
       @media print{.toolbar{display:none}}
     </style></head><body><div class="toolbar"><button onclick="window.print()">طباعة</button></div>
@@ -1796,7 +1796,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             <ErrorText message={errors.client_name} />
           </label>
           <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
-          <label>تاريخ التسليم<input type="date" value={form.delivery_date} onChange={(event) => set("delivery_date", event.target.value)} /><ErrorText message={errors.delivery_date} /></label>
+          <label>تاريخ التسليم<input className={`date-input ${form.delivery_date ? "has-value" : "empty"}`} type="date" value={form.delivery_date} onChange={(event) => set("delivery_date", event.target.value)} /><ErrorText message={errors.delivery_date} /></label>
         </div>
       </section>
       <section className="form-section">
@@ -1925,7 +1925,9 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 }
 
 function Field({ label, value, onChange, type = "text" }: { label: string; value: string | number; onChange: (value: string) => void; type?: string }) {
-  return <label>{label}<input type={type} value={normalizeDigitsToEnglish(value)} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} /></label>;
+  const normalizedValue = normalizeDigitsToEnglish(value);
+  const className = type === "date" ? `date-input ${normalizedValue ? "has-value" : "empty"}` : undefined;
+  return <label>{label}<input className={className} type={type} value={normalizedValue} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} /></label>;
 }
 
 function ErrorText({ message }: { message?: string }) {
@@ -2246,7 +2248,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
         <div className="filters">
           <input placeholder="بحث بالهاتف / رقم الأوردر / اسم العميل" value={query} onChange={(event) => setQuery(event.target.value)} />
           <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">كل الحالات</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select>
-          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          <input className={`date-input ${date ? "has-value" : "empty"}`} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           <select value={source} onChange={(event) => setSource(event.target.value)}><option value="">كل الأطراف</option>{sources.map((item) => <option key={item}>{item}</option>)}</select>
           <label className="check"><input type="checkbox" checked={qualityOnly} onChange={(event) => setQualityOnly(event.target.checked)} /> مشاكل جودة</label>
         </div>
@@ -2637,7 +2639,7 @@ function FinancePageModern({ session }: { session: Session }) {
             <input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="اكتب البيان أو الوصف" />
           </label>
           <label>التاريخ *
-            <input type="date" value={formDate} onChange={(event) => setFormDate(event.target.value)} required />
+            <input className={`date-input ${formDate ? "has-value" : "empty"}`} type="date" value={formDate} onChange={(event) => setFormDate(event.target.value)} required />
           </label>
           <div className="finance-account-select">
             <span>الحساب / الوجهة *</span>
