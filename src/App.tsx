@@ -48,7 +48,7 @@ type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "الت
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
 type View = "dashboard" | "orders" | "new" | "addCustomer" | "addProduct" | "search" | "worker" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
 type Role = string;
-type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string };
+type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
   id: string;
   product_name: string;
@@ -200,7 +200,7 @@ type PermissionKey =
   | "operation.view" | "operation.update" | "operation.upload" | "operation.print"
   | "finishing.view" | "finishing.update" | "finishing.upload" | "finishing.print"
   | "reports.view" | "reports.print" | "import.export"
-  | "users.view" | "users.create" | "users.edit" | "users.deactivate" | "users.delete" | "users.resetPassword"
+  | "users.view" | "users.create" | "users.edit" | "users.deactivate" | "users.delete" | "users.resetPassword" | "users.resetAllPasswords"
   | "roles.view" | "roles.create" | "roles.edit" | "roles.delete" | "permissions.manage" | "audit.view" | "settings.view";
 
 type PermissionOverride = { allow: PermissionKey[]; deny: PermissionKey[] };
@@ -283,6 +283,7 @@ const permissionGroups: Array<{ group: string; permissions: Array<{ key: Permiss
     { key: "users.deactivate", label: "المستخدمين", action: "إيقاف/تفعيل" },
     { key: "users.delete", label: "المستخدمين", action: "حذف" },
     { key: "users.resetPassword", label: "كلمة مرور المستخدمين", action: "تغيير" },
+    { key: "users.resetAllPasswords", label: "كل كلمات المرور", action: "إعادة تعيين" },
     { key: "roles.view", label: "الأدوار", action: "عرض" },
     { key: "roles.create", label: "الأدوار", action: "إضافة" },
     { key: "roles.edit", label: "الأدوار", action: "تعديل" },
@@ -291,7 +292,7 @@ const permissionGroups: Array<{ group: string; permissions: Array<{ key: Permiss
   ] },
 ];
 const allPermissionKeys = permissionGroups.flatMap((group) => group.permissions.map((permission) => permission.key));
-const masterProtectedPermissions: PermissionKey[] = ["users.view", "users.create", "users.edit", "users.deactivate", "users.delete", "users.resetPassword", "roles.view", "roles.create", "roles.edit", "permissions.manage", "audit.view", "settings.view"];
+const masterProtectedPermissions: PermissionKey[] = ["users.view", "users.create", "users.edit", "users.deactivate", "users.delete", "users.resetPassword", "users.resetAllPasswords", "roles.view", "roles.create", "roles.edit", "permissions.manage", "audit.view", "settings.view"];
 
 const roleByEmail: Record<string, Role> = {
   "mahmoudmostafa3104@gmail.com": "Master",
@@ -963,7 +964,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || "اسم المستخدم أو كلمة المرور غير صحيحة.");
-        const session = payload.session as Session;
+        const session = { ...(payload.session as Session), mustChangePassword: Boolean(payload.mustChangePassword ?? payload.session?.mustChangePassword) };
         localStorage.setItem(sessionKey, JSON.stringify(session));
         addAudit(session, "LOGIN", "auth", undefined, undefined, { username: normalizedUsername, role: session.role });
         onLogin(session);
@@ -976,7 +977,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     const user = getLocalUser(normalizedUsername);
     if (!user || user.status === "inactive" || user.password !== password) return setMessage("اسم المستخدم أو كلمة المرور غير صحيحة.");
     const expiresAt = new Date(Date.now() + (stayLoggedIn ? 14 * 24 : 8) * 60 * 60 * 1000).toISOString();
-    const session = { email: user.email, username: normalizedUsername, fullName: user.fullName, role: user.role, loggedInAt: new Date().toISOString(), expiresAt };
+    const session = { email: user.email, username: normalizedUsername, fullName: user.fullName, role: user.role, loggedInAt: new Date().toISOString(), expiresAt, mustChangePassword: user.mustChangePassword };
     localStorage.setItem(sessionKey, JSON.stringify(session));
     saveManagedUsers(loadManagedUsers().map((item) => item.username === normalizedUsername ? { ...item, lastLoginAt: new Date().toISOString() } : item));
     addAudit(session, "LOGIN", "auth", undefined, undefined, { username: normalizedUsername, role: user.role });
@@ -1105,6 +1106,67 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   );
 }
 
+function MandatoryPasswordChange({ session, onChanged }: { session: Session; onChanged: (session: Session) => void }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState("يجب تغيير كلمة المرور المؤقتة");
+  const username = session.username || "";
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (currentPassword !== "1234") return setMessage("كلمة المرور الحالية غير صحيحة");
+    if (newPassword === "1234") return setMessage("لا يمكن استخدام كلمة المرور 1234 مرة أخرى");
+    if (newPassword.trim() !== newPassword || newPassword.trim().length < 8) return setMessage("كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل");
+    if (newPassword !== confirmPassword) return setMessage("كلمتا المرور غير متطابقتين");
+
+    if (useServerAuth || !isLocalHost) {
+      try {
+        const response = await fetch("/api/auth/mandatory-change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "تعذر تغيير كلمة المرور.");
+        const nextSession = { ...(payload.session as Session), mustChangePassword: false };
+        localStorage.setItem(sessionKey, JSON.stringify(nextSession));
+        onChanged(nextSession);
+        return;
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر تغيير كلمة المرور.");
+      }
+    }
+
+    const user = getLocalUser(username);
+    if (!user || user.password !== currentPassword) return setMessage("كلمة المرور الحالية غير صحيحة");
+    saveLocalPassword(username, newPassword);
+    const nextSession = { ...session, mustChangePassword: false };
+    localStorage.setItem(sessionKey, JSON.stringify(nextSession));
+    addAudit(nextSession, "MANDATORY_PASSWORD_CHANGED", "auth", username, undefined, { username });
+    onChanged(nextSession);
+  }
+
+  return (
+    <main className="login-page" dir="rtl">
+      <form className="login-card" onSubmit={submit}>
+        <BrandLogo className="login-logo" />
+        <h1>تغيير كلمة المرور الإجباري</h1>
+        <p>يجب تغيير كلمة المرور المؤقتة قبل استخدام النظام.</p>
+        <label>كلمة المرور الحالية</label>
+        <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" />
+        <label>كلمة المرور الجديدة</label>
+        <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" />
+        <label>تأكيد كلمة المرور الجديدة</label>
+        <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
+        {message && <div className="notice">{message}</div>}
+        <button className="primary-btn">تغيير كلمة المرور</button>
+      </form>
+    </main>
+  );
+}
+
 function cardIconFor(title: string): LucideIcon {
   if (title.includes("إيراد") || title.includes("الإيرادات")) return Banknote;
   if (title.includes("مصروف")) return Receipt;
@@ -1177,6 +1239,114 @@ function orderParty(order: DbOrder) {
 
 function orderPieces(order: DbOrder) {
   return order.pieces_count ?? order.quantity ?? 0;
+}
+
+type OrdersListRecord = Partial<Record<keyof Order | keyof DbOrder | "added_by" | "username" | "user_email" | "product_name_snapshot" | "message_text", unknown>>;
+
+const ordersListHeaders = [
+  "اكتب بواسطة",
+  "تاريخ التسليم",
+  "رقم الأوردر",
+  "اسم العميل",
+  "النوع",
+  "اللوجو",
+  "العدد",
+  "حالة التشغيل",
+  "حالة التشطيب",
+  "شغل جاهز",
+  "رسالة العميل",
+] as const;
+
+function valueText(value: unknown, fallback = "—") {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+}
+
+function orderCreatedBy(order: OrdersListRecord) {
+  return valueText(order.created_by || order.added_by || order.username || order.user_email);
+}
+
+function orderDisplayNumber(order: OrdersListRecord) {
+  return valueText(order.order_number);
+}
+
+function orderDisplayClient(order: OrdersListRecord) {
+  return valueText(order.client_name || order.customer_name);
+}
+
+function orderDisplayType(order: OrdersListRecord) {
+  return valueText(order.productName || order.product_name_snapshot || order.order_type || order.service_type);
+}
+
+function orderDisplayLogo(order: OrdersListRecord) {
+  return valueText(order.logo_place || order.logo_status);
+}
+
+function orderDisplayQuantity(order: OrdersListRecord) {
+  return formatNumber(Number(order.quantity ?? order.pieces_count ?? 0));
+}
+
+function normalizedOperationStatus(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (["تم", "تم التشغيل", "مكتمل", "completed", "done", "WORKER_DONE"].includes(text)) return "تم";
+  if (["جاري التشغيل", "قيد التشغيل", "بدأ التشغيل", "في التشغيل", "operation", "WORKER_STARTED", "SENT_TO_WORKER"].includes(text)) return "جاري التشغيل";
+  return "لم يبدأ";
+}
+
+function normalizedFinishingStatus(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (["تم", "تم التشطيب", "مكتمل", "completed", "done", "FINISH_DONE"].includes(text)) return "تم";
+  if (["جاري التشطيب", "قيد التشطيب", "بدأ التشطيب", "في التشطيب", "finishing", "FINISH_STARTED", "SENT_TO_FINISH"].includes(text)) return "جاري التشطيب";
+  return "لم يبدأ";
+}
+
+function orderReadyStatus(order: OrdersListRecord) {
+  const text = String(order.delivery_status || order.order_status || order.workStage || order.work_stage || "").trim();
+  return ["جاهز", "جاهز للإرسال", "تم التسليم", "completed", "READY", "DELIVERED"].includes(text) ? "جاهز" : "غير جاهز";
+}
+
+function listBadgeClass(value: string) {
+  if (value === "تم" || value === "جاهز") return "badge badge-green";
+  if (value === "جاري التشغيل" || value === "جاري التشطيب") return "badge badge-amber";
+  if (value === "غير جاهز") return "badge badge-red";
+  return "badge badge-gray";
+}
+
+function ordersListPrintRow(order: OrdersListRecord) {
+  return [
+    orderCreatedBy(order),
+    formatDateArabic(String(order.delivery_date || "")),
+    orderDisplayNumber(order),
+    orderDisplayClient(order),
+    orderDisplayType(order),
+    orderDisplayLogo(order),
+    orderDisplayQuantity(order),
+    normalizedOperationStatus(order.operation_status),
+    normalizedFinishingStatus(order.finishing_status),
+    orderReadyStatus(order),
+    valueText(order.client_message || order.message_text),
+  ];
+}
+
+function OrdersListRow({ order }: { order: OrdersListRecord }) {
+  const operationStatus = normalizedOperationStatus(order.operation_status);
+  const finishingStatus = normalizedFinishingStatus(order.finishing_status);
+  const readyStatus = orderReadyStatus(order);
+  return (
+    <tr>
+      <td>{orderCreatedBy(order)}</td>
+      <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
+      <td>{orderDisplayNumber(order)}</td>
+      <td>{orderDisplayClient(order)}</td>
+      <td>{orderDisplayType(order)}</td>
+      <td>{orderDisplayLogo(order)}</td>
+      <td>{orderDisplayQuantity(order)}</td>
+      <td><span className={listBadgeClass(operationStatus)}>{operationStatus}</span></td>
+      <td><span className={listBadgeClass(finishingStatus)}>{finishingStatus}</span></td>
+      <td><span className={listBadgeClass(readyStatus)}>{readyStatus}</span></td>
+      <td>{valueText(order.client_message || order.message_text)}</td>
+    </tr>
+  );
 }
 
 function Dashboard({ setView, canSeeFinancials }: { setView: (view: View) => void; canSeeFinancials: boolean }) {
@@ -1889,7 +2059,24 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
   const [qualityOnly, setQualityOnly] = useState(false);
   const [editing, setEditing] = useState<Order | null>(null);
   const [page, setPage] = useState(1);
+  const [dateSort, setDateSort] = useState<"none" | "asc" | "desc">("none");
   const canPrintOrders = hasPermission(session, queue === "worker" ? "operation.print" : queue === "finish" ? "finishing.print" : "orders.print");
+
+  function renderOrdersListHeaders() {
+    return ordersListHeaders.map((head) => (
+      <th key={head}>
+        {head === "تاريخ التسليم" ? (
+          <button
+            type="button"
+            className="table-sort-button"
+            onClick={() => setDateSort((current) => current === "asc" ? "desc" : "asc")}
+          >
+            {head}{dateSort === "asc" ? " ↑" : dateSort === "desc" ? " ↓" : ""}
+          </button>
+        ) : head}
+      </th>
+    ));
+  }
 
   useEffect(() => {
     if (!queue) return;
@@ -1906,13 +2093,18 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
     if (remoteLoading) return <LoadingPanel />;
     if (remoteError || !remoteOps) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
     const filteredRemote = remoteOps.orders.filter((order) => {
-      const text = `${order.order_number || ""} ${orderClientName(order)} ${order.phone || ""} ${order.service_type || order.order_type || ""}`.toLowerCase();
+      const text = `${order.order_number || ""} ${orderClientName(order)} ${order.phone || ""} ${order.service_type || order.order_type || ""} ${orderCreatedBy(order)}`.toLowerCase();
       return (!query || text.includes(query.toLowerCase()))
         && (!status || [order.operation_status, order.finishing_status, order.delivery_status].includes(status))
         && (!date || order.delivery_date === date);
     });
-    const pagesRemote = Math.max(1, Math.ceil(filteredRemote.length / 8));
-    const visibleRemote = filteredRemote.slice((page - 1) * 8, page * 8);
+    const sortedRemote = dateSort === "none" ? filteredRemote : [...filteredRemote].sort((a, b) => {
+      const first = new Date(String(a.delivery_date || "")).getTime() || 0;
+      const second = new Date(String(b.delivery_date || "")).getTime() || 0;
+      return dateSort === "asc" ? first - second : second - first;
+    });
+    const pagesRemote = Math.max(1, Math.ceil(sortedRemote.length / 8));
+    const visibleRemote = sortedRemote.slice((page - 1) * 8, page * 8);
     return (
       <div className="stack operation-screen">
         <section className="stats-grid">
@@ -1928,9 +2120,9 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
           <button className="primary-btn" onClick={() => setPage(1)}>بحث</button>
           <button className="ghost-btn" onClick={() => { setQuery(""); setStatus(""); setDate(""); }}>مسح الفلاتر</button>
         </section>
-        <section className="table-wrap accounts-table"><table><thead><tr>{["رقم الأوردر", "اسم العميل", "تاريخ التسليم", "عدد القطع", "حالة التشغيل", "حالة التشطيب", "حالة تسليم"].map((head) => <th key={head}>{head}</th>)}</tr></thead><tbody>
-          {visibleRemote.length === 0 && <EmptyRow colSpan={7} />}
-          {visibleRemote.map((order) => <tr key={order.id}><td>{order.order_number || "-"}</td><td>{orderClientName(order)}</td><td>{formatDateArabic(order.delivery_date)}</td><td>{formatNumber(orderPieces(order))}</td><td><span className="badge badge-blue">{order.operation_status || "-"}</span></td><td><span className="badge badge-green">{order.finishing_status || "-"}</span></td><td><span className="badge badge-amber">{order.delivery_status || "-"}</span></td></tr>)}
+        <section className="table-wrap accounts-table orders-list-table-wrap"><table className="orders-list-table"><thead><tr>{renderOrdersListHeaders()}</tr></thead><tbody>
+          {visibleRemote.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
+          {visibleRemote.map((order) => <OrdersListRow key={order.id} order={order} />)}
         </tbody></table></section>
         <div className="pagination"><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}>السابق</button><span>{page} / {pagesRemote}</span><button disabled={page === pagesRemote} onClick={() => setPage((value) => value + 1)}>التالي</button></div>
       </div>
@@ -1943,15 +2135,23 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
     return roleOrders(session.role, orders);
   }, [orders, queue, session.role]);
 
-  const filtered = useMemo(() => baseOrders.filter((order) => {
+  const filtered = useMemo(() => {
+    const rows = baseOrders.filter((order) => {
     const products = [order.order_type, ...(order.items || []).map((item) => `${item.product_name} ${item.details}`)].join(" ");
-    const text = `${order.order_number} ${order.client_name} ${order.client_code} ${order.phone} ${order.source_person} ${products}`.toLowerCase();
+    const text = `${order.order_number} ${order.client_name} ${order.client_code} ${order.phone} ${order.source_person} ${order.created_by} ${products}`.toLowerCase();
     return (!query || text.includes(query.toLowerCase()))
       && (!status || order.order_status === status)
       && (!date || order.delivery_date === date)
       && (!source || order.source_person === source)
       && (!qualityOnly || Boolean(order.quality_notes.trim()) || order.order_status === "مشكلة جودة");
-  }), [baseOrders, query, status, date, source, qualityOnly]);
+    });
+    if (dateSort === "none") return rows;
+    return [...rows].sort((a, b) => {
+      const first = new Date(a.delivery_date || "").getTime() || 0;
+      const second = new Date(b.delivery_date || "").getTime() || 0;
+      return dateSort === "asc" ? first - second : second - first;
+    });
+  }, [baseOrders, query, status, date, source, qualityOnly, dateSort]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
   const visible = filtered.slice((page - 1) * 8, page * 8);
@@ -2068,7 +2268,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
 
   function printAllOrders() {
     addAudit(session, "ORDERS_PRINTED", "orders", undefined, undefined, { count: filtered.length });
-    printDocument("طباعة كل الأوردرات", printableTable(["رقم الأوردر", "العميل", "الطرف", "تاريخ التسليم", "المنتج", "الإجمالي", "المدفوع", "المتبقي", "الحالة"], filtered.map((order) => [order.order_number, order.client_name, order.source_person, order.delivery_date, order.productName || order.order_type, order.total, order.paid, order.remaining, order.order_status])), session, "landscape");
+    printDocument("طباعة كل الأوردرات", printableTable([...ordersListHeaders], filtered.map(ordersListPrintRow)), session, "landscape");
   }
 
   return (
@@ -2084,64 +2284,14 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
           <label className="check"><input type="checkbox" checked={qualityOnly} onChange={(event) => setQualityOnly(event.target.checked)} /> مشاكل جودة</label>
         </div>
       </section>
-      <section className="table-wrap">
-        <table>
+      <section className="table-wrap orders-list-table-wrap">
+        <table className="orders-list-table">
           <thead>
-            <tr>
-              {["رقم الأوردر", "الطرف", "اسم العميل", "كود العميل", "رقم التليفون", "تاريخ التسليم", ...(canManageFinancials(session.role) ? ["السعر", "الإجمالي", "المدفوع", "باقي الحساب", "حساب قديم", "صافي حساب العميل"] : []), "النوع", "العدد", "اللوجو", "أمر الشغل", "الجودة", "تشغيل", "تشطيب", "قطع تالفة", "مرحلة", "الحالة", "الرسالة", "ملاحظات", "إجراءات"].map((head) => <th key={head}>{head}</th>)}
-            </tr>
+            <tr>{renderOrdersListHeaders()}</tr>
           </thead>
           <tbody>
-            {visible.map((order) => (
-              <tr key={order.id} className={daysUntil(order.delivery_date) < 0 && order.order_status !== "تم التسليم" ? "overdue" : ""}>
-                <td>{order.order_number}</td>
-                <td>{order.source_person}</td>
-                <td>{order.client_name}</td>
-                <td>{order.client_code}</td>
-                <td>{order.phone}</td>
-                <td>{order.delivery_date}</td>
-                {canManageFinancials(session.role) && <td>{order.price}</td>}
-                {canManageFinancials(session.role) && <td>{order.total}</td>}
-                {canManageFinancials(session.role) && <td>{order.paid}</td>}
-                {canManageFinancials(session.role) && <td>{order.remaining}</td>}
-                {canManageFinancials(session.role) && <td>{order.old_balance}</td>}
-                {canManageFinancials(session.role) && <td>{order.net_balance}</td>}
-                <td>{order.order_type}</td>
-                <td>{order.quantity}</td>
-                <td>{order.logo_image_url ? <a href={order.logo_image_url} target="_blank">فتح اللوجو</a> : order.logo_status}</td>
-                <td>{order.work_order_image_url ? <a href={order.work_order_image_url} target="_blank">فتح أمر الشغل</a> : "-"}</td>
-                <td>{order.quality_notes}</td>
-                <td>{order.operation_status}</td>
-                <td>{order.finishing_status}</td>
-                <td>{order.damaged_pieces}</td>
-                <td>{order.workflow_stage}</td>
-                <td><span className={statusClass(order.order_status)}>{order.order_status}</span></td>
-                <td>{order.client_message}</td>
-                <td>{order.notes}</td>
-                <td className="actions">
-                  {canPrintOrders && <button onClick={() => printOrder(order)}>طباعة</button>}
-                  {(session.role === "Master" || session.role === "Helper") && order.workStage === "new" && <button onClick={() => transition(order, "SENT_TO_WORKER", { workStage: "operation", order_status: "في التشغيل" })}>يروح التشغيل</button>}
-                  {(session.role === "Master" || session.role === "Worker") && order.workStage === "operation" && <button onClick={() => transition(order, "WORKER_STARTED", { workStage: "operation", operation_status: "بدأ التشغيل", order_status: "في التشغيل" })}>بدء التشغيل</button>}
-                  {(session.role === "Master" || session.role === "Worker") && order.workStage === "operation" && <button onClick={() => transition(order, "WORKER_DONE", { operation_status: "تم التشغيل" })}>تم التشغيل</button>}
-                  {(session.role === "Master" || session.role === "Worker") && order.workStage === "operation" && <button onClick={() => transition(order, "SENT_TO_FINISH", { workStage: "finishing", order_status: "في التشطيب" })}>يروح التشطيب</button>}
-                  {(session.role === "Master" || session.role === "Finish") && order.workStage === "finishing" && <button onClick={() => transition(order, "FINISH_STARTED", { workStage: "finishing", finishing_status: "بدأ التشطيب", order_status: "في التشطيب" })}>بدء التشطيب</button>}
-                  {(session.role === "Master" || session.role === "Finish") && order.workStage === "finishing" && <button onClick={() => transition(order, "FINISH_DONE", { finishing_status: "تم التشطيب" })}>تم التشطيب</button>}
-                  {(session.role === "Master" || session.role === "Finish") && order.workStage === "finishing" && <button onClick={() => transition(order, "READY", { workStage: "completed", order_status: "جاهز" })}>جاهز</button>}
-                  {(session.role === "Master" || session.role === "Helper") && order.order_status === "جاهز" && <button onClick={() => {
-                    const message = order.client_message || `أوردر ${order.order_number} جاهز للاستلام`;
-                    navigator.clipboard?.writeText(message).catch(() => undefined);
-                    transition(order, "CUSTOMER_MESSAGED", { order_status: "جاهز", client_message: message });
-                    alert(message);
-                  }}>رسالة للعميل</button>}
-                  {(session.role === "Master" || session.role === "Helper") && order.order_status !== "تم التسليم" && <button onClick={() => transition(order, "DELIVERED", { workStage: "completed", order_status: "تم التسليم" })}>تم التسليم</button>}
-                  {canEditOrder(session.role, order) && <button onClick={() => setEditing(order)}>تعديل</button>}
-                  <select value={order.order_status} onChange={(event) => changeStatus(order, event.target.value as OrderStatus)}>
-                    {statuses.map((item) => <option key={item}>{item}</option>)}
-                  </select>
-                  {canDeleteOrder(session.role) && <button className="danger-text" onClick={() => remove(order.id)}>حذف</button>}
-                </td>
-              </tr>
-            ))}
+            {visible.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
+            {visible.map((order) => <OrdersListRow key={order.id} order={order} />)}
           </tbody>
         </table>
       </section>
@@ -2785,6 +2935,31 @@ function SettingsPage({ session }: { session: Session }) {
     addAudit(session, action, "roles", target, undefined, details);
   }
 
+  async function resetAllPasswords() {
+    const typed = window.prompt("سيتم تغيير كلمة مرور جميع المستخدمين إلى 1234، وتسجيل خروجهم من جميع الأجهزة، وإجبارهم على تغيير كلمة المرور عند تسجيل الدخول القادم.\n\nاكتب RESET 1234 للتأكيد");
+    if (typed !== "RESET 1234") return setMessage("قيمة التأكيد غير صحيحة");
+    if (useRemoteSettings) {
+      try {
+        const payload = await settingsRequest<{ affectedUsers: number }>("/api/users/reset-all-passwords", {
+          method: "POST",
+          body: JSON.stringify({ confirmation: typed }),
+        });
+        setMessage(`تمت إعادة تعيين كلمات مرور ${payload.affectedUsers} مستخدم. يجب تسجيل الدخول مرة أخرى.`);
+        localStorage.removeItem(sessionKey);
+        window.setTimeout(() => window.location.reload(), 800);
+        return;
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر إعادة تعيين كلمات المرور");
+      }
+    }
+
+    const next = users.map((user) => user.status === "active" ? { ...user, password: "1234", mustChangePassword: true } : user);
+    persistUsers(next, "BULK_PASSWORD_RESET", undefined, { actingMaster: session.username, affectedUsers: next.filter((user) => user.status === "active").length, at: new Date().toISOString() });
+    localStorage.removeItem(sessionKey);
+    setMessage("تمت إعادة تعيين كلمات المرور. يجب تسجيل الدخول مرة أخرى.");
+    window.setTimeout(() => window.location.reload(), 800);
+  }
+
   async function createUser(event: React.FormEvent) {
     event.preventDefault();
     const username = userForm.username.trim().toLowerCase();
@@ -2962,6 +3137,7 @@ function SettingsPage({ session }: { session: Session }) {
     const target = roles.find((role) => role.id === roleId);
     if (!target) return;
     if (target.name === "Master" && patch.permissions && !masterProtectedPermissions.every((key) => patch.permissions?.includes(key))) return setMessage("لا يمكن إزالة صلاحيات الإدارة من دور Master");
+    if (target.name !== "Master" && patch.permissions?.includes("users.resetAllPasswords")) return setMessage("صلاحية إعادة تعيين كل كلمات المرور محمية لدور Master فقط");
     if (useRemoteSettings) {
       try {
         await settingsRequest(`/api/roles/${encodeURIComponent(roleId)}`, {
@@ -3014,6 +3190,13 @@ function SettingsPage({ session }: { session: Session }) {
         <div className="panel-head">
           <h2>الإعدادات</h2>
           <span className="badge badge-red">Master فقط</span>
+        </div>
+        <div className="settings-danger-zone">
+          <div>
+            <strong>إعادة تعيين كلمات مرور جميع المستخدمين</strong>
+            <p className="muted">سيتم ضبط كلمة المرور المؤقتة إلى 1234، وإجبار كل مستخدم نشط على تغييرها عند تسجيل الدخول القادم.</p>
+          </div>
+          {hasPermission(session, "users.resetAllPasswords") && <button type="button" className="primary-btn" onClick={resetAllPasswords}>إعادة تعيين كلمات مرور جميع المستخدمين</button>}
         </div>
         <div className="stats-grid">
           <StatCard title="عدد المستخدمين" value={users.length} icon={Users} />
@@ -3563,6 +3746,7 @@ function ZunionApp() {
   }
 
   if (!session) return <Login onLogin={setSession} />;
+  if (session.mustChangePassword) return <MandatoryPasswordChange session={session} onChanged={setSession} />;
   const routeAllowed = canAccessView(session, view);
 
   return (

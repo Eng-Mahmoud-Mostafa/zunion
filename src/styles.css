@@ -1839,6 +1839,88 @@ textarea::placeholder {
   color: #6b7280 !important;
 }
 
+.orders-list-table-wrap {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.orders-list-table {
+  min-width: 1180px !important;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.orders-list-table th,
+.orders-list-table td {
+  border: 1px solid #d9dee8;
+  height: 40px;
+  padding: 8px 10px;
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.orders-list-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8fafc !important;
+  color: #000 !important;
+  font-weight: 800;
+}
+
+.orders-list-table td {
+  font-weight: 700;
+}
+
+.table-sort-button {
+  border: 0;
+  background: transparent;
+  color: #000 !important;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+}
+
+.table-sort-button:hover,
+.table-sort-button:focus-visible {
+  color: var(--zunion-red) !important;
+  outline: none;
+}
+
+.orders-list-table .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 82px;
+  min-height: 28px;
+  border-radius: 8px;
+  font-weight: 800;
+}
+
+.settings-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 14px 0 18px;
+  padding: 16px;
+  border: 1px solid #fecdd3;
+  border-radius: 12px;
+  background: #fff1f2;
+}
+
+.settings-danger-zone strong {
+  color: #000 !important;
+  font-weight: 900;
+}
+
+.settings-danger-zone p {
+  margin: 6px 0 0;
+}
+
 button,
 button *,
 .ghost-btn,

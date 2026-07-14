@@ -275,7 +275,7 @@ with default_permissions(name, description, permissions) as (
       'operation.view','operation.update','operation.upload','operation.print',
       'finishing.view','finishing.update','finishing.upload','finishing.print',
       'reports.view','reports.print','import.export',
-      'users.view','users.create','users.edit','users.deactivate','users.delete','users.resetPassword',
+      'users.view','users.create','users.edit','users.deactivate','users.delete','users.resetPassword','users.resetAllPasswords',
       'roles.view','roles.create','roles.edit','roles.delete','permissions.manage','audit.view','settings.view'
     ]::text[]),
     ('Helper', 'Order and customer helper access', array[

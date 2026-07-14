@@ -97,6 +97,7 @@ type AppUser = {
   password_salt?: string;
   is_active?: boolean;
   must_change_password?: boolean;
+  token_version?: number;
 };
 
 const seededUsers: Record<string, AppUser & { password: string }> = {
@@ -151,6 +152,8 @@ function makeSession(user: AppUser, stayLoggedIn = true) {
       username: user.username,
       fullName: user.full_name,
       role: user.role,
+      mustChangePassword: user.must_change_password ?? false,
+      tokenVersion: user.token_version ?? 0,
       loggedInAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + maxAge).toISOString(),
     },
@@ -380,6 +383,49 @@ app.post("/api/auth/change-password", async (req, res) => {
   return res.json({ ok: true });
 });
 
+app.post("/api/auth/mandatory-change-password", async (req, res) => {
+  const session = loadAppSessionCookie(req) as { username?: string; role?: string } | null;
+  if (!session?.username) return res.status(401).json({ error: "يجب تسجيل الدخول أولا." });
+  const parsed = z.object({
+    currentPassword: z.string().min(1),
+    newPassword: z.string().min(8),
+    confirmPassword: z.string().min(8),
+  }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل" });
+  if (parsed.data.currentPassword !== "1234") return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
+  if (parsed.data.newPassword.trim() !== parsed.data.newPassword || !parsed.data.newPassword.trim()) return res.status(400).json({ error: "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل" });
+  if (parsed.data.newPassword === "1234") return res.status(400).json({ error: "لا يمكن استخدام كلمة المرور 1234 مرة أخرى" });
+  if (parsed.data.newPassword !== parsed.data.confirmPassword) return res.status(400).json({ error: "كلمتا المرور غير متطابقتين" });
+
+  const profile = await loadProfile(session.username);
+  if (!profile || profile.is_active === false) return res.status(404).json({ error: "المستخدم غير موجود." });
+  const validCurrent = profile.password_hash && profile.password_salt
+    ? profile.password_hash === passwordHash(parsed.data.currentPassword, profile.password_salt)
+    : seededUsers[session.username]?.password === parsed.data.currentPassword;
+  if (!validCurrent) return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
+
+  if (!config.supabaseUrl || !config.supabaseServiceKey || !profile.id) {
+    return res.status(500).json({ error: "تعذر حفظ كلمة المرور في Supabase." });
+  }
+
+  const salt = randomToken(12);
+  const tokenVersion = Date.now();
+  await supabaseRest(`users_profile?id=eq.${profile.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      password_salt: salt,
+      password_hash: passwordHash(parsed.data.newPassword, salt),
+      must_change_password: false,
+      token_version: tokenVersion,
+    }),
+  });
+  const updated = { ...profile, password_salt: salt, password_hash: passwordHash(parsed.data.newPassword, salt), must_change_password: false, token_version: tokenVersion };
+  const { session: nextSession, maxAge } = makeSession(updated, true);
+  res.cookie("zunion_app_session", JSON.stringify(nextSession), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
+  audit(null, "MANDATORY_PASSWORD_CHANGED", "auth", profile.id, undefined, { username: profile.username }).catch(() => undefined);
+  return res.json({ ok: true, session: nextSession });
+});
+
 app.post("/api/auth/logout", requireAuth, async (req, res) => {
   const token = req.cookies?.[config.cookieName];
   if (token) await query("delete from sessions where token_hash=$1", [hashSecret(token)]);
@@ -470,6 +516,38 @@ app.post("/api/users/:id/reset-password", requireAppPermission("users.resetPassw
   }
 });
 
+app.post("/api/users/reset-all-passwords", requireAppPermission("users.resetAllPasswords"), async (req, res) => {
+  const session = loadAppSessionCookie(req) as { username?: string; role?: string } | null;
+  const parsed = z.object({ confirmation: z.literal("RESET 1234") }).safeParse(req.body);
+  if (!session || session.role !== "Master") return res.status(403).json({ message: "غير مصرح لك بتنفيذ هذا الإجراء" });
+  if (!parsed.success) return res.status(400).json({ message: "قيمة التأكيد غير صحيحة" });
+  try {
+    const activeUsers = await supabaseRest<Array<{ id: string; username: string }>>("users_profile?is_active=eq.true&select=id,username");
+    const salt = randomToken(12);
+    const tokenVersion = Date.now();
+    await supabaseRest("users_profile?is_active=eq.true", {
+      method: "PATCH",
+      body: JSON.stringify({
+        password_salt: salt,
+        password_hash: passwordHash("1234", salt),
+        must_change_password: true,
+        token_version: tokenVersion,
+      }),
+    });
+    await audit(null, "BULK_PASSWORD_RESET", "users_profile", undefined, undefined, {
+      actingMaster: session.username,
+      affectedUsers: activeUsers.length,
+      at: new Date().toISOString(),
+      ip: req.ip,
+      userAgent: req.get("user-agent") || "",
+    });
+    res.clearCookie("zunion_app_session");
+    return res.json({ ok: true, affectedUsers: activeUsers.length });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر إعادة تعيين كلمات المرور", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.patch("/api/users/:id/status", requireAppPermission("users.deactivate"), async (req, res) => {
   const id = param(req.params.id);
   const parsed = z.object({ status: z.enum(["active", "inactive"]) }).safeParse(req.body);
@@ -508,6 +586,9 @@ app.post("/api/roles", requireAppPermission("roles.create"), async (req, res) =>
   if (!parsed.success) return res.status(400).json({ message: "بيانات الدور غير صحيحة", issues: parsed.error.issues });
   try {
     const permissions = validatePermissions(parsed.data.permissions);
+    if (parsed.data.name.trim() !== "Master" && permissions.includes("users.resetAllPasswords")) {
+      return res.status(403).json({ message: "صلاحية إعادة تعيين كل كلمات المرور محمية لدور Master فقط" });
+    }
     const rows = await supabaseRest("roles", { method: "POST", body: JSON.stringify([{ name: parsed.data.name.trim(), description: parsed.data.description, status: parsed.data.status, permissions, is_system_role: false }]) });
     await audit(null, "ROLE_CREATED", "roles", undefined, undefined, { name: parsed.data.name });
     return res.status(201).json({ role: rows });
@@ -525,7 +606,15 @@ app.patch("/api/roles/:id", requireAppPermission("roles.edit"), async (req, res)
     if (parsed.data.name) body.name = parsed.data.name.trim();
     if (typeof parsed.data.description === "string") body.description = parsed.data.description;
     if (parsed.data.status) body.status = parsed.data.status;
-    if (parsed.data.permissions) body.permissions = validatePermissions(parsed.data.permissions);
+    if (parsed.data.permissions) {
+      const permissions = validatePermissions(parsed.data.permissions);
+      const currentRows = await supabaseRest<Array<{ name: string }>>(`roles?id=eq.${encodeURIComponent(id)}&select=name&limit=1`);
+      const roleName = String(body.name || currentRows[0]?.name || "");
+      if (roleName !== "Master" && permissions.includes("users.resetAllPasswords")) {
+        return res.status(403).json({ message: "صلاحية إعادة تعيين كل كلمات المرور محمية لدور Master فقط" });
+      }
+      body.permissions = permissions;
+    }
     await supabaseRest(`roles?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
     await audit(null, parsed.data.permissions ? "ROLE_PERMISSIONS_CHANGED" : "ROLE_UPDATED", "roles", id, undefined, body);
     return res.json({ ok: true });
