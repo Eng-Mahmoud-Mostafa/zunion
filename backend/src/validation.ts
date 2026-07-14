@@ -81,6 +81,8 @@ export const customerSchema = z.object({
   name: z.string().min(1),
   code: z.string().optional().default(""),
   phone: z.string().min(1),
+  email: z.string().trim().toLowerCase().email().or(z.literal("")).optional().default(""),
+  address: z.string().trim().optional().default(""),
   source_party: z.string().optional().default(""),
   old_balance: z.coerce.number().default(0),
   notes: z.string().optional().default(""),

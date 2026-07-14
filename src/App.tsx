@@ -68,6 +68,8 @@ type Customer = {
   client_name: string;
   client_code: string;
   phone: string;
+  email?: string;
+  address?: string;
   old_balance: number;
   notes: string;
   created_at: string;
@@ -347,6 +349,48 @@ function addAudit(session: Session | null, action: string, entityType: string, e
     created_at: new Date().toISOString(),
   };
   localStorage.setItem(auditKey, JSON.stringify([entry, ...loadAudit()].slice(0, 500)));
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[char] || char));
+}
+
+function printDocument(title: string, body: string, session?: Session | null, orientation: "portrait" | "landscape" = "portrait") {
+  const popup = window.open("", "_blank", "width=1100,height=780");
+  const printedAt = new Date().toLocaleString("ar-EG");
+  const user = session?.fullName || session?.username || session?.email || "";
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title>
+    <style>
+      @page{size:${orientation};margin:12mm}
+      body{font-family:Tahoma,Arial,sans-serif;color:#111827;margin:0;direction:rtl}
+      .print-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #ed1c24;padding-bottom:12px;margin-bottom:16px}
+      .print-head img{width:190px;height:auto;object-fit:contain}
+      h1{margin:0;color:#bd141a;font-size:24px}.meta{color:#4b5563;font-size:12px;margin-top:6px}
+      table{width:100%;border-collapse:collapse;font-size:12px}thead{display:table-header-group}tr{break-inside:avoid}
+      th,td{border:1px solid #d1d5db;padding:7px;text-align:right;vertical-align:top}th{background:#f8fafc;color:#bd141a;font-weight:800}
+      .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.box{border:1px solid #d1d5db;border-radius:6px;padding:9px;break-inside:avoid}
+      .box strong{display:block;color:#bd141a;font-size:12px;margin-bottom:4px}.section-title{color:#bd141a;margin:18px 0 8px}
+      .toolbar{margin-bottom:12px}.toolbar button{background:#ed1c24;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
+      @media print{.toolbar{display:none}}
+    </style></head><body><div class="toolbar"><button onclick="window.print()">طباعة</button></div>
+    <div class="print-head"><div><h1>${escapeHtml(title)}</h1><div class="meta">نظام Zunion لإدارة الأوردرات</div><div class="meta">تاريخ الطباعة: ${escapeHtml(printedAt)}${user ? ` - المستخدم: ${escapeHtml(user)}` : ""}</div></div><img src="/zunion-logo.png" /></div>${body}</body></html>`;
+  if (!popup) {
+    window.print();
+    return;
+  }
+  popup.document.write(html);
+  popup.document.close();
+  popup.focus();
+  setTimeout(() => popup.print(), 250);
+}
+
+function printableTable(headers: string[], rows: Array<Array<unknown>>) {
+  if (!rows.length) return `<p>لا توجد بيانات للطباعة</p>`;
+  return `<table><thead><tr>${headers.map((head) => `<th>${escapeHtml(head)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function printableRecord(fields: Array<[string, unknown]>) {
+  return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`).join("")}</div>`;
 }
 
 const arabicColumns: Partial<Record<keyof Order, string>> = {
@@ -1581,10 +1625,16 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
     setTimeout(() => popup.print(), 300);
   }
 
+  function printAllOrders() {
+    addAudit(session, "ORDERS_PRINTED", "orders", undefined, undefined, { count: filtered.length });
+    printDocument("طباعة كل الأوردرات", printableTable(["رقم الأوردر", "العميل", "الطرف", "تاريخ التسليم", "المنتج", "الإجمالي", "المدفوع", "المتبقي", "الحالة"], filtered.map((order) => [order.order_number, order.client_name, order.source_person, order.delivery_date, order.productName || order.order_type, order.total, order.paid, order.remaining, order.order_status])), session, "landscape");
+  }
+
   return (
     <div className="stack">
       {editing && <OrderForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
       <section className="panel">
+        <div className="panel-head"><h2>متابعة الأوردرات</h2><button className="ghost-btn compact" type="button" onClick={printAllOrders}>طباعة الكل</button></div>
         <div className="filters">
           <input placeholder="بحث بالهاتف / رقم الأوردر / اسم العميل" value={query} onChange={(event) => setQuery(event.target.value)} />
           <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">كل الحالات</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select>
@@ -1712,13 +1762,13 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState("");
   const customers = useMemo(() => {
-    const grouped = new Map<string, { name: string; code: string; phone: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }>();
+    const grouped = new Map<string, { name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }>();
     for (const customer of savedCustomers) {
-      grouped.set(customer.client_code || customer.phone || customer.client_name, { name: customer.client_name, code: customer.client_code, phone: customer.phone, source: customer.source_person, old: customer.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: customer.old_balance, orders: [] });
+      grouped.set(customer.client_code || customer.phone || customer.client_name, { name: customer.client_name, code: customer.client_code, phone: customer.phone, email: customer.email || "", address: customer.address || "", source: customer.source_person, old: customer.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: customer.old_balance, orders: [] });
     }
     for (const order of orders) {
       const key = order.client_code || order.phone || order.client_name;
-      const current = grouped.get(key) ?? { name: order.client_name, code: order.client_code, phone: order.phone, source: order.source_person, old: order.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: 0, orders: [] };
+      const current = grouped.get(key) ?? { name: order.client_name, code: order.client_code, phone: order.phone, email: "", address: "", source: order.source_person, old: order.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: 0, orders: [] };
       current.totalOrders += 1;
       current.paid += order.paid;
       current.remaining += order.remaining;
@@ -1726,13 +1776,33 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
       current.orders.push(order);
       grouped.set(key, current);
     }
-    return Array.from(grouped.values()).filter((customer) => `${customer.name} ${customer.code} ${customer.phone}`.toLowerCase().includes(search.toLowerCase()));
+    return Array.from(grouped.values()).filter((customer) => `${customer.name} ${customer.code} ${customer.phone} ${customer.email} ${customer.address}`.toLowerCase().includes(search.toLowerCase()));
   }, [orders, savedCustomers, search]);
 
   function updateOldBalance(code: string, value: number) {
     const before = orders.filter((order) => order.client_code === code);
     setOrders((current) => current.map((order) => order.client_code === code ? calculate({ ...order, old_balance: value, updated_at: new Date().toISOString() }) : order));
     addAudit(session, "CUSTOMER_BALANCE_UPDATED", "customers", code, before, { old_balance: value });
+  }
+
+  function printCustomer(customer: { name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }) {
+    printDocument(`طباعة بيانات العميل ${customer.name}`, printableRecord([
+      ["اسم العميل", customer.name],
+      ["كود العميل", customer.code],
+      ["رقم التليفون", customer.phone],
+      ["البريد الإلكتروني", customer.email],
+      ["العنوان", customer.address],
+      ["الطرف", customer.source],
+      ["حساب قديم", customer.old],
+      ["إجمالي الأوردرات", customer.totalOrders],
+      ["إجمالي المدفوع", customer.paid],
+      ["المتبقي", customer.remaining],
+      ["صافي الحساب", customer.net],
+    ]), session);
+  }
+
+  function printAllCustomers() {
+    printDocument("طباعة كل العملاء", printableTable(["اسم العميل", "الكود", "الهاتف", "البريد الإلكتروني", "العنوان", "الطرف", "إجمالي الأوردرات", "المتبقي"], customers.map((customer) => [customer.name, customer.code, customer.phone, customer.email, customer.address, customer.source, customer.totalOrders, customer.remaining])), session, "landscape");
   }
 
   if (session.role !== "Master" && session.role !== "Helper") {
@@ -1743,11 +1813,14 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
     <section className="panel">
       <div className="panel-head">
         <h2>حسابات العملاء</h2>
-        <input placeholder="بحث باسم العميل / الكود / الهاتف" value={search} onChange={(event) => setSearch(event.target.value)} />
+        <div className="inline-actions">
+          <button className="ghost-btn compact" type="button" onClick={printAllCustomers}>طباعة الكل</button>
+          <input placeholder="بحث باسم العميل / الكود / الهاتف / البريد / العنوان" value={search} onChange={(event) => setSearch(event.target.value)} />
+        </div>
       </div>
       <div className="table-wrap accounts-table">
         <table>
-          <thead><tr>{["اسم العميل", "الكود", "الهاتف", "الطرف", "حساب قديم", "إجمالي الأوردرات", "إجمالي المدفوع", "المتبقي", "صافي الحساب", "تاريخ الأوردرات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <thead><tr>{["اسم العميل", "الكود", "الهاتف", "البريد الإلكتروني", "العنوان", "الطرف", "حساب قديم", "إجمالي الأوردرات", "إجمالي المدفوع", "المتبقي", "صافي الحساب", "الإجراءات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
           <tbody>
             {customers.map((customer) => (
               <Fragment key={customer.code || customer.phone || customer.name}>
@@ -1755,15 +1828,17 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
                   <td>{customer.name}</td>
                   <td>{customer.code}</td>
                   <td>{customer.phone}</td>
+                  <td>{customer.email || "-"}</td>
+                  <td>{customer.address || "-"}</td>
                   <td>{customer.source}</td>
                   <td>{session.role === "Master" ? <input type="number" value={customer.old} onChange={(event) => updateOldBalance(customer.code, Number(event.target.value))} /> : customer.old}</td>
                   <td>{customer.totalOrders}</td>
                   <td>{customer.paid}</td>
                   <td>{customer.remaining}</td>
                   <td>{customer.net}</td>
-                  <td><button className="ghost-btn compact" onClick={() => setExpanded(expanded === customer.code ? "" : customer.code)}>عرض</button></td>
+                  <td className="actions"><button className="ghost-btn compact" onClick={() => setExpanded(expanded === customer.code ? "" : customer.code)}>عرض</button><button className="ghost-btn compact" type="button" onClick={() => printCustomer(customer)}>طباعة</button></td>
                 </tr>
-                {expanded === customer.code && <tr><td colSpan={10}><div className="history-list">{customer.orders.map((order) => <span key={order.id}>#{order.order_number} - {order.order_type} - {order.order_status}</span>)}</div></td></tr>}
+                {expanded === customer.code && <tr><td colSpan={12}><div className="history-list">{customer.orders.map((order) => <span key={order.id}>#{order.order_number} - {order.order_type} - {order.order_status}</span>)}</div></td></tr>}
               </Fragment>
             ))}
           </tbody>
@@ -1778,15 +1853,26 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
   const [customParty, setCustomParty] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
+  const [error, setError] = useState("");
   const selectedParty = party === "أخرى" ? customParty : party;
   const code = nextCustomerCode(customers, selectedParty || party);
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    const customer: Customer = { id: createId(), source_person: selectedParty, client_name: name, client_code: code, phone, old_balance: 0, notes: "", created_at: new Date().toISOString() };
+    const normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setError("البريد الإلكتروني غير صحيح");
+      return;
+    }
+    setError("");
+    const customer: Customer = { id: createId(), source_person: selectedParty, client_name: name.trim(), client_code: code, phone: phone.trim(), email: normalizedEmail, address: address.trim(), old_balance: 0, notes: "", created_at: new Date().toISOString() };
     setCustomers((current) => [customer, ...current]);
     addAudit(session, "CUSTOMER_CREATED", "customers", customer.id, undefined, customer);
     setName("");
     setPhone("");
+    setEmail("");
+    setAddress("");
   }
   return (
     <form className="panel order-form" onSubmit={submit}>
@@ -1797,7 +1883,10 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
         <Field label="اسم العميل" value={name} onChange={setName} />
         <ReadonlyText label="كود العميل" value={code} />
         <Field label="تليفون" value={phone} onChange={setPhone} />
+        <Field label="البريد الإلكتروني" type="email" value={email} onChange={setEmail} />
+        <Field label="العنوان" value={address} onChange={setAddress} />
       </div>
+      <ErrorText message={error} />
       <button className="primary-btn">حفظ العميل</button>
     </form>
   );
@@ -1897,6 +1986,37 @@ function FinancePageModern({ session }: { session: Session }) {
     }
   }
 
+  function printTransaction(record: DbTransaction) {
+    printDocument("طباعة معاملة", printableRecord([
+      ["التاريخ", formatDateArabic(record.date)],
+      ["نوع المصروف", record.expense_type || record.transaction_type || record.kind || "-"],
+      ["البيان", record.description || "-"],
+      ["المبلغ", formatMoney(record.amount ?? record.value ?? record.total)],
+      ["الحساب / الوجهة", record.account_destination || "-"],
+      ["اسم العميل", record.customer_name || "-"],
+      ["رقم التفصيل", record.detail_number || "-"],
+      ["المضاف", record.added_by || "-"],
+      ["تاريخ الإضافة", formatDateArabic(record.created_at)],
+    ]), session);
+  }
+
+  function printAllTransactions() {
+    if (!data) return;
+    printDocument("طباعة المعاملات المالية", [
+      printableRecord([
+        ["الشهر", month],
+        ["الحساب / الوجهة", account || "كل الحسابات"],
+        ["إجمالي الإيرادات", formatMoney(data.incomeTotal)],
+        ["إجمالي المصروفات", formatMoney(data.expenseTotal)],
+        ["الصافي", formatMoney(data.netTotal)],
+      ]),
+      printableTable(
+        ["التاريخ", "نوع المصروف", "البيان", "المبلغ", "الحساب / الوجهة", "اسم العميل", "رقم التفصيل", "المضاف", "تاريخ الإضافة"],
+        data.transactions.map((record) => [formatDateArabic(record.date), record.expense_type || record.transaction_type || record.kind || "-", record.description || "-", formatMoney(record.amount ?? record.value ?? record.total), record.account_destination || "-", record.customer_name || "-", record.detail_number || "-", record.added_by || "-", formatDateArabic(record.created_at)])
+      ),
+    ].join(""), session, "landscape");
+  }
+
   if (loading) return <LoadingPanel />;
   if (!data) return <ErrorPanel message={error || "تعذر تحميل البيانات."} />;
 
@@ -1978,15 +2098,16 @@ function FinancePageModern({ session }: { session: Session }) {
 
       <section className="finance-toolbar">
         <button className="primary-btn compact" type="button" onClick={() => setAccount("")}>بحث</button>
+        <button className="ghost-btn compact" type="button" onClick={printAllTransactions}>طباعة الكل</button>
         {["سامح", "احمد", "شيكات", "بنك"].map((name) => <button key={name} className={account === name ? "account-filter active" : "account-filter"} onClick={() => setAccount(account === name ? "" : name)}>{name}</button>)}
       </section>
 
       <section className="table-wrap accounts-table finance-table">
         <table>
-          <thead><tr>{["التاريخ", "نوع المصروف", "البيان", "المبلغ", "الحساب / الوجهة", "اسم العميل", "رقم التفصيل", "المضاف", "التاريخ"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <thead><tr>{["التاريخ", "نوع المصروف", "البيان", "المبلغ", "الحساب / الوجهة", "اسم العميل", "رقم التفصيل", "المضاف", "التاريخ", "الإجراءات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
           <tbody>
-            {data.transactions.length === 0 && <EmptyRow colSpan={9} />}
-            {data.transactions.map((record) => <tr key={record.id}><td>{formatDateArabic(record.date)}</td><td>{record.expense_type || record.transaction_type || record.kind || "-"}</td><td>{record.description || "-"}</td><td className={String(record.transaction_type || record.kind).includes("مصروف") ? "danger-text" : ""}>{formatMoney(record.amount ?? record.value ?? record.total)}</td><td><span className="mini-pill">{record.account_destination || "-"}</span></td><td>{record.customer_name || "-"}</td><td>{record.detail_number || "-"}</td><td>{record.added_by || "-"}</td><td>{formatDateArabic(record.created_at)}</td></tr>)}
+            {data.transactions.length === 0 && <EmptyRow colSpan={10} />}
+            {data.transactions.map((record) => <tr key={record.id}><td>{formatDateArabic(record.date)}</td><td>{record.expense_type || record.transaction_type || record.kind || "-"}</td><td>{record.description || "-"}</td><td className={String(record.transaction_type || record.kind).includes("مصروف") ? "danger-text" : ""}>{formatMoney(record.amount ?? record.value ?? record.total)}</td><td><span className="mini-pill">{record.account_destination || "-"}</span></td><td>{record.customer_name || "-"}</td><td>{record.detail_number || "-"}</td><td>{record.added_by || "-"}</td><td>{formatDateArabic(record.created_at)}</td><td><button className="ghost-btn compact" type="button" onClick={() => printTransaction(record)}>طباعة</button></td></tr>)}
           </tbody>
         </table>
       </section>
@@ -2020,10 +2141,26 @@ function ReportsPage() {
   if (loading) return <LoadingPanel />;
   if (error || !data) return <ErrorPanel message={error || "تعذر تحميل البيانات."} />;
 
+  function printReports() {
+    if (!data) return;
+    printDocument("طباعة التقارير", [
+      printableRecord([
+        ["الشهر", month],
+        ["الإيرادات", formatMoney(data.incomeTotal)],
+        ["المصروفات", formatMoney(data.expenseTotal)],
+        ["الصافي", formatMoney(data.netTotal)],
+      ]),
+      printableTable(
+        ["الشهر", "إيرادات", "مصروفات", "صافي"],
+        data.monthlyRows.map((row) => [row.month, formatMoney(row.income), formatMoney(row.expense), formatMoney(row.net)])
+      ),
+    ].join(""), undefined, "landscape");
+  }
+
   return (
     <div className="stack">
       <section className="panel">
-        <div className="panel-head"><h2>التقارير</h2><input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></div>
+        <div className="panel-head"><h2>التقارير</h2><div className="inline-actions"><button className="ghost-btn compact" type="button" onClick={printReports}>طباعة الكل</button><input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></div></div>
         <div className="stats-grid"><StatCard title="الإيرادات" value={formatMoney(data.incomeTotal)} /><StatCard title="المصروفات" value={formatMoney(data.expenseTotal)} tone="danger" /><StatCard title="الصافي" value={formatMoney(data.netTotal)} /></div>
       </section>
       <section className="panel dashboard-grid">
@@ -2295,10 +2432,32 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
     addAudit(session, "PRODUCT_STATUS_CHANGED", "products", product.id, { status: normalized.status }, { status: next.status });
   }
 
+  function printProduct(product: Product) {
+    const normalized = normalizeProduct(product);
+    printDocument(`طباعة بيانات المنتج ${normalized.name}`, printableRecord([
+      ["اسم المنتج", normalized.name],
+      ["التفاصيل", normalized.details],
+      ["مكان اللوجو", normalized.logoPlacement],
+      ["العدد الافتراضي", normalized.defaultQuantity],
+      ["السعر", formatMoney(normalized.defaultPrice)],
+      ["الإجمالي", formatMoney(normalized.defaultTotal)],
+      ["الجودة", normalized.quality],
+      ["الحالة", normalized.status === "active" ? "نشط" : "غير نشط"],
+      ["تاريخ الإضافة", formatDateArabic(normalized.created_at)],
+    ]), session);
+  }
+
+  function printAllProducts() {
+    printDocument("طباعة كل المنتجات", printableTable(
+      ["اسم المنتج", "التفاصيل", "مكان اللوجو", "العدد", "السعر", "الإجمالي", "الجودة", "الحالة", "تاريخ الإضافة"],
+      normalizedProducts.map((product) => [product.name, product.details, product.logoPlacement, product.defaultQuantity, formatMoney(product.defaultPrice), formatMoney(product.defaultTotal), product.quality, product.status === "active" ? "نشط" : "غير نشط", formatDateArabic(product.created_at)])
+    ), session, "landscape");
+  }
+
   return (
     <div className="stack">
       <section className="panel">
-        <div className="panel-head"><h2>إضافة منتج</h2></div>
+        <div className="panel-head"><h2>إضافة منتج</h2><button className="ghost-btn compact" type="button" onClick={printAllProducts}>طباعة الكل</button></div>
         <form className="order-form compact-form" onSubmit={save}>
           <div className="form-grid">
             <label>اسم المنتج<input value={form.name} onChange={(event) => setProduct("name", event.target.value)} /><ErrorText message={errors.name} /></label>
@@ -2334,7 +2493,7 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
               <td><span className={product.status === "active" ? "badge badge-green" : "badge badge-amber"}>{product.status === "active" ? "نشط" : "غير نشط"}</span></td>
               <td>{product.productImage ? <img className="table-thumb" src={product.productImage} alt={product.name} /> : "لا توجد صورة"}</td>
               <td>{formatDateArabic(product.created_at)}</td>
-              <td className="actions"><button onClick={() => editProduct(product)}>تعديل</button><button onClick={() => toggleStatus(product)}>{product.status === "active" ? "تعطيل" : "تنشيط"}</button></td>
+              <td className="actions"><button onClick={() => editProduct(product)}>تعديل</button><button onClick={() => toggleStatus(product)}>{product.status === "active" ? "تعطيل" : "تنشيط"}</button><button type="button" onClick={() => printProduct(product)}>طباعة</button></td>
             </tr>)}
           </tbody>
         </table>

@@ -4,6 +4,9 @@
 
 :root {
   --red: #ed1c24;
+  --zunion-red: #ed1c24;
+  --zunion-red-dark: #bd141a;
+  --zunion-red-soft: #fb7185;
   --red-dark: #bd141a;
   --dark: #27272a;
   --muted: #71717a;
@@ -1220,6 +1223,155 @@ tr:nth-child(even) td {
 
 .finance-screen .stats-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.inline-actions input,
+.inline-actions select {
+  min-width: min(360px, 100%);
+}
+
+body,
+.content,
+.topbar,
+.topbar h1,
+.topbar p,
+.panel,
+.panel h2,
+.panel h3,
+.panel-head h2,
+.panel-head h3,
+.login-card,
+.login-card h1,
+.login-card p,
+.login-card label,
+.order-form label,
+label,
+input,
+select,
+textarea,
+td,
+.muted,
+.empty-cell,
+.mini-pill,
+.field-error,
+.notice,
+.success-note,
+.stat-card,
+.stat-card span,
+.stat-card strong,
+.donut-card,
+.history-list,
+.pagination,
+.filters,
+.finance-title,
+.finance-title span,
+.finance-form,
+.finance-toolbar,
+.account-filter,
+.sidebar-menu,
+.sidebar-subitem {
+  color: var(--zunion-red);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--zunion-red-soft);
+  opacity: .75;
+}
+
+.primary-btn,
+.success-btn,
+.primary-btn *,
+.success-btn *,
+.sidebar button,
+.sidebar button *,
+.sidebar-parent,
+.sidebar-parent *,
+.sidebar-subitem.active,
+.sidebar-subitem.active *,
+.sidebar-logout,
+.sidebar-logout *,
+.account-filter.active,
+.account-filter.active *,
+th {
+  color: #fff;
+}
+
+.ghost-btn,
+.ghost-btn *,
+.account-buttons button,
+.actions button {
+  color: var(--zunion-red);
+}
+
+.primary-btn:disabled,
+.success-btn:disabled,
+button:disabled {
+  color: #ffe4e6;
+  cursor: not-allowed;
+}
+
+@media print {
+  body {
+    color: #111827;
+    background: #fff;
+  }
+
+  .sidebar,
+  .topbar,
+  .sidebar-overlay,
+  .mobile-menu-btn,
+  .filters,
+  .actions,
+  .pagination,
+  button,
+  input,
+  select,
+  textarea,
+  .no-print {
+    display: none !important;
+  }
+
+  .app,
+  .content,
+  .main-content,
+  .panel,
+  .table-wrap {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+
+  table {
+    min-width: 0 !important;
+    width: 100% !important;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    color: #111827 !important;
+    background: #fff !important;
+    border: 1px solid #cbd5e1 !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 }
 
 .account-buttons {

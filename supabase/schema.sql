@@ -18,10 +18,14 @@ create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(),
   name text,
   phone text,
+  email text default '',
   address text,
   notes text,
   created_at timestamptz not null default now()
 );
+
+alter table public.customers add column if not exists email text default '';
+alter table public.customers add column if not exists address text default '';
 
 create table if not exists public.products (
   id uuid primary key default gen_random_uuid(),

@@ -514,7 +514,7 @@ app.get("/api/orders/:id/files/:fileId", requireAuth, async (req, res) => {
 app.get("/api/customers", requireAuth, requireRole("Master", "Helper"), async (req, res) => {
   const search = String(req.query.search ?? "");
   const params = search ? [`%${search}%`] : [];
-  const where = search ? "where c.name ilike $1 or c.phone ilike $1 or c.code ilike $1" : "";
+  const where = search ? "where c.name ilike $1 or c.phone ilike $1 or c.code ilike $1 or c.email ilike $1 or c.address ilike $1" : "";
   const { rows } = await query(
     `select c.*, count(o.id)::int as total_orders, coalesce(sum(o.paid),0) as total_paid,
      coalesce(sum(o.remaining),0) as remaining_balance, c.old_balance + coalesce(sum(o.remaining),0) as net_account
@@ -530,8 +530,8 @@ app.post("/api/customers", requireAuth, requireRole("Master", "Helper"), async (
   if (!parsed.success) return res.status(400).json({ message: "Invalid customer", issues: parsed.error.issues });
   const customer = parsed.data;
   const { rows } = await query<{ id: string }>(
-    "insert into customers (name, code, phone, source_party, old_balance, notes) values ($1,$2,$3,$4,$5,$6) returning id",
-    [customer.name, customer.code, customer.phone, customer.source_party, customer.old_balance, customer.notes],
+    "insert into customers (name, code, phone, email, address, source_party, old_balance, notes) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id",
+    [customer.name, customer.code, customer.phone, customer.email, customer.address, customer.source_party, customer.old_balance, customer.notes],
   );
   await audit(req.user!, "CUSTOMER_CREATED", "customers", rows[0].id, undefined, customer);
   res.status(201).json(rows[0]);
@@ -549,7 +549,7 @@ app.put("/api/customers/:id", requireAuth, requireRole("Master"), async (req, re
   const parsed = customerSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid customer", issues: parsed.error.issues });
   const old = await query("select * from customers where id=$1", [id]);
-  await query("update customers set name=$1, code=$2, phone=$3, source_party=$4, old_balance=$5, notes=$6 where id=$7", [parsed.data.name, parsed.data.code, parsed.data.phone, parsed.data.source_party, parsed.data.old_balance, parsed.data.notes, id]);
+  await query("update customers set name=$1, code=$2, phone=$3, email=$4, address=$5, source_party=$6, old_balance=$7, notes=$8 where id=$9", [parsed.data.name, parsed.data.code, parsed.data.phone, parsed.data.email, parsed.data.address, parsed.data.source_party, parsed.data.old_balance, parsed.data.notes, id]);
   await audit(req.user!, "CUSTOMER_BALANCE_UPDATED", "customers", id, old.rows[0], parsed.data);
   res.json({ ok: true });
 });
