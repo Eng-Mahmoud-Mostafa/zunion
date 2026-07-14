@@ -373,11 +373,6 @@ textarea:focus {
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
-.order-materials-section {
-  width: min(280px, 100%);
-  margin-left: auto;
-}
-
 .operation-item-row {
   grid-template-columns: minmax(220px, 1.2fr) auto minmax(220px, 1fr) minmax(220px, 1fr) auto;
 }
@@ -417,16 +412,24 @@ textarea:focus {
   align-items: center;
 }
 
-.hidden-file-input {
-  display: none;
-}
-
-.image-pick-btn {
+.image-paste-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   min-height: 32px;
+}
+
+.image-empty-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: var(--muted) !important;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .image-preview-box {
@@ -452,6 +455,30 @@ textarea:focus {
 .form-grid.two {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 12px;
+}
+
+.product-form-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.product-form-grid > label:nth-child(1),
+.product-form-grid > label:nth-child(2) {
+  grid-column: span 3;
+}
+
+.product-form-grid > label:nth-child(3),
+.product-form-grid > label:nth-child(4),
+.product-form-grid > label:nth-child(5) {
+  grid-column: span 2;
+}
+
+.product-form-grid > .product-image-field {
+  grid-column: 1 / -1;
+}
+
+.product-image-field small {
+  color: var(--zunion-red);
+  font-weight: 800;
 }
 
 .order-form {
@@ -1586,6 +1613,87 @@ body,
 
 body {
   background: var(--bg);
+  min-width: 0;
+}
+
+.panel,
+.card,
+.modal,
+.table-wrap,
+.table-wrapper,
+.form-grid,
+.settings-form,
+.role-card,
+.topbar,
+.inline-actions,
+.email-container,
+.email-cell,
+.account-email {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.email-text {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+  text-align: left;
+  color: var(--zunion-red) !important;
+  unicode-bidi: plaintext;
+}
+
+.email-text--wrap {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.email-cell {
+  width: 190px;
+  max-width: 220px;
+  overflow: hidden;
+}
+
+.email-cell > * {
+  min-width: 0;
+}
+
+.account-email {
+  display: inline-block;
+  width: auto;
+  max-width: 180px;
+  vertical-align: middle;
+}
+
+input[type="email"] {
+  direction: ltr;
+  text-align: left;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media print {
+  .email-text {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+    direction: ltr;
+    text-align: left;
+  }
+
+  .email-cell {
+    width: auto;
+    max-width: none;
+  }
 }
 
 .app {
@@ -1831,6 +1939,13 @@ td *,
 .mini-pill,
 .record-value,
 .data-value {
+  color: var(--zunion-red) !important;
+}
+
+.email-text,
+.topbar .email-text,
+.panel .email-text,
+.table-wrap .email-text {
   color: var(--zunion-red) !important;
 }
 
@@ -2593,6 +2708,179 @@ button *,
     display: flex;
     flex-direction: row !important;
     align-items: center !important;
+  }
+}
+
+@media (max-width: 1200px) {
+  .product-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .product-form-grid > label {
+    grid-column: span 1 !important;
+  }
+
+  .product-form-grid > .product-image-field {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .product-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .product-form-grid > label,
+  .product-form-grid > .product-image-field {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+/* Compact controls and English-digit presentation override. */
+body,
+input,
+select,
+textarea,
+button,
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  padding: 16px !important;
+}
+
+.form-section {
+  padding: 14px !important;
+  gap: 10px;
+}
+
+.form-section h3 {
+  font-size: 18px;
+}
+
+.order-form,
+.stack {
+  gap: 12px;
+}
+
+.form-grid,
+.filters,
+.form-grid.two,
+.line-item,
+.finance-form,
+.order-basic-row,
+.order-finance-row,
+.operation-item-row {
+  gap: 10px !important;
+}
+
+.login-card label,
+.order-form label,
+label {
+  gap: 5px;
+  font-size: 13px;
+}
+
+input,
+select,
+textarea {
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 6px 10px !important;
+  font-size: 14px !important;
+  border-radius: 8px !important;
+}
+
+textarea {
+  height: auto !important;
+  min-height: 76px !important;
+  padding-top: 8px !important;
+}
+
+.primary-btn,
+.ghost-btn,
+.actions button,
+.actions select,
+.pagination button {
+  min-height: 36px !important;
+  height: 36px;
+  padding: 6px 12px !important;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.compact,
+.ghost-btn.compact,
+.primary-btn.compact {
+  min-height: 32px !important;
+  height: 32px;
+  padding: 5px 10px !important;
+  font-size: 12px;
+}
+
+.stat-card {
+  padding: 14px 16px !important;
+}
+
+.quick-grid button {
+  min-height: 72px !important;
+  padding: 12px 14px !important;
+  font-size: 15px;
+}
+
+.image-clipboard-field {
+  padding: 8px !important;
+  gap: 6px;
+}
+
+.image-field-actions {
+  gap: 6px;
+}
+
+.image-paste-btn,
+.image-empty-state {
+  min-height: 30px !important;
+}
+
+.image-preview-box {
+  padding: 6px;
+}
+
+.upload-preview {
+  max-height: 140px;
+  margin-top: 6px;
+}
+
+th,
+td {
+  height: 38px !important;
+  padding: 7px 8px !important;
+  font-size: 12.5px;
+}
+
+.badge {
+  padding: 3px 8px;
+  font-size: 11.5px;
+}
+
+.numeric-value,
+input[type="number"],
+input[type="tel"],
+input[type="date"] {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 768px) {
+  input,
+  select,
+  textarea,
+  .primary-btn,
+  .ghost-btn,
+  .actions button,
+  .pagination button {
+    min-height: 40px !important;
+    height: 40px;
   }
 }
 

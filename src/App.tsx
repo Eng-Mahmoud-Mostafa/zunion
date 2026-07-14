@@ -1,4 +1,4 @@
-import { Component, Fragment, useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
 import {
   ArrowDownCircle,
@@ -29,7 +29,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
-import { formatDateArabic, formatMoney, formatNumber } from "./utils/formatters";
+import { formatDateArabic, formatDateTimeEnglish, formatMoney, formatNumber, normalizeDigitsToEnglish } from "./utils/formatters";
 import {
   getDashboardStats,
   getMonthlyFinancialStats,
@@ -153,7 +153,7 @@ type Order = {
   paymentMethod?: string;
   customPaymentMethod?: string;
   customParty?: string;
-  materialsStatus?: "available" | "unavailable" | "";
+  materialsStatus?: string;
   operationMethods?: string[];
   operationItems?: OperationItem[];
   logoFileName?: string;
@@ -482,10 +482,6 @@ const paymentMethods = [
   { value: "deferred", label: "آجل" },
   { value: "other", label: "أخرى" },
 ] as const;
-const materialsOptions = [
-  { value: "available", label: "موجود" },
-  { value: "unavailable", label: "غير موجود" },
-] as const;
 const workStageLabels: Record<WorkStage, string> = {
   new: "أوردر جديد",
   operation: "التشغيل",
@@ -594,13 +590,89 @@ function addAudit(session: Session | null, action: string, entityType: string, e
 }
 
 function escapeHtml(value: unknown) {
-  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[char] || char));
+  return normalizeDigitsToEnglish(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[char] || char));
+}
+
+function isEmailValue(value: unknown) {
+  return typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function EmailText({ email, mode = "truncate", className = "", showTooltip = true }: { email?: string | null; mode?: "truncate" | "wrap"; className?: string; showTooltip?: boolean }) {
+  const value = String(email || "").trim();
+  return (
+    <span className={`email-text ${mode === "wrap" ? "email-text--wrap" : ""} ${className}`.trim()} title={showTooltip ? value : undefined}>
+      {value || "—"}
+    </span>
+  );
+}
+
+function printableCell(value: unknown) {
+  const escaped = escapeHtml(value);
+  return isEmailValue(value) ? `<span class="email-text">${escaped}</span>` : escaped;
+}
+
+const clipboardImageTypes = ["image/png", "image/jpeg", "image/webp"];
+
+function safeClipboardFileName(type: string) {
+  const extension = type.includes("jpeg") ? "jpg" : type.includes("webp") ? "webp" : "png";
+  const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+  return `clipboard-image-${stamp}.${extension}`;
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("حدث خطأ أثناء لصق الصورة"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function normalizeInputDigits(event: React.FormEvent<HTMLElement>) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+  const nextValue = normalizeDigitsToEnglish(target.value);
+  if (nextValue === target.value) return;
+  const start = target.selectionStart;
+  const end = target.selectionEnd;
+  target.value = nextValue;
+  if (start !== null && end !== null) {
+    window.requestAnimationFrame(() => {
+      try {
+        target.setSelectionRange(start, end);
+      } catch {
+        // Some input types, such as date, do not support selection ranges.
+      }
+    });
+  }
+}
+
+async function readClipboardImageFile() {
+  if (!navigator.clipboard?.read) throw new Error("متصفحك لا يدعم لصق الصور من الحافظة");
+  try {
+    const clipboardItems = await navigator.clipboard.read();
+    for (const item of clipboardItems) {
+      const imageType = item.types.find((type) => clipboardImageTypes.includes(type));
+      if (imageType) {
+        const blob = await item.getType(imageType);
+        return new File([blob], safeClipboardFileName(imageType), { type: imageType });
+      }
+    }
+    throw new Error("لا توجد صورة في الحافظة");
+  } catch (error) {
+    if (error instanceof Error && ["لا توجد صورة في الحافظة", "متصفحك لا يدعم لصق الصور من الحافظة"].includes(error.message)) throw error;
+    if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError")) {
+      throw new Error("تعذر الوصول إلى الحافظة. اسمح للموقع بقراءة الحافظة ثم حاول مرة أخرى");
+    }
+    throw new Error("حدث خطأ أثناء لصق الصورة");
+  }
 }
 
 function printDocument(title: string, body: string, session?: Session | null, orientation: "portrait" | "landscape" = "portrait") {
   const popup = window.open("", "_blank", "width=1100,height=780");
-  const printedAt = new Date().toLocaleString("ar-EG");
+  const printedAt = formatDateTimeEnglish(new Date());
   const user = session?.fullName || session?.username || session?.email || "";
+  const userHtml = isEmailValue(user) ? printableCell(user) : escapeHtml(user);
   const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title>
     <style>
       @page{size:${orientation};margin:12mm}
@@ -608,14 +680,15 @@ function printDocument(title: string, body: string, session?: Session | null, or
       .print-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #ed1c24;padding-bottom:12px;margin-bottom:16px}
       .print-head img{width:190px;height:auto;object-fit:contain}
       h1{margin:0;color:#111827;font-size:24px}.meta{color:#4b5563;font-size:12px;margin-top:6px}
-      table{width:100%;border-collapse:collapse;font-size:12px}thead{display:table-header-group}tr{break-inside:avoid}
+      table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}thead{display:table-header-group}tr{break-inside:avoid}
       th,td{border:1px solid #d1d5db;padding:7px;text-align:right;vertical-align:top}th{background:#f8fafc;color:#111827;font-weight:800}td,.record-value{color:#ed1c24}
       .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.box{border:1px solid #d1d5db;border-radius:6px;padding:9px;break-inside:avoid}
       .box strong{display:block;color:#111827;font-size:12px;margin-bottom:4px}.section-title{color:#111827;margin:18px 0 8px}
+      .email-text{display:block;width:100%;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;direction:ltr;text-align:left}
       .toolbar{margin-bottom:12px}.toolbar button{background:#ed1c24;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
       @media print{.toolbar{display:none}}
     </style></head><body><div class="toolbar"><button onclick="window.print()">طباعة</button></div>
-    <div class="print-head"><div><h1>${escapeHtml(title)}</h1><div class="meta">نظام Zunion لإدارة الأوردرات</div><div class="meta">تاريخ الطباعة: ${escapeHtml(printedAt)}${user ? ` - المستخدم: ${escapeHtml(user)}` : ""}</div></div><img src="/zunion-logo.png" /></div>${body}</body></html>`;
+    <div class="print-head"><div><h1>${escapeHtml(title)}</h1><div class="meta">نظام Zunion لإدارة الأوردرات</div><div class="meta">تاريخ الطباعة: ${escapeHtml(printedAt)}${user ? ` - المستخدم: ${userHtml}` : ""}</div></div><img src="/zunion-logo.png" /></div>${body}</body></html>`;
   if (!popup) {
     window.print();
     return;
@@ -628,11 +701,11 @@ function printDocument(title: string, body: string, session?: Session | null, or
 
 function printableTable(headers: string[], rows: Array<Array<unknown>>) {
   if (!rows.length) return `<p>لا توجد بيانات للطباعة</p>`;
-  return `<table><thead><tr>${headers.map((head) => `<th>${escapeHtml(head)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  return `<table><thead><tr>${headers.map((head) => `<th>${escapeHtml(head)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${printableCell(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
 function printableRecord(fields: Array<[string, unknown]>) {
-  return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong><span class="record-value">${escapeHtml(value)}</span></div>`).join("")}</div>`;
+  return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong><span class="record-value">${printableCell(value)}</span></div>`).join("")}</div>`;
 }
 
 const arabicColumns: Partial<Record<keyof Order, string>> = {
@@ -696,7 +769,7 @@ const emptyOrder: Order = {
   paymentMethod: "cash",
   customPaymentMethod: "",
   customParty: "",
-  materialsStatus: "available",
+  materialsStatus: "",
   operationMethods: [""],
   operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
   logoFileName: "",
@@ -1258,7 +1331,7 @@ const ordersListHeaders = [
 ] as const;
 
 function valueText(value: unknown, fallback = "—") {
-  const text = String(value ?? "").trim();
+  const text = normalizeDigitsToEnglish(value).trim();
   return text || fallback;
 }
 
@@ -1332,9 +1405,10 @@ function OrdersListRow({ order }: { order: OrdersListRecord }) {
   const operationStatus = normalizedOperationStatus(order.operation_status);
   const finishingStatus = normalizedFinishingStatus(order.finishing_status);
   const readyStatus = orderReadyStatus(order);
+  const createdBy = orderCreatedBy(order);
   return (
     <tr>
-      <td>{orderCreatedBy(order)}</td>
+      <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
       <td>{orderDisplayNumber(order)}</td>
       <td>{orderDisplayClient(order)}</td>
@@ -1558,87 +1632,40 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     syncOperationItems(operationItems.filter((_, currentIndex) => currentIndex !== index));
   }
 
-  function filePreview(file?: File) {
-    if (!file) return;
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-    if (!allowedTypes.includes(file.type)) {
-      alert("نوع الملف غير مسموح. استخدم jpg أو jpeg أو png أو webp أو pdf.");
-      return "";
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      alert("حجم الملف أكبر من 10MB.");
-      return "";
-    }
-    return URL.createObjectURL(file);
-  }
-
-  function upload(key: "logo_image_url" | "work_order_image_url", file?: File) {
-    if (key === "logo_image_url" && file?.type === "application/pdf") {
-      alert("الملف المرفوع غير مدعوم");
-      return;
-    }
-    const previewUrl = filePreview(file);
-    if (!previewUrl || !file) return;
-    const previous = form[key];
-    if (previous.startsWith("blob:")) URL.revokeObjectURL(previous);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setForm((current) => calculate({
-        ...current,
-        [key]: String(reader.result || previewUrl),
-        [key === "logo_image_url" ? "logoFileName" : "workOrderFileName"]: file.name,
-        updated_at: new Date().toISOString(),
-      }));
-    };
-    reader.onerror = () => set(key, previewUrl as Order[typeof key]);
-    reader.readAsDataURL(file);
-  }
-
   function operationMessageKey(index: number, key: "logoImage" | "workOrderImage") {
     return `${index}-${key}`;
-  }
-
-  function safeClipboardFileName(type: string) {
-    const extension = type.includes("jpeg") ? "jpg" : type.includes("webp") ? "webp" : "png";
-    const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-    return `clipboard-image-${stamp}.${extension}`;
   }
 
   function setImageMessage(index: number, key: "logoImage" | "workOrderImage", message: string) {
     setImageMessages((current) => ({ ...current, [operationMessageKey(index, key)]: message }));
   }
 
-  function setOperationAttachment(index: number, key: "logoImage" | "workOrderImage", file: File | undefined, source: "upload" | "clipboard") {
+  async function setOperationAttachment(index: number, key: "logoImage" | "workOrderImage", file: File | undefined) {
     if (!file) return;
     if (!file.size) {
       setImageMessage(index, key, "ملف الصورة فارغ");
       return;
     }
-    const allowedTypes = key === "workOrderImage"
-      ? ["image/jpeg", "image/png", "image/webp", "application/pdf"]
-      : ["image/jpeg", "image/png", "image/webp"];
-    if (!allowedTypes.includes(file.type)) {
-      setImageMessage(index, key, source === "clipboard" ? "نوع الصورة الموجود في الحافظة غير مدعوم" : "نوع الملف غير مسموح. استخدم jpg أو jpeg أو png أو webp.");
+    if (!clipboardImageTypes.includes(file.type)) {
+      setImageMessage(index, key, "نوع الصورة غير مدعوم");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
       setImageMessage(index, key, "حجم الملف أكبر من 10MB.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
+    try {
+      const dataUrl = await fileToDataUrl(file);
       updateOperationItem(index, {
-        [key]: String(reader.result || ""),
+        [key]: dataUrl,
         [key === "logoImage" ? "logoFileName" : "workOrderFileName"]: file.name,
-        [key === "logoImage" ? "logoImageSource" : "workOrderImageSource"]: source,
+        [key === "logoImage" ? "logoImageSource" : "workOrderImageSource"]: "clipboard",
         [key === "logoImage" ? "logoImageSize" : "workOrderImageSize"]: file.size,
       } as Partial<OperationItem>);
-      setImageMessage(index, key, source === "clipboard" ? "تم لصق الصورة من الحافظة" : "");
-    };
-    reader.onerror = () => {
-      setImageMessage(index, key, source === "clipboard" ? "حدث خطأ أثناء لصق الصورة" : "حدث خطأ أثناء قراءة الملف");
-    };
-    reader.readAsDataURL(file);
+      setImageMessage(index, key, "تم لصق الصورة بنجاح");
+    } catch {
+      setImageMessage(index, key, "حدث خطأ أثناء لصق الصورة");
+    }
   }
 
   function removeOperationAttachment(index: number, key: "logoImage" | "workOrderImage") {
@@ -1650,26 +1677,10 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 
   async function pasteFromClipboard(index: number, key: "logoImage" | "workOrderImage") {
     setActiveImageField({ index, key });
-    if (!navigator.clipboard?.read) {
-      setImageMessage(index, key, "متصفحك لا يدعم قراءة الصور من الحافظة، استخدم اختيار صورة");
-      return;
-    }
     try {
-      const clipboardItems = await navigator.clipboard.read();
-      for (const item of clipboardItems) {
-        const imageType = item.types.find((type) => ["image/png", "image/jpeg", "image/webp"].includes(type));
-        if (imageType) {
-          const blob = await item.getType(imageType);
-          setOperationAttachment(index, key, new File([blob], safeClipboardFileName(imageType), { type: imageType }), "clipboard");
-          return;
-        }
-      }
-      setImageMessage(index, key, "لا توجد صورة في الحافظة");
-    } catch (err) {
-      const message = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError")
-        ? "تعذر الوصول إلى الحافظة. اسمح للموقع بقراءة الحافظة ثم حاول مرة أخرى"
-        : "حدث خطأ أثناء لصق الصورة";
-      setImageMessage(index, key, message);
+      await setOperationAttachment(index, key, await readClipboardImageFile());
+    } catch (error) {
+      setImageMessage(index, key, error instanceof Error ? error.message : "حدث خطأ أثناء لصق الصورة");
     }
   }
 
@@ -1685,8 +1696,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       setImageMessage(activeImageField.index, activeImageField.key, "لا توجد صورة في الحافظة");
       return;
     }
-    if (!["image/png", "image/jpeg", "image/webp"].includes(item.type)) {
-      setImageMessage(activeImageField.index, activeImageField.key, "نوع الصورة الموجود في الحافظة غير مدعوم");
+    if (!clipboardImageTypes.includes(item.type)) {
+      setImageMessage(activeImageField.index, activeImageField.key, "نوع الصورة غير مدعوم");
       return;
     }
     const file = item.getAsFile();
@@ -1694,7 +1705,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       setImageMessage(activeImageField.index, activeImageField.key, "حدث خطأ أثناء لصق الصورة");
       return;
     }
-    setOperationAttachment(activeImageField.index, activeImageField.key, new File([file], safeClipboardFileName(file.type), { type: file.type }), "clipboard");
+    setOperationAttachment(activeImageField.index, activeImageField.key, new File([file], safeClipboardFileName(file.type), { type: file.type }));
   }
 
   function addItem() {
@@ -1704,12 +1715,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 
   function updateItem(id: string, patch: Partial<OrderItem>) {
     set("items", form.items.map((item) => item.id === id ? { ...item, ...patch } : item));
-  }
-
-  function uploadItem(id: string, key: "product_image_url" | "logo_url", file?: File) {
-    const previewUrl = filePreview(file);
-    if (!previewUrl) return;
-    updateItem(id, { [key]: previewUrl });
   }
 
   function submit(event: React.FormEvent) {
@@ -1731,7 +1736,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     if (!form.paymentMethod) nextErrors.paymentMethod = "طريقة الدفع مطلوبة";
     if (form.paymentMethod === "other" && !form.customPaymentMethod?.trim()) nextErrors.customPaymentMethod = "اكتب طريقة الدفع";
     if (!form.delivery_date) nextErrors.delivery_date = "تاريخ التسليم مطلوب";
-    if (!form.materialsStatus) nextErrors.materialsStatus = "يجب تحديد حالة الخامات";
     if (methods.length === 0) nextErrors.operationMethods = "يجب إضافة طريقة تشغيل واحدة على الأقل";
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
@@ -1824,16 +1828,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
           <Readonly label="المتبقي" value={computed.remaining} />
         </div>
       </section>
-      <section className="form-section order-materials-section">
-        <label>
-          الخامات
-          <select value={form.materialsStatus || ""} onChange={(event) => set("materialsStatus", event.target.value as Order["materialsStatus"])}>
-            <option value="">اختر حالة الخامات</option>
-            {materialsOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-          <ErrorText message={errors.materialsStatus} />
-        </label>
-      </section>
       <section className="form-section order-operation-section">
         <h3>طريقة التشغيل</h3>
         <div className="operation-methods">
@@ -1850,11 +1844,9 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 fileName={item.logoFileName}
                 fileSize={item.logoImageSize}
                 source={item.logoImageSource}
-                accept="image/jpeg,image/png,image/webp"
                 active={activeImageField?.index === index && activeImageField.key === "logoImage"}
                 status={imageMessages[operationMessageKey(index, "logoImage")]}
                 onActivate={() => setActiveImageField({ index, key: "logoImage" })}
-                onFile={(file, source) => setOperationAttachment(index, "logoImage", file, source)}
                 onPaste={() => pasteFromClipboard(index, "logoImage")}
                 onRemove={() => removeOperationAttachment(index, "logoImage")}
               />
@@ -1864,12 +1856,9 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 fileName={item.workOrderFileName}
                 fileSize={item.workOrderImageSize}
                 source={item.workOrderImageSource}
-                accept="image/jpeg,image/png,image/webp,application/pdf"
-                allowPdf
                 active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
                 status={imageMessages[operationMessageKey(index, "workOrderImage")]}
                 onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
-                onFile={(file, source) => setOperationAttachment(index, "workOrderImage", file, source)}
                 onPaste={() => pasteFromClipboard(index, "workOrderImage")}
                 onRemove={() => removeOperationAttachment(index, "workOrderImage")}
               />
@@ -1900,16 +1889,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         <Field label="التشغيل" value={form.operation_status} onChange={(value) => set("operation_status", value)} />
         <Field label="التشطيب" value={form.finishing_status} onChange={(value) => set("finishing_status", value)} />
         <Field label="قطعة مقطوعة" type="number" value={form.damaged_pieces} onChange={(value) => set("damaged_pieces", Number(value))} />
-        <label>
-          رفع صورة اللوجو
-          <input type="file" accept="image/*" onChange={(event) => upload("logo_image_url", event.target.files?.[0])} />
-          {form.logo_image_url && <a className="file-preview-link" href={form.logo_image_url} target="_blank">Preview logo</a>}
-        </label>
-        <label>
-          رفع صورة أمر الشغل
-          <input type="file" accept="image/*,.pdf" onChange={(event) => upload("work_order_image_url", event.target.files?.[0])} />
-          {form.work_order_image_url && <a className="file-preview-link" href={form.work_order_image_url} target="_blank">Preview work order</a>}
-        </label>
       </div>
       <section className="line-items" hidden>
         <div className="panel-head">
@@ -1928,8 +1907,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             <Readonly label="الإجمالي" value={item.total} />
             <Field label="الجودة" value={item.quality} onChange={(value) => updateItem(item.id, { quality: value })} />
             <Field label="الحالة" value={item.status} onChange={(value) => updateItem(item.id, { status: value })} />
-            <label>صورة المنتج<input type="file" accept="image/*" onChange={(event) => uploadItem(item.id, "product_image_url", event.target.files?.[0])} />{item.product_image_url && <a className="file-preview-link" href={item.product_image_url} target="_blank">Preview product</a>}</label>
-            <label>اللوجو<input type="file" accept="image/*" onChange={(event) => uploadItem(item.id, "logo_url", event.target.files?.[0])} />{item.logo_url && <a className="file-preview-link" href={item.logo_url} target="_blank">Preview logo</a>}</label>
             <button type="button" className="danger-text line-remove" onClick={() => set("items", form.items.filter((current) => current.id !== item.id))}>حذف المنتج</button>
           </div>
         ))}
@@ -1948,7 +1925,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 }
 
 function Field({ label, value, onChange, type = "text" }: { label: string; value: string | number; onChange: (value: string) => void; type?: string }) {
-  return <label>{label}<input type={type} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+  return <label>{label}<input type={type} value={normalizeDigitsToEnglish(value)} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} /></label>;
 }
 
 function ErrorText({ message }: { message?: string }) {
@@ -1969,11 +1946,11 @@ function PartyField({ value, onChange }: { value: string; onChange: (value: stri
 }
 
 function Readonly({ label, value }: { label: string; value: number }) {
-  return <label>{label}<input value={value.toLocaleString("ar-EG")} readOnly /></label>;
+  return <label>{label}<input value={formatNumber(value)} readOnly /></label>;
 }
 
 function ReadonlyText({ label, value }: { label: string; value: string }) {
-  return <label>{label}<input value={value} readOnly /></label>;
+  return <label>{label}<input value={normalizeDigitsToEnglish(value)} readOnly /></label>;
 }
 
 function Select({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
@@ -1997,12 +1974,9 @@ type ImageInputWithClipboardProps = {
   fileName?: string;
   fileSize?: number;
   source?: "upload" | "clipboard";
-  accept: string;
-  allowPdf?: boolean;
   active?: boolean;
   status?: string;
   onActivate: () => void;
-  onFile: (file: File, source: "upload" | "clipboard") => void;
   onPaste: () => void;
   onRemove: () => void;
 };
@@ -2014,29 +1988,22 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function ImageInputWithClipboard({ label, value, fileName, fileSize, source, accept, allowPdf, active, status, onActivate, onFile, onPaste, onRemove }: ImageInputWithClipboardProps) {
-  const inputId = useId();
-  const isPdf = Boolean(allowPdf && (fileName?.toLowerCase().endsWith(".pdf") || value.startsWith("data:application/pdf")));
+function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, onActivate, onPaste, onRemove }: ImageInputWithClipboardProps) {
   return (
     <div className={`image-clipboard-field${active ? " active" : ""}`} tabIndex={0} onFocus={onActivate} onClick={onActivate}>
       <span className="image-field-label">{label}</span>
       <div className="image-field-actions">
-        <label className="ghost-btn compact image-pick-btn" htmlFor={inputId}>اختيار صورة</label>
-        <input id={inputId} className="hidden-file-input" type="file" accept={accept} onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) onFile(file, "upload");
-          event.currentTarget.value = "";
-        }} />
-        <button type="button" className="ghost-btn compact" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>لصق من الحافظة</button>
+        <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>لصق الصورة من الحافظة</button>
+        {!value && <span className="image-empty-state">لم يتم لصق صورة</span>}
         {value && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
       </div>
       {value && (
         <div className="image-preview-box">
-          {isPdf ? <a className="file-preview-link" href={value} target="_blank">PDF: {fileName}</a> : <a href={value} target="_blank" aria-label={`معاينة ${label}`}><img className="upload-preview" src={value} alt={`معاينة ${label}`} /></a>}
+          <a href={value} target="_blank" aria-label={`معاينة ${label}`}><img className="upload-preview" src={value} alt={`معاينة ${label}`} /></a>
         </div>
       )}
       <div className="image-file-meta">
-        {fileName && <span>{source === "clipboard" ? "تم لصق الصورة من الحافظة" : fileName}</span>}
+        {fileName && <span>{source === "clipboard" ? `تم لصق الصورة بنجاح - ${fileName}` : fileName}</span>}
         {fileSize ? <small>{formatFileSize(fileSize)}</small> : null}
         {status && <small>{status}</small>}
       </div>
@@ -2184,7 +2151,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
   }
 
   function printOrder(order: Order) {
-    const money = (value: number) => value.toLocaleString("ar-EG");
+    const money = (value: number) => formatMoney(value);
     const rows = [
       ["رقم الأوردر", order.order_number],
       ["الطرف", order.source_person],
@@ -2420,7 +2387,7 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
                   <td>{customer.name}</td>
                   <td>{customer.code}</td>
                   <td>{customer.phone}</td>
-                  <td>{customer.email || "-"}</td>
+                  <td className="email-cell"><EmailText email={customer.email} /></td>
                   <td>{customer.address || "-"}</td>
                   <td>{customer.source}</td>
                   <td>{session.role === "Master" ? <input type="number" value={customer.old} onChange={(event) => updateOldBalance(customer.code, Number(event.target.value))} /> : customer.old}</td>
@@ -2626,7 +2593,7 @@ function FinancePageModern({ session }: { session: Session }) {
             setMonth(`${year}-${nextMonth}`);
             addAudit(session, "MONTH_OPENED", "monthly_periods", `${year}-${nextMonth}`);
           }}>
-            {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => <option key={value} value={value}>{new Date(2026, value - 1, 1).toLocaleDateString("ar-EG", { month: "long" })}</option>)}
+            {["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"].map((name, index) => <option key={index + 1} value={index + 1}>{name}</option>)}
           </select>
           <select value={String(year)} onChange={(event) => {
             const nextYear = event.target.value;
@@ -2776,7 +2743,7 @@ function AuditLog() {
       <div className="table-wrap audit-table">
         <table>
           <thead><tr>{["التاريخ", "المستخدم", "الدور", "الإجراء", "النوع", "ID"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.id}><td>{new Date(row.created_at).toLocaleString("ar-EG")}</td><td>{row.user_email}</td><td>{row.user_role}</td><td>{row.action}</td><td>{row.entity_type}</td><td>{row.entity_id}</td></tr>)}</tbody>
+          <tbody>{rows.map((row) => <tr key={row.id}><td>{formatDateTimeEnglish(row.created_at)}</td><td className="email-cell"><EmailText email={row.user_email} /></td><td>{row.user_role}</td><td>{row.action}</td><td>{row.entity_type}</td><td>{row.entity_id}</td></tr>)}</tbody>
         </table>
       </div>
       {rows.length === 0 && <p className="muted">لا توجد عمليات مسجلة بعد.</p>}
@@ -3243,8 +3210,8 @@ function SettingsPage({ session }: { session: Session }) {
                   <td><select value={user.role} onChange={(event) => updateUser(user.id, { role: event.target.value })}>{roles.map((role) => <option key={role.id}>{role.name}</option>)}</select></td>
                   <td><span className={user.status === "active" ? "badge badge-green" : "badge badge-gray"}>{user.status === "active" ? "مفعل" : "موقوف"}</span></td>
                   <td>{user.permissionOverrides.allow.length + user.permissionOverrides.deny.length}</td>
-                  <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString("ar-EG") : "-"}</td>
-                  <td>{new Date(user.createdAt).toLocaleDateString("ar-EG")}</td>
+                  <td>{user.lastLoginAt ? formatDateTimeEnglish(user.lastLoginAt) : "-"}</td>
+                  <td>{formatDateArabic(user.createdAt)}</td>
                   <td className="actions">
                     <button type="button" onClick={() => resetPassword(user)}>تغيير كلمة المرور</button>
                     <button type="button" onClick={() => toggleUserStatus(user)}>{user.status === "active" ? "إيقاف المستخدم" : "تفعيل المستخدم"}</button>
@@ -3386,44 +3353,90 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   const normalizedProducts = products.map(normalizeProduct);
   const emptyProductForm: Product = normalizeProduct({ id: "", name: "", details: "", price: 0, active: true, status: "active", created_at: "" });
   const [form, setForm] = useState<Product>(emptyProductForm);
-  const [editingId, setEditingId] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [productImageStatus, setProductImageStatus] = useState("");
+  const [productImageActive, setProductImageActive] = useState(false);
   const [saving, setSaving] = useState(false);
-  const total = Number(form.defaultQuantity || 1) * Number(form.defaultPrice || 0);
-  const canPrintProducts = hasPermission(session, "products.print");
+  const total = Number(form.defaultPrice || 0);
 
   function setProduct<K extends keyof Product>(key: K, value: Product[K]) {
     setForm((current) => normalizeProduct({ ...current, [key]: value, price: key === "defaultPrice" ? Number(value || 0) : current.price }));
   }
 
-  function imagePreview(file?: File, key?: "productImage" | "logoImage") {
-    if (!file || !key) return;
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setErrors((current) => ({ ...current, [key]: key === "productImage" ? "صيغة صورة المنتج غير مدعومة" : "صيغة ملف اللوجو غير مدعومة" }));
+  async function setProductImageFromClipboard(file?: File) {
+    if (!file) return;
+    if (!file.size) {
+      setProductImageStatus("ملف الصورة فارغ");
+      return;
+    }
+    if (!clipboardImageTypes.includes(file.type)) {
+      setErrors((current) => ({ ...current, productImage: "صيغة صورة المنتج غير مدعومة" }));
+      setProductImageStatus("نوع الصورة غير مدعوم");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      setErrors((current) => ({ ...current, [key]: "حجم الملف أكبر من 10MB" }));
+      setErrors((current) => ({ ...current, productImage: "حجم الملف أكبر من 10MB" }));
+      setProductImageStatus("حجم الملف أكبر من 10MB.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setErrors((current) => ({ ...current, [key]: "" }));
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setErrors((current) => ({ ...current, productImage: "" }));
       setForm((current) => normalizeProduct({
         ...current,
-        [key]: String(reader.result || ""),
-        [key === "productImage" ? "productImageName" : "logoImageName"]: file.name,
+        productImage: dataUrl,
+        productImageName: file.name,
       }));
-    };
-    reader.readAsDataURL(file);
+      setProductImageStatus("تم لصق الصورة بنجاح");
+    } catch {
+      setProductImageStatus("حدث خطأ أثناء لصق الصورة");
+    }
+  }
+
+  async function pasteProductImage() {
+    setProductImageActive(true);
+    try {
+      await setProductImageFromClipboard(await readClipboardImageFile());
+    } catch (error) {
+      setProductImageStatus(error instanceof Error ? error.message : "حدث خطأ أثناء لصق الصورة");
+    }
+  }
+
+  function removeProductImage() {
+    setForm((current) => normalizeProduct({ ...current, productImage: "", productImageName: "" }));
+    setProductImageStatus("");
+    setErrors((current) => ({ ...current, productImage: "" }));
+  }
+
+  function handleProductPaste(event: React.ClipboardEvent<HTMLFormElement>) {
+    if (!(event.target instanceof Element) || !event.target.closest(".image-clipboard-field")) return;
+    event.preventDefault();
+    if (!productImageActive) {
+      setProductImageStatus("اختر خانة الصورة أولاً");
+      return;
+    }
+    const item = Array.from(event.clipboardData.items).find((clipboardItem) => clipboardItem.type.startsWith("image/"));
+    if (!item) {
+      setProductImageStatus("لا توجد صورة في الحافظة");
+      return;
+    }
+    if (!clipboardImageTypes.includes(item.type)) {
+      setProductImageStatus("نوع الصورة غير مدعوم");
+      return;
+    }
+    const file = item.getAsFile();
+    if (!file) {
+      setProductImageStatus("حدث خطأ أثناء لصق الصورة");
+      return;
+    }
+    setProductImageFromClipboard(new File([file], safeClipboardFileName(file.type), { type: file.type }));
   }
 
   function validate() {
     const nextErrors: Record<string, string> = {};
     const trimmedName = form.name.trim();
     if (!trimmedName) nextErrors.name = "اسم المنتج مطلوب";
-    if (normalizedProducts.some((product) => product.id !== editingId && product.name.trim().toLowerCase() === trimmedName.toLowerCase())) nextErrors.name = "اسم المنتج موجود بالفعل";
-    if (Number(form.defaultQuantity || 0) < 1) nextErrors.defaultQuantity = "العدد يجب أن يكون 1 على الأقل";
+    if (normalizedProducts.some((product) => product.name.trim().toLowerCase() === trimmedName.toLowerCase())) nextErrors.name = "اسم المنتج موجود بالفعل";
     if (Number(form.defaultPrice || 0) < 0) nextErrors.defaultPrice = "السعر لا يمكن أن يكون بالسالب";
     if (!["active", "inactive"].includes(form.status || "")) nextErrors.status = "حالة المنتج غير صحيحة";
     setErrors(nextErrors);
@@ -3432,8 +3445,9 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
 
   function resetForm() {
     setForm(emptyProductForm);
-    setEditingId("");
     setErrors({});
+    setProductImageStatus("");
+    setProductImageActive(false);
   }
 
   function save(event: React.FormEvent) {
@@ -3443,101 +3457,56 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
     const now = new Date().toISOString();
     const product = normalizeProduct({
       ...form,
-      id: editingId || createId(),
+      id: createId(),
       name: form.name.trim(),
       details: form.details.trim(),
       price: Number(form.defaultPrice || 0),
-      defaultQuantity: Number(form.defaultQuantity || 1),
+      defaultQuantity: 1,
       defaultPrice: Number(form.defaultPrice || 0),
       defaultTotal: total,
+      logoPlacement: "",
+      quality: "",
+      logoImage: "",
+      logoImageName: "",
       active: form.status !== "inactive",
-      created_at: form.created_at || now,
+      created_at: now,
     });
-    setProducts((current) => editingId ? current.map((item) => item.id === editingId ? product : item) : [product, ...current]);
-    addAudit(session, editingId ? "PRODUCT_UPDATED" : "PRODUCT_CREATED", "products", product.id, editingId ? normalizedProducts.find((item) => item.id === editingId) : undefined, product);
+    setProducts((current) => [product, ...current]);
+    addAudit(session, "PRODUCT_CREATED", "products", product.id, undefined, product);
     resetForm();
     window.setTimeout(() => setSaving(false), 300);
-  }
-
-  function editProduct(product: Product) {
-    const normalized = normalizeProduct(product);
-    setForm(normalized);
-    setEditingId(normalized.id);
-    setErrors({});
-  }
-
-  function toggleStatus(product: Product) {
-    const normalized = normalizeProduct(product);
-    const next = normalizeProduct({ ...normalized, status: normalized.status === "active" ? "inactive" : "active" });
-    setProducts((current) => current.map((item) => item.id === product.id ? next : item));
-    addAudit(session, "PRODUCT_STATUS_CHANGED", "products", product.id, { status: normalized.status }, { status: next.status });
-  }
-
-  function printProduct(product: Product) {
-    const normalized = normalizeProduct(product);
-    printDocument(`طباعة بيانات المنتج ${normalized.name}`, printableRecord([
-      ["اسم المنتج", normalized.name],
-      ["التفاصيل", normalized.details],
-      ["مكان اللوجو", normalized.logoPlacement],
-      ["العدد الافتراضي", normalized.defaultQuantity],
-      ["السعر", formatMoney(normalized.defaultPrice)],
-      ["الإجمالي", formatMoney(normalized.defaultTotal)],
-      ["الجودة", normalized.quality],
-      ["الحالة", normalized.status === "active" ? "نشط" : "غير نشط"],
-      ["تاريخ الإضافة", formatDateArabic(normalized.created_at)],
-    ]), session);
-  }
-
-  function printAllProducts() {
-    printDocument("طباعة كل المنتجات", printableTable(
-      ["اسم المنتج", "التفاصيل", "مكان اللوجو", "العدد", "السعر", "الإجمالي", "الجودة", "الحالة", "تاريخ الإضافة"],
-      normalizedProducts.map((product) => [product.name, product.details, product.logoPlacement, product.defaultQuantity, formatMoney(product.defaultPrice), formatMoney(product.defaultTotal), product.quality, product.status === "active" ? "نشط" : "غير نشط", formatDateArabic(product.created_at)])
-    ), session, "landscape");
   }
 
   return (
     <div className="stack">
       <section className="panel">
-        <div className="panel-head"><h2>إضافة منتج</h2>{canPrintProducts && <button className="ghost-btn compact" type="button" onClick={printAllProducts}>طباعة الكل</button>}</div>
-        <form className="order-form compact-form" onSubmit={save}>
-          <div className="form-grid">
+        <div className="panel-head"><h2>إضافة منتج</h2></div>
+        <form className="order-form compact-form" onSubmit={save} onPaste={handleProductPaste}>
+          <div className="form-grid product-form-grid">
             <label>اسم المنتج<input value={form.name} onChange={(event) => setProduct("name", event.target.value)} /><ErrorText message={errors.name} /></label>
             <label>التفاصيل<input value={form.details} onChange={(event) => setProduct("details", event.target.value)} /></label>
-            <label>مكان اللوجو<input value={form.logoPlacement || ""} onChange={(event) => setProduct("logoPlacement", event.target.value)} /></label>
-            <label>العدد<input type="number" min={1} value={form.defaultQuantity || 1} onChange={(event) => setProduct("defaultQuantity", Number(event.target.value))} /><ErrorText message={errors.defaultQuantity} /></label>
             <label>السعر<input type="number" min={0} step="0.01" value={form.defaultPrice || 0} onChange={(event) => setProduct("defaultPrice", Number(event.target.value))} /><ErrorText message={errors.defaultPrice} /></label>
             <Readonly label="الإجمالي" value={total} />
-            <label>الجودة<input value={form.quality || ""} onChange={(event) => setProduct("quality", event.target.value)} /></label>
             <label>الحالة<select value={form.status || "active"} onChange={(event) => setProduct("status", event.target.value as Product["status"])}><option value="active">نشط</option><option value="inactive">غير نشط</option></select><ErrorText message={errors.status} /></label>
-            <label>صورة المنتج<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => imagePreview(event.target.files?.[0], "productImage")} />{form.productImageName && <small>{form.productImageName}</small>}{form.productImage && <img className="upload-preview" src={form.productImage} alt="product preview" />}<ErrorText message={errors.productImage} /></label>
-            <label>اللوجو<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => imagePreview(event.target.files?.[0], "logoImage")} />{form.logoImageName && <small>{form.logoImageName}</small>}{form.logoImage && <img className="upload-preview" src={form.logoImage} alt="logo preview" />}<ErrorText message={errors.logoImage} /></label>
+            <div className="product-image-field">
+              <ImageInputWithClipboard
+                label="صورة المنتج"
+                value={form.productImage || ""}
+                fileName={form.productImageName}
+                source={form.productImage ? "clipboard" : undefined}
+                active={productImageActive}
+                status={productImageStatus}
+                onActivate={() => setProductImageActive(true)}
+                onPaste={pasteProductImage}
+                onRemove={removeProductImage}
+              />
+              <ErrorText message={errors.productImage} />
+            </div>
           </div>
           <div className="form-actions">
             <button className="primary-btn" type="submit" disabled={saving}>{saving ? "جاري الحفظ..." : "حفظ المنتج"}</button>
-            {editingId && <button className="ghost-btn" type="button" onClick={resetForm}>إلغاء التعديل</button>}
           </div>
         </form>
-      </section>
-      <section className="table-wrap accounts-table">
-        <table>
-          <thead><tr>{["اسم المنتج", "التفاصيل", "مكان اللوجو", "العدد", "السعر", "الإجمالي", "الجودة", "الحالة", "صورة المنتج", "تاريخ الإضافة", "الإجراءات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
-          <tbody>
-            {normalizedProducts.length === 0 && <EmptyRow colSpan={11} />}
-            {normalizedProducts.map((product) => <tr key={product.id}>
-              <td>{product.name}</td>
-              <td>{product.details || "-"}</td>
-              <td>{product.logoPlacement || "-"}</td>
-              <td>{product.defaultQuantity}</td>
-              <td>{formatMoney(product.defaultPrice)}</td>
-              <td>{formatMoney(product.defaultTotal)}</td>
-              <td>{product.quality || "-"}</td>
-              <td><span className={product.status === "active" ? "badge badge-green" : "badge badge-amber"}>{product.status === "active" ? "نشط" : "غير نشط"}</span></td>
-              <td>{product.productImage ? <img className="table-thumb" src={product.productImage} alt={product.name} /> : "لا توجد صورة"}</td>
-              <td>{formatDateArabic(product.created_at)}</td>
-              <td className="actions"><button onClick={() => editProduct(product)}>تعديل</button><button onClick={() => toggleStatus(product)}>{product.status === "active" ? "تعطيل" : "تنشيط"}</button>{canPrintProducts && <button type="button" onClick={() => printProduct(product)}>طباعة</button>}</td>
-            </tr>)}
-          </tbody>
-        </table>
       </section>
     </div>
   );
@@ -3750,7 +3719,7 @@ function ZunionApp() {
   const routeAllowed = canAccessView(session, view);
 
   return (
-    <div className="app" dir="rtl">
+    <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
       <Sidebar
         sections={sidebarSections}
         activeView={view}
@@ -3766,7 +3735,7 @@ function ZunionApp() {
           <button type="button" className="hamburger-btn" aria-label="فتح القائمة" onClick={() => setDrawerOpen(true)}><Menu size={24} /></button>
           <div>
             <h1>نظام Zunion لإدارة الأوردرات</h1>
-            <p>{session.fullName || session.username || session.email} - {session.role}</p>
+            <p>{session.fullName || session.username ? `${session.fullName || session.username} - ${session.role}` : <><EmailText email={session.email} className="account-email" /> - {session.role}</>}</p>
           </div>
           <BrandLogo className="top-logo" />
         </header>

@@ -45,7 +45,7 @@ export const orderSchema = z.object({
   productName: z.string().optional().default(""),
   paymentMethod: z.enum(paymentMethods).default("cash"),
   customPaymentMethod: z.string().optional().default(""),
-  materialsStatus: z.enum(materialsStatuses).default("available"),
+  materialsStatus: z.union([z.enum(materialsStatuses), z.literal(""), z.string().trim()]).optional(),
   operationMethods: z.array(z.string().trim().min(1)).min(1).default(["not_started"]),
   quantity: z.coerce.number().int().min(1).default(1),
   price: z.coerce.number().min(0).default(0),

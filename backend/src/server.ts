@@ -687,7 +687,7 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper"), async (req
       [
         nextOrderNumber(), customerId, order.source_party, order.customer_name_snapshot, order.customer_code_snapshot,
         order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
-        order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus, JSON.stringify(order.operationMethods),
+        order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? "", JSON.stringify(order.operationMethods),
         order.quantity, order.price, order.paid,
         order.old_account, "NEW", "new", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
         order.production_notes, order.finishing_notes, req.user!.id,
@@ -723,7 +723,7 @@ app.put("/api/orders/:id", requireAuth, async (req, res) => {
      materials_status=$11, operation_methods=$12, quantity=$13, price=$14, paid=$15, old_account=$16, status=$17, work_stage=$18, notes=$19,
      message_text=$20, quality_notes=$21, damaged_pieces=$22, production_notes=$23, finishing_notes=$24, updated_by=$25
      where id=$26`,
-    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus, JSON.stringify(order.operationMethods), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, req.user!.id, id],
+    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? oldOrder.materials_status ?? "", JSON.stringify(order.operationMethods), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, req.user!.id, id],
   );
   await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, order);
   res.json({ ok: true });
