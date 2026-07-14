@@ -2928,8 +2928,8 @@ input[type="date"] {
 .red-date-picker {
   display: grid;
   gap: 4px;
-  justify-items: stretch;
-  text-align: right;
+  justify-items: center;
+  text-align: center;
   color: #000 !important;
 }
 
@@ -2938,21 +2938,52 @@ input[type="date"] {
   font-weight: 800;
 }
 
-.delivery-date-input {
-  width: 100%;
+.delivery-date-field {
+  position: relative;
+  display: inline-flex;
+  width: 132px;
+  max-width: 100%;
   height: var(--control-height) !important;
   min-height: var(--control-height) !important;
-  padding: 4px 10px !important;
-  border: 1px solid #d9e1ec;
-  border-radius: 8px !important;
-  background: #fff;
-  color: var(--zunion-red) !important;
+}
+
+.delivery-date-input {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100% !important;
+  min-height: 100% !important;
+  padding: 5px 12px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--zunion-red) !important;
+  color: #fff !important;
   font-size: var(--control-font-size) !important;
-  font-weight: 600;
+  font-weight: 800;
+  text-align: center;
+  direction: ltr;
+  box-shadow: 0 5px 14px rgba(225, 0, 25, .22);
+  outline: none;
+}
+
+.delivery-date-display {
+  position: absolute;
+  inset: 0 32px 0 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  color: #fff !important;
+  font-size: var(--control-font-size);
+  font-weight: 800;
+  line-height: 1;
+  direction: ltr;
+  white-space: nowrap;
 }
 
 .delivery-date-input::placeholder {
-  color: var(--zunion-red) !important;
+  color: #fff !important;
   opacity: 1;
 }
 
@@ -2962,12 +2993,46 @@ input[type="date"] {
 .delivery-date-input::-webkit-datetime-edit-month-field,
 .delivery-date-input::-webkit-datetime-edit-day-field,
 .delivery-date-input::-webkit-datetime-edit-year-field {
-  color: var(--zunion-red);
+  color: transparent;
+}
+
+.delivery-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  filter: invert(1);
+  opacity: 1;
+}
+
+.delivery-date-input:hover {
+  filter: brightness(.97);
+}
+
+.delivery-date-input:focus {
+  box-shadow:
+    0 0 0 3px rgba(225, 0, 25, .16),
+    0 5px 14px rgba(225, 0, 25, .22);
 }
 
 @media (max-width: 768px) {
-  .delivery-date-input {
+  .delivery-date-field {
+    width: 158px;
     height: 40px !important;
     min-height: 40px !important;
+  }
+}
+
+@media print {
+  .delivery-date-field {
+    width: auto;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  .delivery-date-input {
+    display: none !important;
+  }
+
+  .delivery-date-display {
+    position: static;
+    color: #000 !important;
   }
 }

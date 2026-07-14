@@ -1960,6 +1960,13 @@ function Select({ label, value, options, onChange }: { label: string; value: str
   return <label>{label}<select value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option}>{option}</option>)}</select></label>;
 }
 
+function compactDateValue(value: string) {
+  if (!value) return "";
+  const [year, month, day] = normalizeDigitsToEnglish(value).split("-");
+  if (!year || !month || !day) return normalizeDigitsToEnglish(value);
+  return `${year}-${Number(month)}-${Number(day)}`;
+}
+
 function StageSelect({ label, value, onChange }: { label: string; value: WorkStage; onChange: (value: WorkStage) => void }) {
   return (
     <label>
@@ -1972,10 +1979,14 @@ function StageSelect({ label, value, onChange }: { label: string; value: WorkSta
 }
 
 function RedDatePicker({ label, value, onChange, error }: { label: string; value: string; onChange: (value: string) => void; error?: string }) {
+  const displayValue = compactDateValue(value);
   return (
     <label className="red-date-picker">
       <span>{label}</span>
-      <input className="delivery-date-input" type="date" value={value} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} aria-label={label} />
+      <span className="delivery-date-field">
+        <input className="delivery-date-input" type="date" value={value} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} aria-label={label} />
+        <span className={`delivery-date-display${displayValue ? " has-value" : ""}`} aria-hidden="true">{displayValue || "mm/dd/yyyy"}</span>
+      </span>
       <ErrorText message={error} />
     </label>
   );
