@@ -1284,13 +1284,8 @@ body,
 .login-card label,
 .order-form label,
 label,
-input,
-select,
-textarea,
-td,
 .muted,
 .empty-cell,
-.mini-pill,
 .field-error,
 .notice,
 .success-note,
@@ -1305,16 +1300,28 @@ td,
 .finance-title span,
 .finance-form,
 .finance-toolbar,
-.account-filter,
-.sidebar-menu,
-.sidebar-subitem {
+.account-filter {
+  color: #000;
+}
+
+input:not([type="button"]):not([type="submit"]):not([type="reset"]),
+select,
+textarea,
+td,
+.mini-pill,
+.record-value,
+.data-value {
   color: var(--zunion-red);
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: var(--zunion-red-soft);
-  opacity: .75;
+  color: #6b7280;
+  opacity: 1;
+}
+
+th {
+  color: #000;
 }
 
 .primary-btn,
@@ -1325,13 +1332,14 @@ textarea::placeholder {
 .sidebar button *,
 .sidebar-parent,
 .sidebar-parent *,
+.sidebar-subitem,
+.sidebar-subitem *,
 .sidebar-subitem.active,
 .sidebar-subitem.active *,
 .sidebar-logout,
 .sidebar-logout *,
 .account-filter.active,
-.account-filter.active *,
-th {
+.account-filter.active * {
   color: #fff;
 }
 
@@ -1339,7 +1347,7 @@ th {
 .ghost-btn *,
 .account-buttons button,
 .actions button {
-  color: var(--zunion-red);
+  color: #000;
 }
 
 .primary-btn:disabled,
@@ -1724,6 +1732,98 @@ td {
   padding: 9px 10px;
   height: 44px;
   text-align: center;
+}
+
+/* Text color semantics: system text stays black; entered/saved data values use Zunion red. */
+label,
+.topbar,
+.topbar *,
+.panel h1,
+.panel h2,
+.panel h3,
+.panel-head h2,
+.panel-head h3,
+.form-section h3,
+.login-card,
+.login-card *,
+.muted,
+.empty-cell,
+.stat-card,
+.stat-card *,
+.finance-title,
+.finance-title *,
+.pagination,
+.pagination *,
+th {
+  color: #000 !important;
+}
+
+th {
+  background: #f8fafc !important;
+}
+
+input:not([type="button"]):not([type="submit"]):not([type="reset"]),
+select,
+textarea,
+td,
+td *,
+.mini-pill,
+.record-value,
+.data-value {
+  color: var(--zunion-red) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #6b7280 !important;
+}
+
+button,
+button *,
+.ghost-btn,
+.ghost-btn *,
+.actions button,
+.actions button *,
+.account-buttons button,
+.account-buttons button * {
+  color: #000 !important;
+}
+
+.primary-btn,
+.primary-btn *,
+.success-btn,
+.success-btn *,
+.sidebar button,
+.sidebar button *,
+.sidebar-subitem,
+.sidebar-subitem *,
+.sidebar-parent,
+.sidebar-parent *,
+.sidebar-logout,
+.sidebar-logout *,
+.account-filter.active,
+.account-filter.active * {
+  color: #fff !important;
+}
+
+.field-error,
+.notice {
+  color: #9f1239 !important;
+}
+
+@media print {
+  th,
+  th * {
+    color: #000 !important;
+    background: #f8fafc !important;
+  }
+
+  td,
+  td *,
+  .record-value,
+  .data-value {
+    color: var(--zunion-red) !important;
+  }
 }
 
 .finance-hero {

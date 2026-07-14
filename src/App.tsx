@@ -373,11 +373,11 @@ function printDocument(title: string, body: string, session?: Session | null, or
       body{font-family:Tahoma,Arial,sans-serif;color:#111827;margin:0;direction:rtl}
       .print-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #ed1c24;padding-bottom:12px;margin-bottom:16px}
       .print-head img{width:190px;height:auto;object-fit:contain}
-      h1{margin:0;color:#bd141a;font-size:24px}.meta{color:#4b5563;font-size:12px;margin-top:6px}
+      h1{margin:0;color:#111827;font-size:24px}.meta{color:#4b5563;font-size:12px;margin-top:6px}
       table{width:100%;border-collapse:collapse;font-size:12px}thead{display:table-header-group}tr{break-inside:avoid}
-      th,td{border:1px solid #d1d5db;padding:7px;text-align:right;vertical-align:top}th{background:#f8fafc;color:#bd141a;font-weight:800}
+      th,td{border:1px solid #d1d5db;padding:7px;text-align:right;vertical-align:top}th{background:#f8fafc;color:#111827;font-weight:800}td,.record-value{color:#ed1c24}
       .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.box{border:1px solid #d1d5db;border-radius:6px;padding:9px;break-inside:avoid}
-      .box strong{display:block;color:#bd141a;font-size:12px;margin-bottom:4px}.section-title{color:#bd141a;margin:18px 0 8px}
+      .box strong{display:block;color:#111827;font-size:12px;margin-bottom:4px}.section-title{color:#111827;margin:18px 0 8px}
       .toolbar{margin-bottom:12px}.toolbar button{background:#ed1c24;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
       @media print{.toolbar{display:none}}
     </style></head><body><div class="toolbar"><button onclick="window.print()">طباعة</button></div>
@@ -398,7 +398,7 @@ function printableTable(headers: string[], rows: Array<Array<unknown>>) {
 }
 
 function printableRecord(fields: Array<[string, unknown]>) {
-  return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</div>`).join("")}</div>`;
+  return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong><span class="record-value">${escapeHtml(value)}</span></div>`).join("")}</div>`;
 }
 
 const arabicColumns: Partial<Record<keyof Order, string>> = {
