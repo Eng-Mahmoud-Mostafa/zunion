@@ -24,14 +24,14 @@ export const productSchema = z.object({
   details: z.string().optional().default(""),
   logoPlacement: z.string().optional().default(""),
   defaultQuantity: z.coerce.number().int().min(1, "العدد يجب أن يكون 1 على الأقل").default(1),
-  defaultPrice: z.coerce.number().min(0, "السعر لا يمكن أن يكون بالسالب").default(0),
+  defaultPrice: z.coerce.number().min(0, "السعر لا يمكن أن يكون بالسالب").nullable().optional(),
   quality: z.string().optional().default(""),
   status: z.enum(productStatuses, { message: "حالة المنتج غير صحيحة" }).default("active"),
   productImage: z.string().optional().default(""),
   logoImage: z.string().optional().default(""),
 }).transform((product) => ({
   ...product,
-  defaultTotal: product.defaultQuantity * product.defaultPrice,
+  defaultTotal: product.defaultPrice == null ? null : product.defaultQuantity * product.defaultPrice,
 }));
 
 export const orderSchema = z.object({

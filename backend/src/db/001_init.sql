@@ -116,7 +116,7 @@ create table if not exists products (
   details text,
   logo_placement text,
   default_quantity integer not null default 1 check (default_quantity >= 1),
-  default_price numeric not null default 0 check (default_price >= 0),
+  default_price numeric check (default_price >= 0),
   default_total numeric generated always as (default_quantity * default_price) stored,
   quality text,
   status text not null default 'active' check (status in ('active', 'inactive')),
@@ -128,7 +128,9 @@ create table if not exists products (
 
 alter table products add column if not exists logo_placement text;
 alter table products add column if not exists default_quantity integer not null default 1;
-alter table products add column if not exists default_price numeric not null default 0;
+alter table products add column if not exists default_price numeric;
+alter table products alter column default_price drop not null;
+alter table products alter column default_price drop default;
 alter table products add column if not exists quality text;
 alter table products add column if not exists status text not null default 'active';
 alter table products add column if not exists product_image text;

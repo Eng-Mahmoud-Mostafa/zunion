@@ -1,4 +1,4 @@
-import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
 import {
   ArrowDownCircle,
@@ -102,13 +102,13 @@ type Product = {
   id: string;
   name: string;
   details: string;
-  price: number;
+  price?: number;
   active?: boolean;
   status?: "active" | "inactive";
   logoPlacement?: string;
   defaultQuantity?: number;
-  defaultPrice?: number;
-  defaultTotal?: number;
+  defaultPrice?: number | null;
+  defaultTotal?: number | null;
   quality?: string;
   productImage?: string;
   logoImage?: string;
@@ -879,7 +879,8 @@ function calculate(order: Order): Order {
 
 function normalizeProduct(product: Product): Product {
   const defaultQuantity = Math.max(1, Number(product.defaultQuantity ?? 1) || 1);
-  const defaultPrice = Math.max(0, Number(product.defaultPrice ?? product.price ?? 0) || 0);
+  const hasSavedPrice = product.defaultPrice !== undefined && product.defaultPrice !== null || product.price !== undefined && product.price !== null;
+  const defaultPrice = hasSavedPrice ? Math.max(0, Number(product.defaultPrice ?? product.price ?? 0) || 0) : undefined;
   const status = product.status ?? (product.active === false ? "inactive" : "active");
   return {
     ...product,
@@ -891,7 +892,7 @@ function normalizeProduct(product: Product): Product {
     logoPlacement: product.logoPlacement || "",
     defaultQuantity,
     defaultPrice,
-    defaultTotal: defaultQuantity * defaultPrice,
+    defaultTotal: defaultPrice === undefined ? undefined : defaultQuantity * defaultPrice,
     quality: product.quality || "",
     productImage: product.productImage || "",
     logoImage: product.logoImage || "",
@@ -1595,7 +1596,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         productName: product.name,
         order_type: product.name,
         quantity: current.quantity && current.quantity !== 1 ? current.quantity : product.defaultQuantity || 1,
-        price: current.price > 0 ? current.price : Number(product.defaultPrice ?? product.price ?? 0),
+        price: current.price,
         logo_place: current.logo_place || product.logoPlacement || "",
         quality_notes: current.quality_notes || product.quality || "",
         operationMethods: nextMethods?.length ? nextMethods : [""],
@@ -1970,31 +1971,11 @@ function StageSelect({ label, value, onChange }: { label: string; value: WorkSta
   );
 }
 
-function compactDateValue(value: string) {
-  if (!value) return "";
-  const [year, month, day] = value.split("-");
-  if (!year || !month || !day) return normalizeDigitsToEnglish(value);
-  return `${normalizeDigitsToEnglish(year)}-${Number(month)}-${Number(day)}`;
-}
-
 function RedDatePicker({ label, value, onChange, error }: { label: string; value: string; onChange: (value: string) => void; error?: string }) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  function openPicker() {
-    const input = inputRef.current;
-    if (!input) return;
-    if (typeof input.showPicker === "function") input.showPicker();
-    else input.click();
-    input.focus();
-  }
   return (
     <label className="red-date-picker">
       <span>{label}</span>
-      <span className="red-date-control">
-        <input ref={inputRef} type="date" value={value} onChange={(event) => onChange(event.target.value)} aria-label={label} />
-        <button type="button" className="red-date-pill" onClick={openPicker}>
-          {value ? compactDateValue(value) : "اختر التاريخ"}
-        </button>
-      </span>
+      <input className="delivery-date-input" type="date" value={value} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} aria-label={label} />
       <ErrorText message={error} />
     </label>
   );
@@ -3344,17 +3325,15 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { message: str
 function AddProductPage({ products, setProducts, session }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; session: Session }) {
   const [name, setName] = useState("");
   const [details, setDetails] = useState("");
-  const [price, setPrice] = useState(0);
 
   function save(event: React.FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;
-    const product: Product = { id: createId(), name: name.trim(), details, price: Number(price || 0), active: true, created_at: new Date().toISOString() };
+    const product: Product = { id: createId(), name: name.trim(), details, active: true, created_at: new Date().toISOString() };
     setProducts((current) => [product, ...current]);
     addAudit(session, "PRODUCT_CREATED", "products", product.id, undefined, product);
     setName("");
     setDetails("");
-    setPrice(0);
   }
 
   return (
@@ -3364,18 +3343,8 @@ function AddProductPage({ products, setProducts, session }: { products: Product[
         <form className="order-form compact-form" onSubmit={save}>
           <label>اسم المنتج<input value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label>الوصف<input value={details} onChange={(event) => setDetails(event.target.value)} /></label>
-          <label>السعر<input type="number" value={price} onChange={(event) => setPrice(Number(event.target.value))} /></label>
           <button className="primary-btn" type="submit">حفظ المنتج</button>
         </form>
-      </section>
-      <section className="table-wrap accounts-table">
-        <table>
-          <thead><tr><th>اسم المنتج</th><th>الوصف</th><th>السعر</th><th>تاريخ الإضافة</th></tr></thead>
-          <tbody>
-            {products.length === 0 && <EmptyRow colSpan={4} />}
-            {products.map((product) => <tr key={product.id}><td>{product.name}</td><td>{product.details || "-"}</td><td>{formatMoney(product.price)}</td><td>{formatDateArabic(product.created_at)}</td></tr>)}
-          </tbody>
-        </table>
       </section>
     </div>
   );
@@ -3383,16 +3352,15 @@ function AddProductPage({ products, setProducts, session }: { products: Product[
 
 function ProductManagerPage({ products, setProducts, session }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; session: Session }) {
   const normalizedProducts = products.map(normalizeProduct);
-  const emptyProductForm: Product = normalizeProduct({ id: "", name: "", details: "", price: 0, active: true, status: "active", created_at: "" });
+  const emptyProductForm: Product = normalizeProduct({ id: "", name: "", details: "", active: true, status: "active", created_at: "" });
   const [form, setForm] = useState<Product>(emptyProductForm);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [productImageStatus, setProductImageStatus] = useState("");
   const [productImageActive, setProductImageActive] = useState(false);
   const [saving, setSaving] = useState(false);
-  const total = Number(form.defaultPrice || 0);
 
   function setProduct<K extends keyof Product>(key: K, value: Product[K]) {
-    setForm((current) => normalizeProduct({ ...current, [key]: value, price: key === "defaultPrice" ? Number(value || 0) : current.price }));
+    setForm((current) => normalizeProduct({ ...current, [key]: value }));
   }
 
   async function setProductImageFromClipboard(file?: File) {
@@ -3469,7 +3437,6 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
     const trimmedName = form.name.trim();
     if (!trimmedName) nextErrors.name = "اسم المنتج مطلوب";
     if (normalizedProducts.some((product) => product.name.trim().toLowerCase() === trimmedName.toLowerCase())) nextErrors.name = "اسم المنتج موجود بالفعل";
-    if (Number(form.defaultPrice || 0) < 0) nextErrors.defaultPrice = "السعر لا يمكن أن يكون بالسالب";
     if (!["active", "inactive"].includes(form.status || "")) nextErrors.status = "حالة المنتج غير صحيحة";
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -3492,10 +3459,7 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
       id: createId(),
       name: form.name.trim(),
       details: form.details.trim(),
-      price: Number(form.defaultPrice || 0),
       defaultQuantity: 1,
-      defaultPrice: Number(form.defaultPrice || 0),
-      defaultTotal: total,
       logoPlacement: "",
       quality: "",
       logoImage: "",
@@ -3517,8 +3481,6 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
           <div className="form-grid product-form-grid">
             <label>اسم المنتج<input value={form.name} onChange={(event) => setProduct("name", event.target.value)} /><ErrorText message={errors.name} /></label>
             <label>التفاصيل<input value={form.details} onChange={(event) => setProduct("details", event.target.value)} /></label>
-            <label>السعر<input type="number" min={0} step="0.01" value={form.defaultPrice || 0} onChange={(event) => setProduct("defaultPrice", Number(event.target.value))} /><ErrorText message={errors.defaultPrice} /></label>
-            <Readonly label="الإجمالي" value={total} />
             <label>الحالة<select value={form.status || "active"} onChange={(event) => setProduct("status", event.target.value as Product["status"])}><option value="active">نشط</option><option value="inactive">غير نشط</option></select><ErrorText message={errors.status} /></label>
             <div className="product-image-field">
               <ImageInputWithClipboard
