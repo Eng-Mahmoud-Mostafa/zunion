@@ -2381,6 +2381,51 @@ button *,
   box-shadow: 0 10px 22px rgba(217, 4, 22, .25);
 }
 
+.sidebar button.sidebar-subitem,
+.sidebar button.sidebar-subitem span,
+.sidebar button.sidebar-subitem svg {
+  background: #fff !important;
+  color: var(--zunion-red) !important;
+  border-color: var(--zunion-red) !important;
+  stroke: currentColor;
+  fill: none;
+  opacity: 1;
+}
+
+.sidebar button.sidebar-subitem:hover,
+.sidebar button.sidebar-subitem:hover span,
+.sidebar button.sidebar-subitem:hover svg {
+  background: #fff1f2 !important;
+  color: var(--zunion-red) !important;
+  border-color: var(--zunion-red) !important;
+}
+
+.sidebar button.sidebar-subitem.active,
+.sidebar button.sidebar-subitem.active span,
+.sidebar button.sidebar-subitem.active svg {
+  background: var(--zunion-red) !important;
+  color: #fff !important;
+  border-color: var(--zunion-red) !important;
+}
+
+.sidebar button.sidebar-subitem:disabled,
+.sidebar button.sidebar-subitem.disabled,
+.sidebar button.sidebar-subitem:disabled span,
+.sidebar button.sidebar-subitem.disabled span,
+.sidebar button.sidebar-subitem:disabled svg,
+.sidebar button.sidebar-subitem.disabled svg {
+  background: #e5e7eb !important;
+  color: #4b5563 !important;
+  border-color: #d1d5db !important;
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.sidebar button.sidebar-subitem:focus-visible {
+  outline: 3px solid rgba(237, 28, 36, .35);
+  outline-offset: 2px;
+}
+
 .sidebar button.sidebar-logout {
   margin-top: auto;
   height: 52px;
