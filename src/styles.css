@@ -388,6 +388,67 @@ textarea:focus {
   min-width: 46px;
 }
 
+.image-clipboard-field {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+  outline: none;
+}
+
+.image-clipboard-field.active,
+.image-clipboard-field:focus-within {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(237, 28, 36, .12);
+}
+
+.image-field-label {
+  color: #000;
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.image-field-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.image-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  min-height: 32px;
+}
+
+.image-preview-box {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.image-file-meta {
+  display: grid;
+  gap: 3px;
+  color: var(--zunion-red);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.image-file-meta small {
+  color: var(--zunion-red);
+  font-weight: 700;
+}
+
 .form-grid.two {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 12px;

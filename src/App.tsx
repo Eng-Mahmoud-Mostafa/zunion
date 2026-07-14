@@ -1,4 +1,4 @@
-import { Component, Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
 import {
   ArrowDownCircle,
@@ -66,8 +66,12 @@ type OperationItem = {
   method: string;
   logoImage: string;
   logoFileName?: string;
+  logoImageSource?: "upload" | "clipboard";
+  logoImageSize?: number;
   workOrderImage: string;
   workOrderFileName?: string;
+  workOrderImageSource?: "upload" | "clipboard";
+  workOrderImageSize?: number;
 };
 type Customer = {
   id: string;
@@ -1049,6 +1053,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [productSearch, setProductSearch] = useState("");
+  const [activeImageField, setActiveImageField] = useState<{ index: number; key: "logoImage" | "workOrderImage" } | null>(null);
+  const [imageMessages, setImageMessages] = useState<Record<string, string>>({});
   const computed = calculate(form);
   const normalizedProducts = products.map(normalizeProduct);
   const activeProducts = normalizedProducts.filter((product) => product.status === "active");
@@ -1188,30 +1194,107 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     reader.readAsDataURL(file);
   }
 
-  function uploadOperationFile(index: number, key: "logoImage" | "workOrderImage", file?: File) {
-    if (key === "logoImage" && file?.type === "application/pdf") {
-      alert("الملف المرفوع غير مدعوم");
+  function operationMessageKey(index: number, key: "logoImage" | "workOrderImage") {
+    return `${index}-${key}`;
+  }
+
+  function safeClipboardFileName(type: string) {
+    const extension = type.includes("jpeg") ? "jpg" : type.includes("webp") ? "webp" : "png";
+    const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+    return `clipboard-image-${stamp}.${extension}`;
+  }
+
+  function setImageMessage(index: number, key: "logoImage" | "workOrderImage", message: string) {
+    setImageMessages((current) => ({ ...current, [operationMessageKey(index, key)]: message }));
+  }
+
+  function setOperationAttachment(index: number, key: "logoImage" | "workOrderImage", file: File | undefined, source: "upload" | "clipboard") {
+    if (!file) return;
+    if (!file.size) {
+      setImageMessage(index, key, "ملف الصورة فارغ");
       return;
     }
-    const previewUrl = filePreview(file);
-    if (!previewUrl || !file) return;
-    const currentItem = operationItems[index];
-    const previous = key === "logoImage" ? currentItem?.logoImage : currentItem?.workOrderImage;
-    if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
+    const allowedTypes = key === "workOrderImage"
+      ? ["image/jpeg", "image/png", "image/webp", "application/pdf"]
+      : ["image/jpeg", "image/png", "image/webp"];
+    if (!allowedTypes.includes(file.type)) {
+      setImageMessage(index, key, source === "clipboard" ? "نوع الصورة الموجود في الحافظة غير مدعوم" : "نوع الملف غير مسموح. استخدم jpg أو jpeg أو png أو webp.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setImageMessage(index, key, "حجم الملف أكبر من 10MB.");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       updateOperationItem(index, {
-        [key]: String(reader.result || previewUrl),
+        [key]: String(reader.result || ""),
         [key === "logoImage" ? "logoFileName" : "workOrderFileName"]: file.name,
+        [key === "logoImage" ? "logoImageSource" : "workOrderImageSource"]: source,
+        [key === "logoImage" ? "logoImageSize" : "workOrderImageSize"]: file.size,
       } as Partial<OperationItem>);
+      setImageMessage(index, key, source === "clipboard" ? "تم لصق الصورة من الحافظة" : "");
     };
     reader.onerror = () => {
-      updateOperationItem(index, {
-        [key]: previewUrl,
-        [key === "logoImage" ? "logoFileName" : "workOrderFileName"]: file.name,
-      } as Partial<OperationItem>);
+      setImageMessage(index, key, source === "clipboard" ? "حدث خطأ أثناء لصق الصورة" : "حدث خطأ أثناء قراءة الملف");
     };
     reader.readAsDataURL(file);
+  }
+
+  function removeOperationAttachment(index: number, key: "logoImage" | "workOrderImage") {
+    updateOperationItem(index, key === "logoImage"
+      ? { logoImage: "", logoFileName: "", logoImageSource: undefined, logoImageSize: undefined }
+      : { workOrderImage: "", workOrderFileName: "", workOrderImageSource: undefined, workOrderImageSize: undefined });
+    setImageMessage(index, key, "");
+  }
+
+  async function pasteFromClipboard(index: number, key: "logoImage" | "workOrderImage") {
+    setActiveImageField({ index, key });
+    if (!navigator.clipboard?.read) {
+      setImageMessage(index, key, "متصفحك لا يدعم قراءة الصور من الحافظة، استخدم اختيار صورة");
+      return;
+    }
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      for (const item of clipboardItems) {
+        const imageType = item.types.find((type) => ["image/png", "image/jpeg", "image/webp"].includes(type));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          setOperationAttachment(index, key, new File([blob], safeClipboardFileName(imageType), { type: imageType }), "clipboard");
+          return;
+        }
+      }
+      setImageMessage(index, key, "لا توجد صورة في الحافظة");
+    } catch (err) {
+      const message = err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError")
+        ? "تعذر الوصول إلى الحافظة. اسمح للموقع بقراءة الحافظة ثم حاول مرة أخرى"
+        : "حدث خطأ أثناء لصق الصورة";
+      setImageMessage(index, key, message);
+    }
+  }
+
+  function handleClipboardPaste(event: React.ClipboardEvent<HTMLFormElement>) {
+    if (!(event.target instanceof Element) || !event.target.closest(".image-clipboard-field")) return;
+    if (!activeImageField) {
+      alert("اختر مكان الصورة أولاً");
+      return;
+    }
+    const item = Array.from(event.clipboardData.items).find((clipboardItem) => clipboardItem.type.startsWith("image/"));
+    event.preventDefault();
+    if (!item) {
+      setImageMessage(activeImageField.index, activeImageField.key, "لا توجد صورة في الحافظة");
+      return;
+    }
+    if (!["image/png", "image/jpeg", "image/webp"].includes(item.type)) {
+      setImageMessage(activeImageField.index, activeImageField.key, "نوع الصورة الموجود في الحافظة غير مدعوم");
+      return;
+    }
+    const file = item.getAsFile();
+    if (!file) {
+      setImageMessage(activeImageField.index, activeImageField.key, "حدث خطأ أثناء لصق الصورة");
+      return;
+    }
+    setOperationAttachment(activeImageField.index, activeImageField.key, new File([file], safeClipboardFileName(file.type), { type: file.type }), "clipboard");
   }
 
   function addItem() {
@@ -1278,7 +1361,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   }
 
   return (
-    <form className="panel order-form" onSubmit={submit}>
+    <form className="panel order-form" onSubmit={submit} onPaste={handleClipboardPaste}>
       <div className="panel-head">
         <h2>{initial ? "تعديل أوردر" : "إضافة أوردر جديد"}</h2>
         {onCancel && <button type="button" className="ghost-btn compact" onClick={onCancel}>إلغاء</button>}
@@ -1361,18 +1444,35 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "صدر شمال" : "ظهر"} />
               </label>
               <button type="button" className="primary-btn compact operation-add-btn" onClick={addOperationItem}>+</button>
-              <label>
-                رفع صورة اللوجو
-                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => uploadOperationFile(index, "logoImage", event.target.files?.[0])} />
-                {item.logoFileName && <small>{item.logoFileName}</small>}
-                {item.logoImage && <img className="upload-preview" src={item.logoImage} alt="logo preview" />}
-              </label>
-              <label>
-                رفع صورة أمر الشغل
-                <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => uploadOperationFile(index, "workOrderImage", event.target.files?.[0])} />
-                {item.workOrderFileName && <small>{item.workOrderFileName}</small>}
-                {item.workOrderImage && (item.workOrderFileName?.toLowerCase().endsWith(".pdf") ? <span className="file-preview-link">PDF: {item.workOrderFileName}</span> : <img className="upload-preview" src={item.workOrderImage} alt="work order preview" />)}
-              </label>
+              <ImageInputWithClipboard
+                label="رفع صورة اللوجو"
+                value={item.logoImage}
+                fileName={item.logoFileName}
+                fileSize={item.logoImageSize}
+                source={item.logoImageSource}
+                accept="image/jpeg,image/png,image/webp"
+                active={activeImageField?.index === index && activeImageField.key === "logoImage"}
+                status={imageMessages[operationMessageKey(index, "logoImage")]}
+                onActivate={() => setActiveImageField({ index, key: "logoImage" })}
+                onFile={(file, source) => setOperationAttachment(index, "logoImage", file, source)}
+                onPaste={() => pasteFromClipboard(index, "logoImage")}
+                onRemove={() => removeOperationAttachment(index, "logoImage")}
+              />
+              <ImageInputWithClipboard
+                label="رفع صورة أمر الشغل"
+                value={item.workOrderImage}
+                fileName={item.workOrderFileName}
+                fileSize={item.workOrderImageSize}
+                source={item.workOrderImageSource}
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                allowPdf
+                active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
+                status={imageMessages[operationMessageKey(index, "workOrderImage")]}
+                onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
+                onFile={(file, source) => setOperationAttachment(index, "workOrderImage", file, source)}
+                onPaste={() => pasteFromClipboard(index, "workOrderImage")}
+                onRemove={() => removeOperationAttachment(index, "workOrderImage")}
+              />
               {operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
             </div>
           ))}
@@ -1488,6 +1588,59 @@ function StageSelect({ label, value, onChange }: { label: string; value: WorkSta
         {workStageOptions.map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}
       </select>
     </label>
+  );
+}
+
+type ImageInputWithClipboardProps = {
+  label: string;
+  value: string;
+  fileName?: string;
+  fileSize?: number;
+  source?: "upload" | "clipboard";
+  accept: string;
+  allowPdf?: boolean;
+  active?: boolean;
+  status?: string;
+  onActivate: () => void;
+  onFile: (file: File, source: "upload" | "clipboard") => void;
+  onPaste: () => void;
+  onRemove: () => void;
+};
+
+function formatFileSize(size?: number) {
+  if (!size) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ImageInputWithClipboard({ label, value, fileName, fileSize, source, accept, allowPdf, active, status, onActivate, onFile, onPaste, onRemove }: ImageInputWithClipboardProps) {
+  const inputId = useId();
+  const isPdf = Boolean(allowPdf && (fileName?.toLowerCase().endsWith(".pdf") || value.startsWith("data:application/pdf")));
+  return (
+    <div className={`image-clipboard-field${active ? " active" : ""}`} tabIndex={0} onFocus={onActivate} onClick={onActivate}>
+      <span className="image-field-label">{label}</span>
+      <div className="image-field-actions">
+        <label className="ghost-btn compact image-pick-btn" htmlFor={inputId}>اختيار صورة</label>
+        <input id={inputId} className="hidden-file-input" type="file" accept={accept} onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onFile(file, "upload");
+          event.currentTarget.value = "";
+        }} />
+        <button type="button" className="ghost-btn compact" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>لصق من الحافظة</button>
+        {value && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
+      </div>
+      {value && (
+        <div className="image-preview-box">
+          {isPdf ? <a className="file-preview-link" href={value} target="_blank">PDF: {fileName}</a> : <a href={value} target="_blank" aria-label={`معاينة ${label}`}><img className="upload-preview" src={value} alt={`معاينة ${label}`} /></a>}
+        </div>
+      )}
+      <div className="image-file-meta">
+        {fileName && <span>{source === "clipboard" ? "تم لصق الصورة من الحافظة" : fileName}</span>}
+        {fileSize ? <small>{formatFileSize(fileSize)}</small> : null}
+        {status && <small>{status}</small>}
+      </div>
+    </div>
   );
 }
 
