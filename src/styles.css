@@ -357,6 +357,37 @@ textarea:focus {
   gap: 12px;
 }
 
+.order-basic-row,
+.order-finance-row,
+.operation-item-row {
+  display: grid;
+  gap: 12px;
+  align-items: start;
+}
+
+.order-basic-row {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.order-finance-row {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.order-materials-section {
+  width: min(280px, 100%);
+  margin-left: auto;
+}
+
+.operation-item-row {
+  grid-template-columns: minmax(220px, 1.2fr) auto minmax(220px, 1fr) minmax(220px, 1fr) auto;
+}
+
+.operation-add-btn,
+.operation-delete-btn {
+  align-self: end;
+  min-width: 46px;
+}
+
 .form-grid.two {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 12px;
@@ -1635,10 +1666,24 @@ body {
 .filters,
 .form-grid.two,
 .line-item,
-.finance-form {
+.finance-form,
+.order-basic-row,
+.order-finance-row,
+.operation-item-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
+}
+
+.order-basic-row {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.order-finance-row {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.operation-item-row {
+  grid-template-columns: minmax(220px, 1.2fr) auto minmax(220px, 1fr) minmax(220px, 1fr) auto;
 }
 
 input,
@@ -1734,8 +1779,16 @@ td {
   .form-grid.two,
   .line-item,
   .finance-form,
-  .finance-hero {
+  .finance-hero,
+  .order-basic-row,
+  .order-finance-row,
+  .operation-item-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .operation-item-row .operation-add-btn,
+  .operation-item-row .operation-delete-btn {
+    align-self: stretch;
   }
 }
 
@@ -1797,6 +1850,9 @@ td {
   .line-item,
   .finance-form,
   .finance-hero,
+  .order-basic-row,
+  .order-finance-row,
+  .operation-item-row,
   .finance-month,
   .finance-account-select .account-buttons,
   .account-buttons {

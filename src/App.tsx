@@ -62,6 +62,13 @@ type OrderItem = {
   quality: string;
   status: string;
 };
+type OperationItem = {
+  method: string;
+  logoImage: string;
+  logoFileName?: string;
+  workOrderImage: string;
+  workOrderFileName?: string;
+};
 type Customer = {
   id: string;
   source_person: string;
@@ -144,6 +151,7 @@ type Order = {
   customParty?: string;
   materialsStatus?: "available" | "unavailable" | "";
   operationMethods?: string[];
+  operationItems?: OperationItem[];
   logoFileName?: string;
   workOrderFileName?: string;
   details: string;
@@ -456,6 +464,7 @@ const emptyOrder: Order = {
   customParty: "",
   materialsStatus: "available",
   operationMethods: [""],
+  operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
   logoFileName: "",
   workOrderFileName: "",
   details: "",
@@ -1045,6 +1054,15 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   const activeProducts = normalizedProducts.filter((product) => product.status === "active");
   const selectedProduct = normalizedProducts.find((product) => product.id === form.productId);
   const visibleProducts = activeProducts.filter((product) => `${product.name} ${product.details}`.toLowerCase().includes(productSearch.trim().toLowerCase()));
+  const operationItems: OperationItem[] = form.operationItems?.length
+    ? form.operationItems
+    : (form.operationMethods?.length ? form.operationMethods : [""]).map((method, index) => ({
+      method,
+      logoImage: index === 0 ? form.logo_image_url : "",
+      logoFileName: index === 0 ? form.logoFileName : "",
+      workOrderImage: index === 0 ? form.work_order_image_url : "",
+      workOrderFileName: index === 0 ? form.workOrderFileName : "",
+    }));
 
   function set<K extends keyof Order>(key: K, value: Order[K]) {
     setForm((current) => calculate({ ...current, [key]: value, updated_at: new Date().toISOString() }));
@@ -1088,6 +1106,9 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       const nextMethods = current.operationMethods?.some((method) => method.trim())
         ? current.operationMethods
         : (product.logoPlacement ? [product.logoPlacement] : (product.operationMethods?.length ? product.operationMethods : current.operationMethods));
+      const nextOperationItems = nextMethods?.length
+        ? nextMethods.map((method, index) => current.operationItems?.[index] ? { ...current.operationItems[index], method } : { method, logoImage: "", workOrderImage: "" })
+        : [{ method: "", logoImage: "", workOrderImage: "" }];
       return calculate({
         ...current,
         productId: product.id,
@@ -1098,23 +1119,37 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         logo_place: current.logo_place || product.logoPlacement || "",
         quality_notes: current.quality_notes || product.quality || "",
         operationMethods: nextMethods?.length ? nextMethods : [""],
+        operationItems: nextOperationItems,
         updated_at: new Date().toISOString(),
       });
     });
   }
 
-  function setOperationMethod(index: number, value: string) {
-    set("operationMethods", (form.operationMethods?.length ? form.operationMethods : [""]).map((method, currentIndex) => currentIndex === index ? value : method));
+  function syncOperationItems(items: OperationItem[]) {
+    const normalized = items.length ? items : [{ method: "", logoImage: "", workOrderImage: "" }];
+    setForm((current) => calculate({
+      ...current,
+      operationItems: normalized,
+      operationMethods: normalized.map((item) => item.method),
+      logo_image_url: normalized[0]?.logoImage || "",
+      logoFileName: normalized[0]?.logoFileName || "",
+      work_order_image_url: normalized[0]?.workOrderImage || "",
+      workOrderFileName: normalized[0]?.workOrderFileName || "",
+      updated_at: new Date().toISOString(),
+    }));
   }
 
-  function addOperationMethod() {
-    set("operationMethods", [...(form.operationMethods?.length ? form.operationMethods : [""]), ""]);
+  function updateOperationItem(index: number, patch: Partial<OperationItem>) {
+    syncOperationItems(operationItems.map((item, currentIndex) => currentIndex === index ? { ...item, ...patch } : item));
   }
 
-  function removeOperationMethod(index: number) {
-    const methods = form.operationMethods?.length ? form.operationMethods : [""];
-    if (methods.length === 1) return;
-    set("operationMethods", methods.filter((_, currentIndex) => currentIndex !== index));
+  function addOperationItem() {
+    syncOperationItems([...operationItems, { method: "", logoImage: "", workOrderImage: "" }]);
+  }
+
+  function removeOperationItem(index: number) {
+    if (operationItems.length === 1) return;
+    syncOperationItems(operationItems.filter((_, currentIndex) => currentIndex !== index));
   }
 
   function filePreview(file?: File) {
@@ -1153,6 +1188,32 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     reader.readAsDataURL(file);
   }
 
+  function uploadOperationFile(index: number, key: "logoImage" | "workOrderImage", file?: File) {
+    if (key === "logoImage" && file?.type === "application/pdf") {
+      alert("الملف المرفوع غير مدعوم");
+      return;
+    }
+    const previewUrl = filePreview(file);
+    if (!previewUrl || !file) return;
+    const currentItem = operationItems[index];
+    const previous = key === "logoImage" ? currentItem?.logoImage : currentItem?.workOrderImage;
+    if (previous?.startsWith("blob:")) URL.revokeObjectURL(previous);
+    const reader = new FileReader();
+    reader.onload = () => {
+      updateOperationItem(index, {
+        [key]: String(reader.result || previewUrl),
+        [key === "logoImage" ? "logoFileName" : "workOrderFileName"]: file.name,
+      } as Partial<OperationItem>);
+    };
+    reader.onerror = () => {
+      updateOperationItem(index, {
+        [key]: previewUrl,
+        [key === "logoImage" ? "logoFileName" : "workOrderFileName"]: file.name,
+      } as Partial<OperationItem>);
+    };
+    reader.readAsDataURL(file);
+  }
+
   function addItem() {
     const item: OrderItem = { id: createId(), product_name: "", details: "", product_image_url: "", logo_url: "", logo_place: "", quantity: 1, price: 0, total: 0, quality: "", status: "جديد" };
     set("items", [...form.items, item]);
@@ -1172,7 +1233,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     event.preventDefault();
     if (saving) return;
     const nextErrors: Record<string, string> = {};
-    const methods = (form.operationMethods || []).map((method) => method.trim()).filter(Boolean);
+    const normalizedOperationItems = operationItems.map((item) => ({ ...item, method: item.method.trim() }));
+    const methods = normalizedOperationItems.map((item) => item.method).filter(Boolean);
     const total = Number(form.quantity || 0) * Number(form.price || 0);
     const paid = Number(form.paid || 0);
     if (!form.order_number.trim()) nextErrors.order_number = "رقم الأوردر مطلوب";
@@ -1203,6 +1265,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       order_type: selectedName,
       client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
       operationMethods: methods,
+      operationItems: normalizedOperationItems.filter((item) => item.method || item.logoImage || item.workOrderImage),
       workStage: "new",
       workflow_stage: "أوردر جديد",
       order_status: "جديد",
@@ -1222,15 +1285,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       </div>
       <section className="form-section">
         <h3>بيانات الأوردر</h3>
-        <div className="form-grid">
+        <div className="order-basic-row">
           <label>رقم الأوردر<input value={form.order_number} readOnly /></label>
-          <label>
-            اسم العميل
-            <input list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} />
-            <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
-            <ErrorText message={errors.client_name} />
-          </label>
-          <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
           <label>
             طرف
             <select value={partyOptions.includes(form.source_person) ? form.source_person : "other"} onChange={(event) => {
@@ -1247,8 +1303,20 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             <ErrorText message={errors.source_person} />
           </label>
           <label>
+            اسم العميل
+            <input list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} />
+            <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
+            <ErrorText message={errors.client_name} />
+          </label>
+          <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
+          <label>تاريخ التسليم<input type="date" value={form.delivery_date} onChange={(event) => set("delivery_date", event.target.value)} /><ErrorText message={errors.delivery_date} /></label>
+        </div>
+      </section>
+      <section className="form-section">
+        <h3>بيانات المنتج والحساب</h3>
+        <div className="order-finance-row">
+          <label>
             نوع المنتج
-            <input placeholder="ابحث عن المنتج" value={productSearch} onChange={(event) => setProductSearch(event.target.value)} />
             <select value={form.productId || ""} onChange={(event) => selectProduct(event.target.value)}>
               <option value="">{activeProducts.length ? "اختر نوع المنتج" : "لا توجد منتجات مضافة"}</option>
               {visibleProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
@@ -1259,20 +1327,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             <ErrorText message={errors.productId} />
           </label>
           <label>العدد<input type="number" min={1} value={form.quantity} onChange={(event) => set("quantity", Number(event.target.value))} /><ErrorText message={errors.quantity} /></label>
-          <label>تاريخ التسليم<input type="date" value={form.delivery_date} onChange={(event) => set("delivery_date", event.target.value)} /><ErrorText message={errors.delivery_date} /></label>
-          <label>
-            الخامات
-            <select value={form.materialsStatus || ""} onChange={(event) => set("materialsStatus", event.target.value as Order["materialsStatus"])}>
-              <option value="">اختر حالة الخامات</option>
-              {materialsOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-            <ErrorText message={errors.materialsStatus} />
-          </label>
-        </div>
-      </section>
-      <section className="form-section">
-        <h3>البيانات المالية</h3>
-        <div className="form-grid">
           <label>السعر<input type="number" min={0} step="0.01" value={form.price} onChange={(event) => set("price", Number(event.target.value))} /><ErrorText message={errors.price} /></label>
           <Readonly label="الإجمالي" value={computed.total} />
           <label>المدفوع<input type="number" min={0} step="0.01" value={form.paid} onChange={(event) => set("paid", Number(event.target.value))} /><ErrorText message={errors.paid} /></label>
@@ -1287,40 +1341,43 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
           <Readonly label="المتبقي" value={computed.remaining} />
         </div>
       </section>
-      <section className="form-section">
-        <div className="panel-head">
-          <h3>طريقة التشغيل</h3>
-          <button type="button" className="ghost-btn compact" onClick={addOperationMethod}>+</button>
-        </div>
+      <section className="form-section order-materials-section">
+        <label>
+          الخامات
+          <select value={form.materialsStatus || ""} onChange={(event) => set("materialsStatus", event.target.value as Order["materialsStatus"])}>
+            <option value="">اختر حالة الخامات</option>
+            {materialsOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <ErrorText message={errors.materialsStatus} />
+        </label>
+      </section>
+      <section className="form-section order-operation-section">
+        <h3>طريقة التشغيل</h3>
         <div className="operation-methods">
-          {(form.operationMethods?.length ? form.operationMethods : [""]).map((method, index) => (
-            <label key={index}>
-              طريقة تشغيل {index + 1}
-              <div className="operation-method-row">
-                <input value={method} onChange={(event) => setOperationMethod(index, event.target.value)} />
-                <button type="button" className="ghost-btn compact" disabled={(form.operationMethods?.length || 1) === 1} onClick={() => removeOperationMethod(index)}>حذف</button>
-              </div>
-            </label>
+          {operationItems.map((item, index) => (
+            <div className="operation-item-row" key={index}>
+              <label>
+                طريقة التشغيل
+                <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "صدر شمال" : "ظهر"} />
+              </label>
+              <button type="button" className="primary-btn compact operation-add-btn" onClick={addOperationItem}>+</button>
+              <label>
+                رفع صورة اللوجو
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => uploadOperationFile(index, "logoImage", event.target.files?.[0])} />
+                {item.logoFileName && <small>{item.logoFileName}</small>}
+                {item.logoImage && <img className="upload-preview" src={item.logoImage} alt="logo preview" />}
+              </label>
+              <label>
+                رفع صورة أمر الشغل
+                <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => uploadOperationFile(index, "workOrderImage", event.target.files?.[0])} />
+                {item.workOrderFileName && <small>{item.workOrderFileName}</small>}
+                {item.workOrderImage && (item.workOrderFileName?.toLowerCase().endsWith(".pdf") ? <span className="file-preview-link">PDF: {item.workOrderFileName}</span> : <img className="upload-preview" src={item.workOrderImage} alt="work order preview" />)}
+              </label>
+              {operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
+            </div>
           ))}
         </div>
         <ErrorText message={errors.operationMethods} />
-      </section>
-      <section className="form-section">
-        <h3>المرفقات</h3>
-        <div className="form-grid two">
-          <label>
-            رفع صورة اللوجو
-            <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => upload("logo_image_url", event.target.files?.[0])} />
-            {form.logoFileName && <small>{form.logoFileName}</small>}
-            {form.logo_image_url && <img className="upload-preview" src={form.logo_image_url} alt="logo preview" />}
-          </label>
-          <label>
-            رفع صورة أمر الشغل
-            <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => upload("work_order_image_url", event.target.files?.[0])} />
-            {form.workOrderFileName && <small>{form.workOrderFileName}</small>}
-            {form.work_order_image_url && (form.workOrderFileName?.toLowerCase().endsWith(".pdf") ? <span className="file-preview-link">PDF: {form.workOrderFileName}</span> : <img className="upload-preview" src={form.work_order_image_url} alt="work order preview" />)}
-          </label>
-        </div>
       </section>
       <div className="form-grid" hidden>
         <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} />
