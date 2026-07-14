@@ -33,5 +33,5 @@ export const roleByEmail = {
   "mahmoud.foly.2007@gmail.com": "Finish",
 } as const;
 
-export type UserRole = (typeof roleByEmail)[keyof typeof roleByEmail];
+export type UserRole = string;
 export type UserEmail = keyof typeof roleByEmail;

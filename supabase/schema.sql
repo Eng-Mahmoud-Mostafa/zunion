@@ -6,13 +6,44 @@ create table if not exists public.users_profile (
   username text unique not null,
   full_name text not null,
   email text,
-  role text not null check (role in ('Master', 'Operator', 'Supervisor', 'Finishing', 'Helper', 'Worker', 'Finish')),
+  role text not null,
   password_hash text not null,
   password_salt text not null,
   is_active boolean not null default true,
   must_change_password boolean not null default true,
+  permission_overrides jsonb not null default '{"allow":[],"deny":[]}'::jsonb,
+  token_version integer not null default 0,
+  last_login_at timestamptz,
+  updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+alter table public.users_profile drop constraint if exists users_profile_role_check;
+alter table public.users_profile add column if not exists permission_overrides jsonb not null default '{"allow":[],"deny":[]}'::jsonb;
+alter table public.users_profile add column if not exists token_version integer not null default 0;
+alter table public.users_profile add column if not exists last_login_at timestamptz;
+alter table public.users_profile add column if not exists updated_at timestamptz not null default now();
+alter table public.users_profile add column if not exists is_active boolean not null default true;
+alter table public.users_profile add column if not exists must_change_password boolean not null default true;
+
+create table if not exists public.roles (
+  id uuid primary key default gen_random_uuid(),
+  name text unique not null,
+  description text not null default '',
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  permissions jsonb not null default '[]'::jsonb,
+  is_system_role boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.roles add column if not exists description text not null default '';
+alter table public.roles add column if not exists status text not null default 'active';
+alter table public.roles add column if not exists permissions jsonb not null default '[]'::jsonb;
+alter table public.roles add column if not exists is_system_role boolean not null default false;
+alter table public.roles add column if not exists updated_at timestamptz not null default now();
+alter table public.roles drop constraint if exists roles_status_check;
+alter table public.roles add constraint roles_status_check check (status in ('active', 'inactive'));
 
 create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(),
@@ -168,7 +199,18 @@ create trigger set_products_updated_at
   before update on public.products
   for each row execute function public.set_updated_at();
 
+drop trigger if exists set_users_profile_updated_at on public.users_profile;
+create trigger set_users_profile_updated_at
+  before update on public.users_profile
+  for each row execute function public.set_updated_at();
+
+drop trigger if exists set_roles_updated_at on public.roles;
+create trigger set_roles_updated_at
+  before update on public.roles
+  for each row execute function public.set_updated_at();
+
 alter table public.users_profile enable row level security;
+alter table public.roles enable row level security;
 alter table public.customers enable row level security;
 alter table public.products enable row level security;
 alter table public.orders enable row level security;
@@ -194,7 +236,7 @@ begin
   end loop;
 end $$;
 
-revoke all on public.users_profile, public.password_reset_codes from anon, authenticated;
+revoke all on public.users_profile, public.roles, public.password_reset_codes from anon, authenticated;
 grant select, insert, update, delete on public.customers, public.products, public.orders, public.transactions, public.operation_logs, public.company_settings to authenticated;
 revoke all on public.customers, public.products, public.orders, public.transactions, public.operation_logs, public.company_settings from anon;
 
@@ -222,6 +264,59 @@ drop policy if exists "authenticated users can delete order files" on storage.ob
 create policy "authenticated users can delete order files"
   on storage.objects for delete to authenticated
   using (bucket_id = 'order-files');
+
+with default_permissions(name, description, permissions) as (
+  values
+    ('Master', 'Full system access', array[
+      'dashboard.view','orders.view','orders.create','orders.edit','orders.delete','orders.print',
+      'customers.view','customers.create','customers.edit','customers.delete','customers.print',
+      'products.view','products.create','products.edit','products.delete','products.print',
+      'search.use','expenses.view','expenses.create','expenses.print','revenues.view','revenues.create','revenues.print',
+      'operation.view','operation.update','operation.upload','operation.print',
+      'finishing.view','finishing.update','finishing.upload','finishing.print',
+      'reports.view','reports.print','import.export',
+      'users.view','users.create','users.edit','users.deactivate','users.delete','users.resetPassword',
+      'roles.view','roles.create','roles.edit','roles.delete','permissions.manage','audit.view','settings.view'
+    ]::text[]),
+    ('Helper', 'Order and customer helper access', array[
+      'dashboard.view','orders.view','orders.create','orders.edit','orders.print',
+      'customers.view','customers.create','customers.edit','customers.print',
+      'products.view','search.use','import.export'
+    ]::text[]),
+    ('Operator', 'Operation team access', array[
+      'dashboard.view','orders.view','orders.edit','orders.print',
+      'customers.view','products.view','search.use',
+      'operation.view','operation.update','operation.upload','operation.print'
+    ]::text[]),
+    ('Supervisor', 'Supervisor access', array[
+      'dashboard.view','orders.view','orders.create','orders.edit','orders.print',
+      'customers.view','customers.create','customers.edit','customers.print',
+      'products.view','products.create','products.edit','products.print',
+      'search.use','operation.view','operation.update','operation.print',
+      'finishing.view','finishing.update','finishing.print','reports.view','reports.print'
+    ]::text[]),
+    ('Finishing', 'Finishing team access', array[
+      'dashboard.view','orders.view','orders.edit','orders.print',
+      'customers.view','products.view','search.use',
+      'finishing.view','finishing.update','finishing.upload','finishing.print'
+    ]::text[]),
+    ('Worker', 'Worker access', array[
+      'dashboard.view','orders.view','orders.edit','orders.print',
+      'products.view','operation.view','operation.update','operation.upload','operation.print'
+    ]::text[]),
+    ('Finish', 'Legacy finishing role', array[
+      'dashboard.view','orders.view','orders.edit','orders.print',
+      'products.view','finishing.view','finishing.update','finishing.upload','finishing.print'
+    ]::text[])
+)
+insert into public.roles (name, description, status, permissions, is_system_role)
+select name, description, 'active', to_jsonb(permissions), true
+from default_permissions
+on conflict (name) do update set
+  description = excluded.description,
+  status = excluded.status,
+  permissions = excluded.permissions,
+  is_system_role = true;
 
 insert into public.users_profile (username, full_name, email, role, password_salt, password_hash, must_change_password)
 values

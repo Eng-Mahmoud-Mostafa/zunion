@@ -12,6 +12,7 @@ import { audit, canSeeFinancials, hashSecret, otpCode, randomToken, requireAuth,
 import { sendOtpEmail, sendVerificationEmail } from "./mailer.js";
 import { customerSchema, orderSchema, statusSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
+import { validatePermissions, type PermissionKey } from "./permissions.js";
 
 const app = express();
 fs.mkdirSync(config.uploadDir, { recursive: true });
@@ -33,6 +34,8 @@ const serviceRoutedPrefixes = [
   "/dashboard",
   "/audit",
   "/finance",
+  "/users",
+  "/roles",
 ];
 
 app.use((req, _res, next) => {
@@ -176,6 +179,43 @@ function requireFinanceSession(req: express.Request, res: express.Response, next
   return next();
 }
 
+function appSessionHasPermission(session: { role?: string } | null, permission: PermissionKey) {
+  if (!session) return false;
+  if (session.role === "Master") return true;
+  return false;
+}
+
+function requireAppPermission(permission: PermissionKey) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const session = loadAppSessionCookie(req);
+    if (!session) return res.status(401).json({ message: "يجب تسجيل الدخول أولا." });
+    if (!appSessionHasPermission(session, permission)) return res.status(403).json({ message: "غير مصرح لك بتنفيذ هذا الإجراء" });
+    return next();
+  };
+}
+
+const permissionOverridesSchema = z.object({
+  allow: z.array(z.string()).default([]),
+  deny: z.array(z.string()).default([]),
+}).default({ allow: [], deny: [] });
+
+const userAdminSchema = z.object({
+  username: z.string().min(1),
+  name: z.string().min(1),
+  password: z.string().min(4).optional(),
+  roleId: z.string().min(1),
+  status: z.enum(["active", "inactive"]).default("active"),
+  mustChangePassword: z.boolean().default(true),
+  permissionOverrides: permissionOverridesSchema,
+});
+
+const roleAdminSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional().default(""),
+  status: z.enum(["active", "inactive"]).default("active"),
+  permissions: z.array(z.string()).default([]),
+});
+
 app.post("/api/auth/login", async (req, res) => {
   const parsed = z.object({ username: z.string().min(1), password: z.string().min(1), stayLoggedIn: z.boolean().optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "اسم المستخدم وكلمة المرور مطلوبان." });
@@ -187,6 +227,12 @@ app.post("/api/auth/login", async (req, res) => {
     : seededUsers[username]?.password === parsed.data.password;
   if (!validPassword) return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
   const { session, maxAge } = makeSession(profile, parsed.data.stayLoggedIn);
+  if (config.supabaseUrl && config.supabaseServiceKey && profile.id) {
+    supabaseRest(`users_profile?id=eq.${encodeURIComponent(profile.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ last_login_at: new Date().toISOString() }),
+    }).catch((error) => console.warn("Supabase users_profile last_login_at update failed.", error));
+  }
   res.cookie("zunion_app_session", JSON.stringify(session), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
   return res.json({ ok: true, session, mustChangePassword: profile.must_change_password ?? true });
 });
@@ -342,6 +388,162 @@ app.post("/api/auth/logout", requireAuth, async (req, res) => {
 });
 
 app.get("/api/auth/me", requireAuth, (req, res) => res.json({ user: req.user }));
+
+app.get("/api/users", requireAppPermission("users.view"), async (_req, res) => {
+  try {
+    const users = await supabaseRest("users_profile?select=id,username,full_name,email,role,is_active,must_change_password,permission_overrides,created_at,last_login_at&order=created_at.desc");
+    return res.json({ users });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر تحميل المستخدمين", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/users", requireAppPermission("users.create"), async (req, res) => {
+  const parsed = userAdminSchema.extend({ password: z.string().min(4) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "بيانات المستخدم غير صحيحة", issues: parsed.error.issues });
+  try {
+    const username = parsed.data.username.trim().toLowerCase();
+    const exists = await supabaseRest<Array<{ id: string }>>(`users_profile?username=eq.${encodeURIComponent(username)}&select=id`);
+    if (exists[0]) return res.status(409).json({ message: "اسم المستخدم مستخدم بالفعل" });
+    validatePermissions(parsed.data.permissionOverrides.allow);
+    validatePermissions(parsed.data.permissionOverrides.deny);
+    const salt = randomToken(12);
+    const rows = await supabaseRest<Array<{ id: string }>>("users_profile", {
+      method: "POST",
+      body: JSON.stringify([{
+        username,
+        full_name: parsed.data.name.trim(),
+        email: `${username.replace(/\s+/g, ".")}@zunion.local`,
+        role: parsed.data.roleId,
+        password_salt: salt,
+        password_hash: passwordHash(parsed.data.password, salt),
+        is_active: parsed.data.status === "active",
+        must_change_password: parsed.data.mustChangePassword,
+        permission_overrides: parsed.data.permissionOverrides,
+      }]),
+    });
+    await audit(null, "USER_CREATED", "users_profile", rows[0]?.id, undefined, { username, role: parsed.data.roleId });
+    return res.status(201).json({ user: rows[0] });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر إنشاء المستخدم", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.patch("/api/users/:id", requireAppPermission("users.edit"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = userAdminSchema.omit({ password: true }).partial().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "بيانات المستخدم غير صحيحة", issues: parsed.error.issues });
+  try {
+    if (parsed.data.permissionOverrides) {
+      validatePermissions(parsed.data.permissionOverrides.allow);
+      validatePermissions(parsed.data.permissionOverrides.deny);
+    }
+    const body: Record<string, unknown> = {};
+    if (parsed.data.username) body.username = parsed.data.username.trim().toLowerCase();
+    if (parsed.data.name) body.full_name = parsed.data.name.trim();
+    if (parsed.data.roleId) body.role = parsed.data.roleId;
+    if (parsed.data.status) body.is_active = parsed.data.status === "active";
+    if (typeof parsed.data.mustChangePassword === "boolean") body.must_change_password = parsed.data.mustChangePassword;
+    if (parsed.data.permissionOverrides) body.permission_overrides = parsed.data.permissionOverrides;
+    const rows = await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
+    await audit(null, parsed.data.roleId ? "USER_ROLE_CHANGED" : "USER_UPDATED", "users_profile", id, undefined, body);
+    return res.json({ user: rows });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر تحديث المستخدم", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/users/:id/reset-password", requireAppPermission("users.resetPassword"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = z.object({ password: z.string().min(4), mustChangePassword: z.boolean().default(true) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "كلمة المرور الجديدة غير صحيحة", issues: parsed.error.issues });
+  const salt = randomToken(12);
+  try {
+    await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ password_salt: salt, password_hash: passwordHash(parsed.data.password, salt), must_change_password: parsed.data.mustChangePassword }),
+    });
+    await audit(null, "PASSWORD_RESET_BY_MASTER", "users_profile", id, undefined, { mustChangePassword: parsed.data.mustChangePassword });
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر تغيير كلمة المرور", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.patch("/api/users/:id/status", requireAppPermission("users.deactivate"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = z.object({ status: z.enum(["active", "inactive"]) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "حالة المستخدم غير صحيحة" });
+  try {
+    await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ is_active: parsed.data.status === "active" }) });
+    await audit(null, parsed.data.status === "active" ? "USER_ACTIVATED" : "USER_DEACTIVATED", "users_profile", id, undefined, parsed.data);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر تغيير حالة المستخدم", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.delete("/api/users/:id", requireAppPermission("users.delete"), async (req, res) => {
+  const id = param(req.params.id);
+  try {
+    await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+    await audit(null, "USER_DELETED", "users_profile", id);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(409).json({ message: "لا يمكن حذف هذا المستخدم لوجود بيانات مرتبطة به", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/roles", requireAppPermission("roles.view"), async (_req, res) => {
+  try {
+    const roles = await supabaseRest("roles?select=*&order=created_at.desc");
+    return res.json({ roles });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر تحميل الأدوار", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/roles", requireAppPermission("roles.create"), async (req, res) => {
+  const parsed = roleAdminSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "بيانات الدور غير صحيحة", issues: parsed.error.issues });
+  try {
+    const permissions = validatePermissions(parsed.data.permissions);
+    const rows = await supabaseRest("roles", { method: "POST", body: JSON.stringify([{ name: parsed.data.name.trim(), description: parsed.data.description, status: parsed.data.status, permissions, is_system_role: false }]) });
+    await audit(null, "ROLE_CREATED", "roles", undefined, undefined, { name: parsed.data.name });
+    return res.status(201).json({ role: rows });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر إنشاء الدور", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.patch("/api/roles/:id", requireAppPermission("roles.edit"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = roleAdminSchema.partial().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "بيانات الدور غير صحيحة", issues: parsed.error.issues });
+  try {
+    const body: Record<string, unknown> = {};
+    if (parsed.data.name) body.name = parsed.data.name.trim();
+    if (typeof parsed.data.description === "string") body.description = parsed.data.description;
+    if (parsed.data.status) body.status = parsed.data.status;
+    if (parsed.data.permissions) body.permissions = validatePermissions(parsed.data.permissions);
+    await supabaseRest(`roles?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
+    await audit(null, parsed.data.permissions ? "ROLE_PERMISSIONS_CHANGED" : "ROLE_UPDATED", "roles", id, undefined, body);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر تحديث الدور", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.delete("/api/roles/:id", requireAppPermission("roles.delete"), async (req, res) => {
+  const id = param(req.params.id);
+  try {
+    await supabaseRest(`roles?id=eq.${encodeURIComponent(id)}&is_system_role=eq.false`, { method: "DELETE" });
+    await audit(null, "ROLE_DELETED", "roles", id);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(409).json({ message: "لا يمكن حذف دور مرتبط بمستخدمين", details: error instanceof Error ? error.message : String(error) });
+  }
+});
 
 app.get("/api/orders", requireAuth, async (req, res) => {
   const where = orderVisibility(req.user!.role);

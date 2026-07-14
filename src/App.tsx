@@ -47,7 +47,7 @@ type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | 
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
 type View = "dashboard" | "orders" | "new" | "addCustomer" | "addProduct" | "search" | "worker" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
-type Role = "Master" | "Operator" | "Supervisor" | "Finishing" | "Helper" | "Worker" | "Finish";
+type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string };
 type OrderItem = {
   id: string;
@@ -188,7 +188,110 @@ const customersKey = "zunion-local-customers-v1";
 const financeKey = "zunion-local-finance-v1";
 const productsKey = "zunion-local-products-v1";
 const localPasswordsKey = "zunion-local-passwords-v1";
+const managedUsersKey = "zunion-managed-users-v1";
+const managedRolesKey = "zunion-managed-roles-v1";
 const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
+
+type PermissionKey =
+  | "dashboard.view" | "orders.view" | "orders.create" | "orders.edit" | "orders.delete" | "orders.print"
+  | "customers.view" | "customers.create" | "customers.edit" | "customers.delete" | "customers.print"
+  | "products.view" | "products.create" | "products.edit" | "products.delete" | "products.print"
+  | "search.use" | "expenses.view" | "expenses.create" | "expenses.print" | "revenues.view" | "revenues.create" | "revenues.print"
+  | "operation.view" | "operation.update" | "operation.upload" | "operation.print"
+  | "finishing.view" | "finishing.update" | "finishing.upload" | "finishing.print"
+  | "reports.view" | "reports.print" | "import.export"
+  | "users.view" | "users.create" | "users.edit" | "users.deactivate" | "users.delete" | "users.resetPassword"
+  | "roles.view" | "roles.create" | "roles.edit" | "roles.delete" | "permissions.manage" | "audit.view" | "settings.view";
+
+type PermissionOverride = { allow: PermissionKey[]; deny: PermissionKey[] };
+type ManagedUser = {
+  id: string;
+  username: string;
+  fullName: string;
+  email: string;
+  role: string;
+  password: string;
+  status: "active" | "inactive";
+  mustChangePassword: boolean;
+  permissionOverrides: PermissionOverride;
+  createdAt: string;
+  lastLoginAt?: string;
+};
+type ManagedRole = {
+  id: string;
+  name: string;
+  description: string;
+  status: "active" | "inactive";
+  permissions: PermissionKey[];
+  isSystemRole: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const permissionGroups: Array<{ group: string; permissions: Array<{ key: PermissionKey; label: string; action: string }> }> = [
+  { group: "الرئيسية", permissions: [
+    { key: "dashboard.view", label: "الرئيسية", action: "عرض" },
+    { key: "orders.view", label: "متابعة أوردرات", action: "عرض" },
+    { key: "orders.create", label: "أوردر جديد", action: "إضافة" },
+    { key: "orders.edit", label: "الأوردرات", action: "تعديل" },
+    { key: "orders.delete", label: "الأوردرات", action: "حذف" },
+    { key: "orders.print", label: "الأوردرات", action: "طباعة" },
+  ] },
+  { group: "العملاء", permissions: [
+    { key: "customers.view", label: "بيانات العملاء", action: "عرض" },
+    { key: "customers.create", label: "إضافة عميل", action: "إضافة" },
+    { key: "customers.edit", label: "العملاء", action: "تعديل" },
+    { key: "customers.delete", label: "العملاء", action: "حذف" },
+    { key: "customers.print", label: "العملاء", action: "طباعة" },
+  ] },
+  { group: "المنتجات", permissions: [
+    { key: "products.view", label: "بيانات المنتجات", action: "عرض" },
+    { key: "products.create", label: "إضافة منتج", action: "إضافة" },
+    { key: "products.edit", label: "المنتجات", action: "تعديل" },
+    { key: "products.delete", label: "المنتجات", action: "حذف" },
+    { key: "products.print", label: "المنتجات", action: "طباعة" },
+  ] },
+  { group: "مصروفات وإيرادات", permissions: [
+    { key: "expenses.view", label: "عرض المصروفات", action: "عرض" },
+    { key: "expenses.create", label: "إضافة مصروف", action: "إضافة" },
+    { key: "expenses.print", label: "المصروفات", action: "طباعة" },
+    { key: "revenues.view", label: "عرض الإيرادات", action: "عرض" },
+    { key: "revenues.create", label: "إضافة إيراد", action: "إضافة" },
+    { key: "revenues.print", label: "الإيرادات", action: "طباعة" },
+  ] },
+  { group: "التشغيل", permissions: [
+    { key: "operation.view", label: "أوردرات التشغيل", action: "عرض" },
+    { key: "operation.update", label: "حالة التشغيل", action: "تغيير حالة" },
+    { key: "operation.upload", label: "ملفات التشغيل", action: "رفع ملفات" },
+    { key: "operation.print", label: "التشغيل", action: "طباعة" },
+  ] },
+  { group: "التشطيب", permissions: [
+    { key: "finishing.view", label: "أوردرات التشطيب", action: "عرض" },
+    { key: "finishing.update", label: "حالة التشطيب", action: "تغيير حالة" },
+    { key: "finishing.upload", label: "ملفات التشطيب", action: "رفع ملفات" },
+    { key: "finishing.print", label: "التشطيب", action: "طباعة" },
+  ] },
+  { group: "التقارير والإعدادات", permissions: [
+    { key: "reports.view", label: "التقارير", action: "عرض" },
+    { key: "reports.print", label: "التقارير", action: "طباعة" },
+    { key: "import.export", label: "الاستيراد والتصدير", action: "تصدير" },
+    { key: "settings.view", label: "الإعدادات", action: "عرض" },
+    { key: "audit.view", label: "سجل العمليات", action: "عرض" },
+    { key: "users.view", label: "إدارة المستخدمين", action: "عرض" },
+    { key: "users.create", label: "المستخدمين", action: "إضافة" },
+    { key: "users.edit", label: "المستخدمين", action: "تعديل" },
+    { key: "users.deactivate", label: "المستخدمين", action: "إيقاف/تفعيل" },
+    { key: "users.delete", label: "المستخدمين", action: "حذف" },
+    { key: "users.resetPassword", label: "كلمة مرور المستخدمين", action: "تغيير" },
+    { key: "roles.view", label: "الأدوار", action: "عرض" },
+    { key: "roles.create", label: "الأدوار", action: "إضافة" },
+    { key: "roles.edit", label: "الأدوار", action: "تعديل" },
+    { key: "roles.delete", label: "الأدوار", action: "حذف" },
+    { key: "permissions.manage", label: "الصلاحيات", action: "إدارة" },
+  ] },
+];
+const allPermissionKeys = permissionGroups.flatMap((group) => group.permissions.map((permission) => permission.key));
+const masterProtectedPermissions: PermissionKey[] = ["users.view", "users.create", "users.edit", "users.deactivate", "users.delete", "users.resetPassword", "roles.view", "roles.create", "roles.edit", "permissions.manage", "audit.view", "settings.view"];
 
 const roleByEmail: Record<string, Role> = {
   "mahmoudmostafa3104@gmail.com": "Master",
@@ -214,6 +317,82 @@ const localUsers: Record<string, { fullName: string; role: Role; password: strin
   "finishing 2": { fullName: "Finishing 2", role: "Finishing", password: "1234", email: "finishing2@zunion.local", mustChangePassword: true },
 };
 
+const roleDefaultPermissions: Record<string, PermissionKey[]> = {
+  Master: allPermissionKeys,
+  Helper: ["dashboard.view", "orders.view", "orders.create", "orders.edit", "orders.print", "customers.view", "customers.create", "customers.print", "products.view", "products.create", "search.use", "operation.view", "operation.update", "operation.upload", "operation.print", "finishing.view", "finishing.print"],
+  Operator: ["dashboard.view", "orders.view", "orders.create", "orders.edit", "orders.print", "customers.view", "customers.create", "products.view", "products.create", "search.use", "expenses.view", "expenses.create", "revenues.view", "revenues.create", "operation.view", "operation.update", "operation.upload"],
+  Supervisor: ["dashboard.view", "orders.view", "orders.edit", "orders.print", "customers.view", "products.view", "search.use", "operation.view", "operation.update", "operation.upload", "operation.print"],
+  Worker: ["orders.view", "orders.edit", "operation.view", "operation.update", "operation.upload", "operation.print"],
+  Finishing: ["orders.view", "orders.edit", "finishing.view", "finishing.update", "finishing.upload", "finishing.print"],
+  Finish: ["orders.view", "orders.edit", "finishing.view", "finishing.update", "finishing.upload", "finishing.print"],
+};
+
+function seedRoles(): ManagedRole[] {
+  const now = new Date().toISOString();
+  return Object.entries(roleDefaultPermissions).map(([name, permissions]) => ({
+    id: name,
+    name,
+    description: name === "Master" ? "دور إداري كامل ومحمي" : "",
+    status: "active",
+    permissions,
+    isSystemRole: ["Master", "Operator", "Supervisor", "Finishing", "Helper", "Worker", "Finish"].includes(name),
+    createdAt: now,
+    updatedAt: now,
+  }));
+}
+
+function seedManagedUsers(): ManagedUser[] {
+  const now = new Date().toISOString();
+  return Object.entries(localUsers).map(([username, user]) => ({
+    id: `user-${username}`,
+    username,
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role,
+    password: user.password,
+    status: "active",
+    mustChangePassword: user.mustChangePassword,
+    permissionOverrides: { allow: [], deny: [] },
+    createdAt: now,
+  }));
+}
+
+function loadManagedRoles(): ManagedRole[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(managedRolesKey) || "[]") as ManagedRole[];
+    const byName = new Map(seedRoles().map((role) => [role.name.toLowerCase(), role]));
+    for (const role of saved) byName.set(role.name.toLowerCase(), { ...role, permissions: role.name === "Master" ? Array.from(new Set([...role.permissions, ...masterProtectedPermissions])) : role.permissions });
+    return Array.from(byName.values());
+  } catch {
+    localStorage.removeItem(managedRolesKey);
+    return seedRoles();
+  }
+}
+
+function saveManagedRoles(roles: ManagedRole[]) {
+  localStorage.setItem(managedRolesKey, JSON.stringify(roles));
+}
+
+function loadManagedUsers(): ManagedUser[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(managedUsersKey) || "[]") as ManagedUser[];
+    const byUsername = new Map(seedManagedUsers().map((user) => [user.username, user]));
+    for (const user of saved) byUsername.set(user.username, { ...user, permissionOverrides: user.permissionOverrides || { allow: [], deny: [] } });
+    return Array.from(byUsername.values());
+  } catch {
+    localStorage.removeItem(managedUsersKey);
+    return seedManagedUsers();
+  }
+}
+
+function saveManagedUsers(users: ManagedUser[]) {
+  localStorage.setItem(managedUsersKey, JSON.stringify(users));
+}
+
+function activeMasterCount(users = loadManagedUsers()) {
+  return users.filter((user) => user.role === "Master" && user.status === "active").length;
+}
+
 function loadLocalPasswords(): Record<string, { password: string; mustChangePassword: boolean }> {
   try {
     return JSON.parse(localStorage.getItem(localPasswordsKey) || "{}") as Record<string, { password: string; mustChangePassword: boolean }>;
@@ -224,6 +403,15 @@ function loadLocalPasswords(): Record<string, { password: string; mustChangePass
 }
 
 function getLocalUser(username: string) {
+  const managed = loadManagedUsers().find((user) => user.username === username);
+  if (managed) return {
+    fullName: managed.fullName,
+    role: managed.role as Role,
+    password: managed.password,
+    email: managed.email,
+    mustChangePassword: managed.mustChangePassword,
+    status: managed.status,
+  };
   const base = localUsers[username];
   if (!base) return null;
   const saved = loadLocalPasswords()[username];
@@ -240,6 +428,47 @@ function saveLocalPassword(username: string, password: string) {
     ...current,
     [username]: { password, mustChangePassword: false },
   }));
+  const users = loadManagedUsers();
+  saveManagedUsers(users.map((user) => user.username === username ? { ...user, password, mustChangePassword: false } : user));
+}
+
+function resolvePermissionsForSession(session: Session | null, roles = loadManagedRoles(), users = loadManagedUsers()): Set<PermissionKey> {
+  if (!session) return new Set();
+  if (session.role === "Master") return new Set(allPermissionKeys);
+  const user = users.find((item) => item.username === session.username);
+  const roleName = user?.role || session.role;
+  const role = roles.find((item) => item.name === roleName && item.status === "active");
+  const permissions = new Set<PermissionKey>(role?.permissions || roleDefaultPermissions[roleName] || []);
+  for (const key of user?.permissionOverrides?.allow || []) permissions.add(key);
+  for (const key of user?.permissionOverrides?.deny || []) permissions.delete(key);
+  return permissions;
+}
+
+function hasPermission(session: Session | null, key: PermissionKey) {
+  return resolvePermissionsForSession(session).has(key);
+}
+
+const routePermissions: Partial<Record<View, PermissionKey>> = {
+  dashboard: "dashboard.view",
+  orders: "orders.view",
+  new: "orders.create",
+  addCustomer: "customers.create",
+  addProduct: "products.create",
+  search: "orders.view",
+  worker: "operation.view",
+  finish: "finishing.view",
+  customers: "customers.view",
+  finance: "expenses.view",
+  reports: "reports.view",
+  import: "import.export",
+  audit: "audit.view",
+  settings: "settings.view",
+  alerts: "orders.view",
+};
+
+function canAccessView(session: Session | null, view: View) {
+  const key = routePermissions[view];
+  return !key || hasPermission(session, key);
 }
 
 const workflowStages: WorkflowStage[] = ["أوردر جديد", "يروح للتشغيل", "التشغيل", "يروح للتشطيب", "التشطيب", "الشغل جاهز", "تم التسليم"];
@@ -745,10 +974,11 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
       }
     }
     const user = getLocalUser(normalizedUsername);
-    if (!user || user.password !== password) return setMessage("اسم المستخدم أو كلمة المرور غير صحيحة.");
+    if (!user || user.status === "inactive" || user.password !== password) return setMessage("اسم المستخدم أو كلمة المرور غير صحيحة.");
     const expiresAt = new Date(Date.now() + (stayLoggedIn ? 14 * 24 : 8) * 60 * 60 * 1000).toISOString();
     const session = { email: user.email, username: normalizedUsername, fullName: user.fullName, role: user.role, loggedInAt: new Date().toISOString(), expiresAt };
     localStorage.setItem(sessionKey, JSON.stringify(session));
+    saveManagedUsers(loadManagedUsers().map((item) => item.username === normalizedUsername ? { ...item, lastLoginAt: new Date().toISOString() } : item));
     addAudit(session, "LOGIN", "auth", undefined, undefined, { username: normalizedUsername, role: user.role });
     onLogin(session);
   }
@@ -1659,6 +1889,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
   const [qualityOnly, setQualityOnly] = useState(false);
   const [editing, setEditing] = useState<Order | null>(null);
   const [page, setPage] = useState(1);
+  const canPrintOrders = hasPermission(session, queue === "worker" ? "operation.print" : queue === "finish" ? "finishing.print" : "orders.print");
 
   useEffect(() => {
     if (!queue) return;
@@ -1844,7 +2075,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
     <div className="stack">
       {editing && <OrderForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
       <section className="panel">
-        <div className="panel-head"><h2>متابعة الأوردرات</h2><button className="ghost-btn compact" type="button" onClick={printAllOrders}>طباعة الكل</button></div>
+        <div className="panel-head"><h2>متابعة الأوردرات</h2>{canPrintOrders && <button className="ghost-btn compact" type="button" onClick={printAllOrders}>طباعة الكل</button>}</div>
         <div className="filters">
           <input placeholder="بحث بالهاتف / رقم الأوردر / اسم العميل" value={query} onChange={(event) => setQuery(event.target.value)} />
           <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">كل الحالات</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select>
@@ -1888,7 +2119,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
                 <td>{order.client_message}</td>
                 <td>{order.notes}</td>
                 <td className="actions">
-                  <button onClick={() => printOrder(order)}>طباعة</button>
+                  {canPrintOrders && <button onClick={() => printOrder(order)}>طباعة</button>}
                   {(session.role === "Master" || session.role === "Helper") && order.workStage === "new" && <button onClick={() => transition(order, "SENT_TO_WORKER", { workStage: "operation", order_status: "في التشغيل" })}>يروح التشغيل</button>}
                   {(session.role === "Master" || session.role === "Worker") && order.workStage === "operation" && <button onClick={() => transition(order, "WORKER_STARTED", { workStage: "operation", operation_status: "بدأ التشغيل", order_status: "في التشغيل" })}>بدء التشغيل</button>}
                   {(session.role === "Master" || session.role === "Worker") && order.workStage === "operation" && <button onClick={() => transition(order, "WORKER_DONE", { operation_status: "تم التشغيل" })}>تم التشغيل</button>}
@@ -1971,6 +2202,7 @@ function ImportExport({ orders, setOrders, session }: { orders: Order[]; setOrde
 function CustomerAccounts({ orders, customers: savedCustomers, session, setOrders }: { orders: Order[]; customers: Customer[]; session: Session; setOrders: React.Dispatch<React.SetStateAction<Order[]>> }) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState("");
+  const canPrintCustomers = hasPermission(session, "customers.print");
   const customers = useMemo(() => {
     const grouped = new Map<string, { name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }>();
     for (const customer of savedCustomers) {
@@ -2024,7 +2256,7 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
       <div className="panel-head">
         <h2>حسابات العملاء</h2>
         <div className="inline-actions">
-          <button className="ghost-btn compact" type="button" onClick={printAllCustomers}>طباعة الكل</button>
+          {canPrintCustomers && <button className="ghost-btn compact" type="button" onClick={printAllCustomers}>طباعة الكل</button>}
           <input placeholder="بحث باسم العميل / الكود / الهاتف / البريد / العنوان" value={search} onChange={(event) => setSearch(event.target.value)} />
         </div>
       </div>
@@ -2046,7 +2278,7 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
                   <td>{customer.paid}</td>
                   <td>{customer.remaining}</td>
                   <td>{customer.net}</td>
-                  <td className="actions"><button className="ghost-btn compact" onClick={() => setExpanded(expanded === customer.code ? "" : customer.code)}>عرض</button><button className="ghost-btn compact" type="button" onClick={() => printCustomer(customer)}>طباعة</button></td>
+                  <td className="actions"><button className="ghost-btn compact" onClick={() => setExpanded(expanded === customer.code ? "" : customer.code)}>عرض</button>{canPrintCustomers && <button className="ghost-btn compact" type="button" onClick={() => printCustomer(customer)}>طباعة</button>}</td>
                 </tr>
                 {expanded === customer.code && <tr><td colSpan={12}><div className="history-list">{customer.orders.map((order) => <span key={order.id}>#{order.order_number} - {order.order_type} - {order.order_status}</span>)}</div></td></tr>}
               </Fragment>
@@ -2159,6 +2391,7 @@ function FinancePageModern({ session }: { session: Session }) {
   const [notice, setNotice] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [year, selectedMonth] = month.split("-").map(Number);
+  const canPrintFinance = hasPermission(session, "expenses.print") || hasPermission(session, "revenues.print");
 
   useEffect(() => {
     let active = true;
@@ -2308,7 +2541,7 @@ function FinancePageModern({ session }: { session: Session }) {
 
       <section className="finance-toolbar">
         <button className="primary-btn compact" type="button" onClick={() => setAccount("")}>بحث</button>
-        <button className="ghost-btn compact" type="button" onClick={printAllTransactions}>طباعة الكل</button>
+        {canPrintFinance && <button className="ghost-btn compact" type="button" onClick={printAllTransactions}>طباعة الكل</button>}
         {["سامح", "احمد", "شيكات", "بنك"].map((name) => <button key={name} className={account === name ? "account-filter active" : "account-filter"} onClick={() => setAccount(account === name ? "" : name)}>{name}</button>)}
       </section>
 
@@ -2317,7 +2550,7 @@ function FinancePageModern({ session }: { session: Session }) {
           <thead><tr>{["التاريخ", "نوع المصروف", "البيان", "المبلغ", "الحساب / الوجهة", "اسم العميل", "رقم التفصيل", "المضاف", "التاريخ", "الإجراءات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
           <tbody>
             {data.transactions.length === 0 && <EmptyRow colSpan={10} />}
-            {data.transactions.map((record) => <tr key={record.id}><td>{formatDateArabic(record.date)}</td><td>{record.expense_type || record.transaction_type || record.kind || "-"}</td><td>{record.description || "-"}</td><td className={String(record.transaction_type || record.kind).includes("مصروف") ? "danger-text" : ""}>{formatMoney(record.amount ?? record.value ?? record.total)}</td><td><span className="mini-pill">{record.account_destination || "-"}</span></td><td>{record.customer_name || "-"}</td><td>{record.detail_number || "-"}</td><td>{record.added_by || "-"}</td><td>{formatDateArabic(record.created_at)}</td><td><button className="ghost-btn compact" type="button" onClick={() => printTransaction(record)}>طباعة</button></td></tr>)}
+            {data.transactions.map((record) => <tr key={record.id}><td>{formatDateArabic(record.date)}</td><td>{record.expense_type || record.transaction_type || record.kind || "-"}</td><td>{record.description || "-"}</td><td className={String(record.transaction_type || record.kind).includes("مصروف") ? "danger-text" : ""}>{formatMoney(record.amount ?? record.value ?? record.total)}</td><td><span className="mini-pill">{record.account_destination || "-"}</span></td><td>{record.customer_name || "-"}</td><td>{record.detail_number || "-"}</td><td>{record.added_by || "-"}</td><td>{formatDateArabic(record.created_at)}</td><td>{canPrintFinance && <button className="ghost-btn compact" type="button" onClick={() => printTransaction(record)}>طباعة</button>}</td></tr>)}
           </tbody>
         </table>
       </section>
@@ -2331,12 +2564,13 @@ function FinancePageModern({ session }: { session: Session }) {
   );
 }
 
-function ReportsPage() {
+function ReportsPage({ session }: { session: Session }) {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [data, setData] = useState<ReportsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [year, selectedMonth] = month.split("-").map(Number);
+  const canPrintReports = hasPermission(session, "reports.print");
 
   useEffect(() => {
     let active = true;
@@ -2370,7 +2604,7 @@ function ReportsPage() {
   return (
     <div className="stack">
       <section className="panel">
-        <div className="panel-head"><h2>التقارير</h2><div className="inline-actions"><button className="ghost-btn compact" type="button" onClick={printReports}>طباعة الكل</button><input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></div></div>
+        <div className="panel-head"><h2>التقارير</h2><div className="inline-actions">{canPrintReports && <button className="ghost-btn compact" type="button" onClick={printReports}>طباعة الكل</button>}<input type="month" value={month} onChange={(event) => setMonth(event.target.value)} /></div></div>
         <div className="stats-grid"><StatCard title="الإيرادات" value={formatMoney(data.incomeTotal)} /><StatCard title="المصروفات" value={formatMoney(data.expenseTotal)} tone="danger" /><StatCard title="الصافي" value={formatMoney(data.netTotal)} /></div>
       </section>
       <section className="panel dashboard-grid">
@@ -2438,8 +2672,342 @@ function excelDate(value: string | number) {
   return String(value || "").slice(0, 10);
 }
 
-function SettingsPage() {
-  const users = Object.entries(localUsers);
+type ServerUserRow = {
+  id: string;
+  username: string;
+  full_name?: string;
+  email?: string;
+  role?: string;
+  is_active?: boolean;
+  must_change_password?: boolean;
+  permission_overrides?: PermissionOverride;
+  created_at?: string;
+  last_login_at?: string;
+};
+
+type ServerRoleRow = {
+  id: string;
+  name: string;
+  description?: string;
+  status?: "active" | "inactive";
+  permissions?: PermissionKey[];
+  is_system_role?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+async function settingsRequest<T>(url: string, init: RequestInit = {}) {
+  const response = await fetch(url, {
+    ...init,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...init.headers },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.message || payload.error || "تعذر حفظ بيانات الإعدادات");
+  return payload as T;
+}
+
+function normalizePermissionOverride(value?: PermissionOverride): PermissionOverride {
+  return {
+    allow: (value?.allow || []).filter((key): key is PermissionKey => allPermissionKeys.includes(key as PermissionKey)),
+    deny: (value?.deny || []).filter((key): key is PermissionKey => allPermissionKeys.includes(key as PermissionKey)),
+  };
+}
+
+function managedUserFromServer(row: ServerUserRow): ManagedUser {
+  return {
+    id: row.id,
+    username: row.username,
+    fullName: row.full_name || row.username,
+    email: row.email || `${row.username}@zunion.local`,
+    role: row.role || "Operator",
+    password: "",
+    status: row.is_active === false ? "inactive" : "active",
+    mustChangePassword: row.must_change_password !== false,
+    permissionOverrides: normalizePermissionOverride(row.permission_overrides),
+    createdAt: row.created_at || new Date().toISOString(),
+    lastLoginAt: row.last_login_at,
+  };
+}
+
+function managedRoleFromServer(row: ServerRoleRow): ManagedRole {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || "",
+    status: row.status || "active",
+    permissions: (row.permissions || []).filter((key): key is PermissionKey => allPermissionKeys.includes(key as PermissionKey)),
+    isSystemRole: Boolean(row.is_system_role),
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
+  };
+}
+
+function SettingsPage({ session }: { session: Session }) {
+  const [users, setUsers] = useState<ManagedUser[]>(() => loadManagedUsers());
+  const [roles, setRoles] = useState<ManagedRole[]>(() => loadManagedRoles());
+  const [userForm, setUserForm] = useState({ username: "", fullName: "", password: "", confirmPassword: "", role: "Operator", status: "active" as "active" | "inactive", mustChangePassword: true });
+  const [roleForm, setRoleForm] = useState({ name: "", description: "" });
+  const [message, setMessage] = useState("");
+  const [permissionSearch, setPermissionSearch] = useState("");
+  const isMaster = session.role === "Master";
+  const useRemoteSettings = useServerAuth || !isLocalHost;
+
+  useEffect(() => {
+    if (!useRemoteSettings || !isMaster) return;
+    let mounted = true;
+    Promise.all([
+      settingsRequest<{ users: ServerUserRow[] }>("/api/users"),
+      settingsRequest<{ roles: ServerRoleRow[] }>("/api/roles"),
+    ]).then(([usersPayload, rolesPayload]) => {
+      if (!mounted) return;
+      const nextUsers = usersPayload.users.map(managedUserFromServer);
+      const nextRoles = rolesPayload.roles.map(managedRoleFromServer);
+      setUsers(nextUsers);
+      setRoles(nextRoles);
+      saveManagedUsers(nextUsers);
+      saveManagedRoles(nextRoles);
+    }).catch((error) => {
+      if (mounted) setMessage(error instanceof Error ? error.message : "تعذر تحميل بيانات المستخدمين من الخادم");
+    });
+    return () => { mounted = false; };
+  }, [useRemoteSettings, isMaster]);
+
+  function persistUsers(next: ManagedUser[], action: string, target?: string, details?: unknown) {
+    setUsers(next);
+    saveManagedUsers(next);
+    addAudit(session, action, "users", target, undefined, details);
+  }
+
+  function persistRoles(next: ManagedRole[], action: string, target?: string, details?: unknown) {
+    setRoles(next);
+    saveManagedRoles(next);
+    addAudit(session, action, "roles", target, undefined, details);
+  }
+
+  async function createUser(event: React.FormEvent) {
+    event.preventDefault();
+    const username = userForm.username.trim().toLowerCase();
+    if (!username) return setMessage("اسم المستخدم مطلوب");
+    if (users.some((user) => user.username === username)) return setMessage("اسم المستخدم مستخدم بالفعل");
+    if (!userForm.fullName.trim()) return setMessage("الاسم مطلوب");
+    if (!userForm.password) return setMessage("كلمة المرور مطلوبة");
+    if (userForm.password !== userForm.confirmPassword) return setMessage("كلمتا المرور غير متطابقتين");
+    if (!roles.some((role) => role.name === userForm.role)) return setMessage("يجب اختيار الدور");
+    const now = new Date().toISOString();
+    let nextUser: ManagedUser = {
+      id: createId(),
+      username,
+      fullName: userForm.fullName.trim(),
+      email: `${username.replace(/\s+/g, ".")}@zunion.local`,
+      role: userForm.role,
+      password: userForm.password,
+      status: userForm.status,
+      mustChangePassword: userForm.mustChangePassword,
+      permissionOverrides: { allow: [], deny: [] },
+      createdAt: now,
+    };
+    if (useRemoteSettings) {
+      try {
+        const payload = await settingsRequest<{ user?: ServerUserRow }>("/api/users", {
+          method: "POST",
+          body: JSON.stringify({
+            username,
+            name: nextUser.fullName,
+            password: userForm.password,
+            roleId: nextUser.role,
+            status: nextUser.status,
+            mustChangePassword: nextUser.mustChangePassword,
+            permissionOverrides: nextUser.permissionOverrides,
+          }),
+        });
+        if (payload.user) nextUser = managedUserFromServer(payload.user);
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر إنشاء المستخدم");
+      }
+    }
+    persistUsers([nextUser, ...users], "USER_CREATED", nextUser.id, { username, role: nextUser.role });
+    setUserForm({ username: "", fullName: "", password: "", confirmPassword: "", role: "Operator", status: "active", mustChangePassword: true });
+    setMessage("تم إضافة المستخدم بنجاح");
+  }
+
+  async function resetPassword(user: ManagedUser) {
+    const password = window.prompt(`كلمة المرور الجديدة للمستخدم ${user.username}`);
+    if (!password) return;
+    if (password.length < 4) return setMessage("كلمة المرور الجديدة يجب ألا تقل عن 4 أحرف");
+    if (useRemoteSettings) {
+      try {
+        await settingsRequest(`/api/users/${encodeURIComponent(user.id)}/reset-password`, {
+          method: "POST",
+          body: JSON.stringify({ password, mustChangePassword: true }),
+        });
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر تغيير كلمة المرور");
+      }
+    }
+    persistUsers(users.map((item) => item.id === user.id ? { ...item, password, mustChangePassword: true } : item), "PASSWORD_RESET_BY_MASTER", user.id, { username: user.username });
+    setMessage("تم تغيير كلمة المرور بنجاح");
+  }
+
+  async function toggleUserStatus(user: ManagedUser) {
+    if (user.username === session.username) return setMessage("لا يمكنك إيقاف حسابك الحالي");
+    if (user.role === "Master" && user.status === "active" && activeMasterCount(users) <= 1) return setMessage("لا يمكن حذف آخر حساب Master فعال");
+    const status = user.status === "active" ? "inactive" : "active";
+    if (useRemoteSettings) {
+      try {
+        await settingsRequest(`/api/users/${encodeURIComponent(user.id)}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status }),
+        });
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر تغيير حالة المستخدم");
+      }
+    }
+    persistUsers(users.map((item) => item.id === user.id ? { ...item, status } : item), status === "active" ? "USER_ACTIVATED" : "USER_DEACTIVATED", user.id, { username: user.username, status });
+    setMessage(status === "active" ? "تم تفعيل المستخدم بنجاح" : "تم إيقاف المستخدم بنجاح");
+  }
+
+  async function deleteUser(user: ManagedUser) {
+    if (user.username === session.username) return setMessage("لا يمكنك حذف حسابك الحالي");
+    if (user.role === "Master" && user.status === "active" && activeMasterCount(users) <= 1) return setMessage("لا يمكن حذف آخر حساب Master فعال");
+    const typed = window.prompt("هل أنت متأكد من حذف هذا المستخدم؟ اكتب اسم المستخدم للتأكيد");
+    if (typed !== user.username) return;
+    if (useRemoteSettings) {
+      try {
+        await settingsRequest(`/api/users/${encodeURIComponent(user.id)}`, { method: "DELETE" });
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر حذف المستخدم");
+      }
+    }
+    persistUsers(users.filter((item) => item.id !== user.id), "USER_DELETED", user.id, { username: user.username });
+    setMessage("تم حذف المستخدم بنجاح");
+  }
+
+  async function updateUser(id: string, patch: Partial<ManagedUser>) {
+    const oldUser = users.find((user) => user.id === id);
+    if (useRemoteSettings) {
+      try {
+        await settingsRequest(`/api/users/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            username: patch.username,
+            name: patch.fullName,
+            roleId: patch.role,
+            status: patch.status,
+            mustChangePassword: patch.mustChangePassword,
+            permissionOverrides: patch.permissionOverrides,
+          }),
+        });
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر تحديث المستخدم");
+      }
+    }
+    const next = users.map((user) => user.id === id ? { ...user, ...patch } : user);
+    persistUsers(next, patch.role && patch.role !== oldUser?.role ? "USER_ROLE_CHANGED" : "USER_UPDATED", id, patch);
+  }
+
+  async function toggleUserOverride(userId: string, mode: "allow" | "deny", permission: PermissionKey) {
+    const next = users.map((user) => {
+      if (user.id !== userId) return user;
+      const allow = new Set(user.permissionOverrides.allow);
+      const deny = new Set(user.permissionOverrides.deny);
+      if (mode === "allow") {
+        allow.has(permission) ? allow.delete(permission) : allow.add(permission);
+        deny.delete(permission);
+      } else {
+        deny.has(permission) ? deny.delete(permission) : deny.add(permission);
+        allow.delete(permission);
+      }
+      return { ...user, permissionOverrides: { allow: Array.from(allow), deny: Array.from(deny) } };
+    });
+    const target = next.find((user) => user.id === userId);
+    if (useRemoteSettings && target) {
+      try {
+        await settingsRequest(`/api/users/${encodeURIComponent(userId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ permissionOverrides: target.permissionOverrides }),
+        });
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر تحديث صلاحيات المستخدم");
+      }
+    }
+    persistUsers(next, "USER_PERMISSIONS_CHANGED", userId, { permission, mode });
+  }
+
+  async function createRole(event: React.FormEvent) {
+    event.preventDefault();
+    const name = roleForm.name.trim();
+    if (!name) return setMessage("اسم الدور مطلوب");
+    if (roles.some((role) => role.name.toLowerCase() === name.toLowerCase())) return setMessage("اسم الدور موجود بالفعل");
+    const now = new Date().toISOString();
+    let role: ManagedRole = { id: createId(), name, description: roleForm.description.trim(), status: "active", permissions: ["dashboard.view"], isSystemRole: false, createdAt: now, updatedAt: now };
+    if (useRemoteSettings) {
+      try {
+        const payload = await settingsRequest<{ role?: ServerRoleRow | ServerRoleRow[] }>("/api/roles", {
+          method: "POST",
+          body: JSON.stringify({ name: role.name, description: role.description, status: role.status, permissions: role.permissions }),
+        });
+        const serverRole = Array.isArray(payload.role) ? payload.role[0] : payload.role;
+        if (serverRole) role = managedRoleFromServer(serverRole);
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر إنشاء الدور");
+      }
+    }
+    persistRoles([role, ...roles], "ROLE_CREATED", role.id, { name });
+    setRoleForm({ name: "", description: "" });
+    setMessage("تم إنشاء الدور بنجاح");
+  }
+
+  async function updateRole(roleId: string, patch: Partial<ManagedRole>) {
+    const target = roles.find((role) => role.id === roleId);
+    if (!target) return;
+    if (target.name === "Master" && patch.permissions && !masterProtectedPermissions.every((key) => patch.permissions?.includes(key))) return setMessage("لا يمكن إزالة صلاحيات الإدارة من دور Master");
+    if (useRemoteSettings) {
+      try {
+        await settingsRequest(`/api/roles/${encodeURIComponent(roleId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name: patch.name,
+            description: patch.description,
+            status: patch.status,
+            permissions: patch.permissions,
+          }),
+        });
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر تحديث الدور");
+      }
+    }
+    persistRoles(roles.map((role) => role.id === roleId ? { ...role, ...patch, updatedAt: new Date().toISOString() } : role), patch.permissions ? "ROLE_PERMISSIONS_CHANGED" : "ROLE_UPDATED", roleId, patch);
+  }
+
+  function toggleRolePermission(roleId: string, permission: PermissionKey) {
+    const role = roles.find((item) => item.id === roleId);
+    if (!role) return;
+    const set = new Set(role.permissions);
+    set.has(permission) ? set.delete(permission) : set.add(permission);
+    updateRole(roleId, { permissions: Array.from(set) });
+  }
+
+  async function deleteRole(role: ManagedRole) {
+    if (role.name === "Master" || role.isSystemRole) return setMessage("لا يمكن حذف الأدوار الأساسية");
+    if (users.some((user) => user.role === role.name)) return setMessage("لا يمكن حذف دور مرتبط بمستخدمين");
+    if (useRemoteSettings) {
+      try {
+        await settingsRequest(`/api/roles/${encodeURIComponent(role.id)}`, { method: "DELETE" });
+      } catch (error) {
+        return setMessage(error instanceof Error ? error.message : "تعذر حذف الدور");
+      }
+    }
+    persistRoles(roles.filter((item) => item.id !== role.id), "ROLE_DELETED", role.id, { name: role.name });
+  }
+
+  const filteredPermissionGroups = permissionGroups.map((group) => ({
+    ...group,
+    permissions: group.permissions.filter((permission) => `${group.group} ${permission.label} ${permission.action} ${permission.key}`.toLowerCase().includes(permissionSearch.trim().toLowerCase())),
+  })).filter((group) => group.permissions.length);
+
+  if (!isMaster) return <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />;
+
   return (
     <div className="stack">
       <section className="panel">
@@ -2457,8 +3025,19 @@ function SettingsPage() {
       <section className="panel">
         <div className="panel-head">
           <h2>إدارة المستخدمين</h2>
-          <button className="ghost-btn compact" type="button">إعادة تعيين كلمة المرور إلى 1234</button>
+          <span className="badge badge-red">Master</span>
         </div>
+        <form className="settings-form" onSubmit={createUser}>
+          <input placeholder="اسم المستخدم" value={userForm.username} onChange={(event) => setUserForm((current) => ({ ...current, username: event.target.value }))} />
+          <input placeholder="الاسم" value={userForm.fullName} onChange={(event) => setUserForm((current) => ({ ...current, fullName: event.target.value }))} />
+          <input placeholder="كلمة المرور" type="password" value={userForm.password} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} />
+          <input placeholder="تأكيد كلمة المرور" type="password" value={userForm.confirmPassword} onChange={(event) => setUserForm((current) => ({ ...current, confirmPassword: event.target.value }))} />
+          <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}>{roles.map((role) => <option key={role.id}>{role.name}</option>)}</select>
+          <select value={userForm.status} onChange={(event) => setUserForm((current) => ({ ...current, status: event.target.value as "active" | "inactive" }))}><option value="active">مفعل</option><option value="inactive">موقوف</option></select>
+          <label className="check"><input type="checkbox" checked={userForm.mustChangePassword} onChange={(event) => setUserForm((current) => ({ ...current, mustChangePassword: event.target.checked }))} /> إجبار تغيير كلمة المرور</label>
+          <button className="primary-btn">إضافة مستخدم جديد</button>
+        </form>
+        {message && <p className="notice">{message}</p>}
         <div className="table-wrap accounts-table">
           <table>
             <thead>
@@ -2467,21 +3046,89 @@ function SettingsPage() {
                 <th>الاسم</th>
                 <th>الدور</th>
                 <th>الحالة</th>
-                <th>تغيير كلمة المرور</th>
+                <th>صلاحيات مخصصة</th>
+                <th>آخر تسجيل دخول</th>
+                <th>تاريخ الإنشاء</th>
+                <th>الإجراءات</th>
               </tr>
             </thead>
             <tbody>
-              {users.map(([username, user]) => (
-                <tr key={username}>
-                  <td>{username}</td>
-                  <td>{user.fullName}</td>
-                  <td>{user.role}</td>
-                  <td><span className="badge badge-green">مفعل</span></td>
-                  <td>{user.mustChangePassword ? "مطلوب عند أول دخول" : "لا"}</td>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>{user.username}</td>
+                  <td><input value={user.fullName} onChange={(event) => updateUser(user.id, { fullName: event.target.value })} /></td>
+                  <td><select value={user.role} onChange={(event) => updateUser(user.id, { role: event.target.value })}>{roles.map((role) => <option key={role.id}>{role.name}</option>)}</select></td>
+                  <td><span className={user.status === "active" ? "badge badge-green" : "badge badge-gray"}>{user.status === "active" ? "مفعل" : "موقوف"}</span></td>
+                  <td>{user.permissionOverrides.allow.length + user.permissionOverrides.deny.length}</td>
+                  <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString("ar-EG") : "-"}</td>
+                  <td>{new Date(user.createdAt).toLocaleDateString("ar-EG")}</td>
+                  <td className="actions">
+                    <button type="button" onClick={() => resetPassword(user)}>تغيير كلمة المرور</button>
+                    <button type="button" onClick={() => toggleUserStatus(user)}>{user.status === "active" ? "إيقاف المستخدم" : "تفعيل المستخدم"}</button>
+                    <button type="button" onClick={() => updateUser(user.id, { mustChangePassword: !user.mustChangePassword })}>{user.mustChangePassword ? "إلغاء الإجبار" : "إجبار التغيير"}</button>
+                    <button type="button" className="danger-text" onClick={() => deleteUser(user)}>حذف المستخدم</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+      <section className="panel">
+        <div className="panel-head"><h2>إدارة الأدوار والصلاحيات</h2><input placeholder="بحث الصلاحيات" value={permissionSearch} onChange={(event) => setPermissionSearch(event.target.value)} /></div>
+        <form className="settings-form" onSubmit={createRole}>
+          <input placeholder="اسم الدور" value={roleForm.name} onChange={(event) => setRoleForm((current) => ({ ...current, name: event.target.value }))} />
+          <input placeholder="وصف الدور" value={roleForm.description} onChange={(event) => setRoleForm((current) => ({ ...current, description: event.target.value }))} />
+          <button className="primary-btn">إنشاء دور</button>
+        </form>
+        <div className="role-grid">
+          {roles.map((role) => (
+            <div className="role-card" key={role.id}>
+              <div className="panel-head">
+                <h3>{role.name}</h3>
+                <span className={role.status === "active" ? "badge badge-green" : "badge badge-gray"}>{role.status === "active" ? "مفعل" : "موقوف"}</span>
+              </div>
+              <input value={role.description} placeholder="وصف الدور" onChange={(event) => updateRole(role.id, { description: event.target.value })} />
+              <div className="actions">
+                <button type="button" onClick={() => updateRole(role.id, { permissions: allPermissionKeys })}>تحديد الكل</button>
+                <button type="button" onClick={() => updateRole(role.id, { permissions: role.name === "Master" ? masterProtectedPermissions : [] })}>إلغاء تحديد الكل</button>
+                <button type="button" onClick={() => updateRole(role.id, { status: role.status === "active" ? "inactive" : "active" })}>{role.status === "active" ? "إيقاف" : "تفعيل"}</button>
+                {!role.isSystemRole && <button type="button" className="danger-text" onClick={() => deleteRole(role)}>حذف الدور</button>}
+              </div>
+              <p className="muted">عدد الصلاحيات: {role.permissions.length}</p>
+              <div className="permission-matrix">
+                {filteredPermissionGroups.map((group) => (
+                  <div className="permission-group" key={`${role.id}-${group.group}`}>
+                    <strong>{group.group}</strong>
+                    <button type="button" className="ghost-btn compact" onClick={() => updateRole(role.id, { permissions: Array.from(new Set([...role.permissions, ...group.permissions.map((permission) => permission.key)])) })}>تحديد القسم بالكامل</button>
+                    {group.permissions.map((permission) => (
+                      <label className="check permission-check" key={permission.key}>
+                        <input type="checkbox" checked={role.permissions.includes(permission.key)} onChange={() => toggleRolePermission(role.id, permission.key)} />
+                        {permission.label} - {permission.action}
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="panel">
+        <div className="panel-head"><h2>صلاحيات مخصصة للمستخدمين</h2></div>
+        <div className="role-grid">
+          {users.map((user) => (
+            <div className="role-card" key={`override-${user.id}`}>
+              <h3>{user.username}</h3>
+              {permissionGroups.flatMap((group) => group.permissions).slice(0, 18).map((permission) => (
+                <div className="permission-override-row" key={`${user.id}-${permission.key}`}>
+                  <span>{permission.label} - {permission.action}</span>
+                  <button type="button" className={user.permissionOverrides.allow.includes(permission.key) ? "primary-btn compact" : "ghost-btn compact"} onClick={() => toggleUserOverride(user.id, "allow", permission.key)}>سماح</button>
+                  <button type="button" className={user.permissionOverrides.deny.includes(permission.key) ? "primary-btn compact" : "ghost-btn compact"} onClick={() => toggleUserOverride(user.id, "deny", permission.key)}>منع</button>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       </section>
     </div>
@@ -2560,6 +3207,7 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const total = Number(form.defaultQuantity || 1) * Number(form.defaultPrice || 0);
+  const canPrintProducts = hasPermission(session, "products.print");
 
   function setProduct<K extends keyof Product>(key: K, value: Product[K]) {
     setForm((current) => normalizeProduct({ ...current, [key]: value, price: key === "defaultPrice" ? Number(value || 0) : current.price }));
@@ -2667,7 +3315,7 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   return (
     <div className="stack">
       <section className="panel">
-        <div className="panel-head"><h2>إضافة منتج</h2><button className="ghost-btn compact" type="button" onClick={printAllProducts}>طباعة الكل</button></div>
+        <div className="panel-head"><h2>إضافة منتج</h2>{canPrintProducts && <button className="ghost-btn compact" type="button" onClick={printAllProducts}>طباعة الكل</button>}</div>
         <form className="order-form compact-form" onSubmit={save}>
           <div className="form-grid">
             <label>اسم المنتج<input value={form.name} onChange={(event) => setProduct("name", event.target.value)} /><ErrorText message={errors.name} /></label>
@@ -2703,7 +3351,7 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
               <td><span className={product.status === "active" ? "badge badge-green" : "badge badge-amber"}>{product.status === "active" ? "نشط" : "غير نشط"}</span></td>
               <td>{product.productImage ? <img className="table-thumb" src={product.productImage} alt={product.name} /> : "لا توجد صورة"}</td>
               <td>{formatDateArabic(product.created_at)}</td>
-              <td className="actions"><button onClick={() => editProduct(product)}>تعديل</button><button onClick={() => toggleStatus(product)}>{product.status === "active" ? "تعطيل" : "تنشيط"}</button><button type="button" onClick={() => printProduct(product)}>طباعة</button></td>
+              <td className="actions"><button onClick={() => editProduct(product)}>تعديل</button><button onClick={() => toggleStatus(product)}>{product.status === "active" ? "تعطيل" : "تنشيط"}</button>{canPrintProducts && <button type="button" onClick={() => printProduct(product)}>طباعة</button>}</td>
             </tr>)}
           </tbody>
         </table>
@@ -2828,6 +3476,7 @@ function ZunionApp() {
   const isOperator = currentRole === "Operator" || currentRole === "Helper";
   const isSupervisor = currentRole === "Supervisor" || currentRole === "Worker";
   const isFinishing = currentRole === "Finishing" || currentRole === "Finish";
+  const can = (permission: PermissionKey) => hasPermission(session, permission);
   const sidebarSections = useMemo<SidebarSectionConfig[]>(() => {
     const sections: SidebarSectionConfig[] = [
       {
@@ -2835,10 +3484,10 @@ function ZunionApp() {
         label: "الرئيسية",
         icon: ClipboardList,
         items: [
-          { id: "search", label: "متابعة أوردرات", visible: !isFinishing, icon: ClipboardList },
-          { id: "new", label: "أوردر جديد", visible: isMaster || isOperator, icon: FilePlus },
-          { id: "addCustomer", label: "إضافة عميل", visible: isMaster || isOperator, icon: UserPlus },
-          { id: "addProduct", label: "إضافة منتج", visible: isMaster || isOperator, icon: PackagePlus },
+          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
+          { id: "new", label: "أوردر جديد", visible: can("orders.create"), icon: FilePlus },
+          { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
+          { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
         ],
       },
       {
@@ -2846,8 +3495,8 @@ function ZunionApp() {
         label: "بحث",
         icon: Search,
         items: [
-          { id: "search", label: "بحث", visible: !isFinishing, icon: Search },
-          { id: "customers", label: "العملاء", visible: isMaster || isOperator || isSupervisor, icon: Users },
+          { id: "search", label: "بحث", visible: can("search.use") || can("orders.view"), icon: Search },
+          { id: "customers", label: "العملاء", visible: can("customers.view"), icon: Users },
         ],
       },
       {
@@ -2855,9 +3504,9 @@ function ZunionApp() {
         label: "مصروفات وإيرادات",
         icon: ArrowUpDown,
         items: [
-          { id: "finance", label: "مصروفات وإيرادات", visible: isMaster || isOperator, icon: WalletCards },
-          { id: "reports", label: "التقارير", visible: isMaster || isOperator, icon: BadgeInfo },
-          { id: "import", label: "الاستيراد والتصدير", visible: isMaster, icon: ArrowUpDown },
+          { id: "finance", label: "مصروفات وإيرادات", visible: can("expenses.view") || can("revenues.view"), icon: WalletCards },
+          { id: "reports", label: "التقارير", visible: can("reports.view"), icon: BadgeInfo },
+          { id: "import", label: "الاستيراد والتصدير", visible: can("import.export"), icon: ArrowUpDown },
         ],
       },
       {
@@ -2865,8 +3514,8 @@ function ZunionApp() {
         label: "التشغيل",
         icon: Cog,
         items: [
-          { id: "worker", label: "التشغيل", visible: isMaster || isOperator || isSupervisor, icon: Cog },
-          { id: "alerts", label: "التنبيهات", visible: true, icon: BadgeInfo },
+          { id: "worker", label: "التشغيل", visible: can("operation.view"), icon: Cog },
+          { id: "alerts", label: "التنبيهات", visible: can("orders.view"), icon: BadgeInfo },
         ],
       },
       {
@@ -2874,7 +3523,7 @@ function ZunionApp() {
         label: "التشطيب",
         icon: Wrench,
         items: [
-          { id: "finish", label: "التشطيب", visible: isMaster || isFinishing, icon: Wrench },
+          { id: "finish", label: "التشطيب", visible: can("finishing.view"), icon: Wrench },
         ],
       },
       {
@@ -2882,15 +3531,15 @@ function ZunionApp() {
         label: "الإعدادات",
         icon: Cog,
         items: [
-          { id: "audit", label: "سجل العمليات", visible: isMaster, icon: ClipboardList },
-          { id: "settings", label: "الإعدادات", visible: isMaster, icon: Cog },
+          { id: "audit", label: "سجل العمليات", visible: can("audit.view"), icon: ClipboardList },
+          { id: "settings", label: "الإعدادات", visible: can("settings.view"), icon: Cog },
         ],
       },
     ];
     return sections
       .map((section) => ({ ...section, items: section.items.filter((item) => item.visible) }))
       .filter((section) => section.items.length > 0);
-  }, [isFinishing, isMaster, isOperator, isSupervisor]);
+  }, [session]);
 
   useEffect(() => {
     const activeSection = sidebarSections.find((section) => section.items.some((item) => item.id === view));
@@ -2914,6 +3563,7 @@ function ZunionApp() {
   }
 
   if (!session) return <Login onLogin={setSession} />;
+  const routeAllowed = canAccessView(session, view);
 
   return (
     <div className="app" dir="rtl">
@@ -2937,6 +3587,8 @@ function ZunionApp() {
           <BrandLogo className="top-logo" />
         </header>
         <section className="page">
+          {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}
+          {routeAllowed && <>
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} />}
@@ -2946,12 +3598,13 @@ function ZunionApp() {
           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" />}
           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
-          {view === "finance" && (canManageFinancials(session.role) ? <FinancePageModern session={session} /> : <ErrorPanel message="ليس لديك صلاحية للوصول لهذه الصفحة" />)}
-          {view === "reports" && (canManageFinancials(session.role) ? <ReportsPage /> : <ErrorPanel message="ليس لديك صلاحية للوصول لهذه الصفحة" />)}
+          {view === "finance" && <FinancePageModern session={session} />}
+          {view === "reports" && <ReportsPage session={session} />}
           {view === "import" && <ImportExport orders={orders} setOrders={setOrders} session={session} />}
           {view === "audit" && <AuditLog />}
-          {view === "settings" && <SettingsPage />}
+          {view === "settings" && <SettingsPage session={session} />}
           {view === "alerts" && <section className="panel"><h2>تنبيهات التسليم</h2><div className="alerts-list">{buildAlerts(visibleOrders, canManageFinancials(session.role)).map((alert, index) => <AlertItem key={`${alert.order.id}-${index}`} alert={alert} />)}</div></section>}
+          </>}
         </section>
       </main>
     </div>

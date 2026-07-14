@@ -24,9 +24,47 @@ create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   email text unique not null,
   role user_role not null,
+  username text unique,
+  full_name text,
+  password_hash text,
+  password_salt text,
+  is_active boolean not null default true,
+  must_change_password boolean not null default false,
+  permission_overrides jsonb not null default '{"allow":[],"deny":[]}'::jsonb,
+  token_version integer not null default 0,
+  last_login_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table users add column if not exists username text unique;
+alter table users add column if not exists full_name text;
+alter table users add column if not exists password_hash text;
+alter table users add column if not exists password_salt text;
+alter table users add column if not exists is_active boolean not null default true;
+alter table users add column if not exists must_change_password boolean not null default false;
+alter table users add column if not exists permission_overrides jsonb not null default '{"allow":[],"deny":[]}'::jsonb;
+alter table users add column if not exists token_version integer not null default 0;
+alter table users add column if not exists last_login_at timestamptz;
+
+create table if not exists roles (
+  id uuid primary key default gen_random_uuid(),
+  name text unique not null,
+  description text not null default '',
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  permissions jsonb not null default '[]'::jsonb,
+  is_system_role boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table roles add column if not exists description text not null default '';
+alter table roles add column if not exists status text not null default 'active';
+alter table roles add column if not exists permissions jsonb not null default '[]'::jsonb;
+alter table roles add column if not exists is_system_role boolean not null default false;
+alter table roles add column if not exists updated_at timestamptz not null default now();
+alter table roles drop constraint if exists roles_status_check;
+alter table roles add constraint roles_status_check check (status in ('active', 'inactive'));
 
 create table if not exists otp_codes (
   id uuid primary key default gen_random_uuid(),
@@ -280,6 +318,12 @@ create trigger set_customers_updated_at before update on customers for each row 
 drop trigger if exists set_products_updated_at on products;
 create trigger set_products_updated_at before update on products for each row execute function set_updated_at();
 
+drop trigger if exists set_users_updated_at on users;
+create trigger set_users_updated_at before update on users for each row execute function set_updated_at();
+
+drop trigger if exists set_roles_updated_at on roles;
+create trigger set_roles_updated_at before update on roles for each row execute function set_updated_at();
+
 drop trigger if exists set_orders_updated_at on orders;
 create trigger set_orders_updated_at before update on orders for each row execute function set_updated_at();
 
@@ -301,6 +345,59 @@ insert into users (email, role) values
   ('mahmoudodo20072021@gmail.com', 'Worker'),
   ('mahmoud.foly.2007@gmail.com', 'Finish')
 on conflict (email) do update set role = excluded.role;
+
+with default_permissions(name, description, permissions) as (
+  values
+    ('Master', 'Full system access', array[
+      'dashboard.view','orders.view','orders.create','orders.edit','orders.delete','orders.print',
+      'customers.view','customers.create','customers.edit','customers.delete','customers.print',
+      'products.view','products.create','products.edit','products.delete','products.print',
+      'search.use','expenses.view','expenses.create','expenses.print','revenues.view','revenues.create','revenues.print',
+      'operation.view','operation.update','operation.upload','operation.print',
+      'finishing.view','finishing.update','finishing.upload','finishing.print',
+      'reports.view','reports.print','import.export',
+      'users.view','users.create','users.edit','users.deactivate','users.delete','users.resetPassword',
+      'roles.view','roles.create','roles.edit','roles.delete','permissions.manage','audit.view','settings.view'
+    ]::text[]),
+    ('Helper', 'Order and customer helper access', array[
+      'dashboard.view','orders.view','orders.create','orders.edit','orders.print',
+      'customers.view','customers.create','customers.edit','customers.print',
+      'products.view','search.use','import.export'
+    ]::text[]),
+    ('Operator', 'Operation team access', array[
+      'dashboard.view','orders.view','orders.edit','orders.print',
+      'customers.view','products.view','search.use',
+      'operation.view','operation.update','operation.upload','operation.print'
+    ]::text[]),
+    ('Supervisor', 'Supervisor access', array[
+      'dashboard.view','orders.view','orders.create','orders.edit','orders.print',
+      'customers.view','customers.create','customers.edit','customers.print',
+      'products.view','products.create','products.edit','products.print',
+      'search.use','operation.view','operation.update','operation.print',
+      'finishing.view','finishing.update','finishing.print','reports.view','reports.print'
+    ]::text[]),
+    ('Finishing', 'Finishing team access', array[
+      'dashboard.view','orders.view','orders.edit','orders.print',
+      'customers.view','products.view','search.use',
+      'finishing.view','finishing.update','finishing.upload','finishing.print'
+    ]::text[]),
+    ('Worker', 'Worker access', array[
+      'dashboard.view','orders.view','orders.edit','orders.print',
+      'products.view','operation.view','operation.update','operation.upload','operation.print'
+    ]::text[]),
+    ('Finish', 'Legacy finishing role', array[
+      'dashboard.view','orders.view','orders.edit','orders.print',
+      'products.view','finishing.view','finishing.update','finishing.upload','finishing.print'
+    ]::text[])
+)
+insert into roles (name, description, status, permissions, is_system_role)
+select name, description, 'active', to_jsonb(permissions), true
+from default_permissions
+on conflict (name) do update set
+  description = excluded.description,
+  status = excluded.status,
+  permissions = excluded.permissions,
+  is_system_role = true;
 
 with customer as (
   insert into customers (name, code, phone, source_party, old_balance, notes)
