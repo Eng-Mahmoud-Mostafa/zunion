@@ -1,4 +1,4 @@
-import { Component, Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
 import {
   ArrowDownCircle,
@@ -679,12 +679,12 @@ function printDocument(title: string, body: string, session?: Session | null, or
       body{font-family:Tahoma,Arial,sans-serif;color:#111827;margin:0;direction:rtl}
       .print-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #ed1c24;padding-bottom:12px;margin-bottom:16px}
       .print-head img{width:190px;height:auto;object-fit:contain}
-      h1{margin:0;color:#ed1c24;font-size:24px}.meta{color:#ed1c24;font-size:12px;margin-top:6px}
+      h1{margin:0;color:#111827;font-size:24px}.meta{color:#4b5563;font-size:12px;margin-top:6px}
       table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}thead{display:table-header-group}tr{break-inside:avoid}
-      th,td{border:1px solid #d1d5db;padding:7px;text-align:right;vertical-align:top}th{background:#f8fafc;color:#ed1c24;font-weight:800}td,.record-value{color:#000}
+      th,td{border:1px solid #d1d5db;padding:7px;text-align:right;vertical-align:top}th{background:#f8fafc;color:#111827;font-weight:800}td,.record-value{color:#ed1c24}
       .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.box{border:1px solid #d1d5db;border-radius:6px;padding:9px;break-inside:avoid}
-      .box strong{display:block;color:#ed1c24;font-size:12px;margin-bottom:4px}.section-title{color:#ed1c24;margin:18px 0 8px}
-      .email-text{display:block;width:100%;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;direction:ltr;text-align:left;color:#000}
+      .box strong{display:block;color:#111827;font-size:12px;margin-bottom:4px}.section-title{color:#111827;margin:18px 0 8px}
+      .email-text{display:block;width:100%;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;direction:ltr;text-align:left}
       .toolbar{margin-bottom:12px}.toolbar button{background:#ed1c24;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
       @media print{.toolbar{display:none}}
     </style></head><body><div class="toolbar"><button onclick="window.print()">طباعة</button></div>
@@ -1796,7 +1796,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             <ErrorText message={errors.client_name} />
           </label>
           <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
-          <label>تاريخ التسليم<input className={`date-input ${form.delivery_date ? "has-value" : "empty"}`} type="date" value={form.delivery_date} onChange={(event) => set("delivery_date", event.target.value)} /><ErrorText message={errors.delivery_date} /></label>
+          <RedDatePicker label="تاريخ التسليم" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} error={errors.delivery_date} />
         </div>
       </section>
       <section className="form-section">
@@ -1966,6 +1966,36 @@ function StageSelect({ label, value, onChange }: { label: string; value: WorkSta
       <select value={value} onChange={(event) => onChange(event.target.value as WorkStage)}>
         {workStageOptions.map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}
       </select>
+    </label>
+  );
+}
+
+function compactDateValue(value: string) {
+  if (!value) return "";
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return normalizeDigitsToEnglish(value);
+  return `${normalizeDigitsToEnglish(year)}-${Number(month)}-${Number(day)}`;
+}
+
+function RedDatePicker({ label, value, onChange, error }: { label: string; value: string; onChange: (value: string) => void; error?: string }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  function openPicker() {
+    const input = inputRef.current;
+    if (!input) return;
+    if (typeof input.showPicker === "function") input.showPicker();
+    else input.click();
+    input.focus();
+  }
+  return (
+    <label className="red-date-picker">
+      <span>{label}</span>
+      <span className="red-date-control">
+        <input ref={inputRef} type="date" value={value} onChange={(event) => onChange(event.target.value)} aria-label={label} />
+        <button type="button" className="red-date-pill" onClick={openPicker}>
+          {value ? compactDateValue(value) : "اختر التاريخ"}
+        </button>
+      </span>
+      <ErrorText message={error} />
     </label>
   );
 }

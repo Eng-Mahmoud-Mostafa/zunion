@@ -2901,194 +2901,62 @@ input[type="date"] {
   }
 }
 
-/* Final text-color semantics: fixed interface text is red; entered/saved data values are black. */
-:root {
-  --system-text-color: var(--zunion-red);
-  --data-text-color: #000;
+.red-date-picker {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+  color: #000 !important;
 }
 
-.system-text,
-.placeholder-text,
-label,
-.form-label,
-.field-label,
-.page-title,
-.section-title,
-.helper-text,
-.panel h1,
-.panel h2,
-.panel h3,
-.panel-head h2,
-.panel-head h3,
-.form-section h3,
-.login-card h1,
-.topbar h1,
-.muted,
-.empty-cell,
-.image-field-label,
-.image-empty-state,
-th,
-.table-sort-button,
-.finance-title,
-.finance-title *,
-.stat-card span:not(.stat-icon):not(.account-pills):not(.logo-preview-value),
-.action-copy strong,
-.field-error {
-  color: var(--system-text-color) !important;
+.red-date-picker > span:first-child {
+  color: #000 !important;
+  font-weight: 800;
 }
 
-input:not([type="button"]):not([type="submit"]):not([type="reset"]),
-select,
-textarea,
-input[readonly],
-input:disabled,
-select:disabled,
-textarea:disabled,
-td,
-td *,
-.data-text,
-.data-value,
-.record-value,
-.email-text,
-.topbar p,
-.stat-card strong,
-.donut-card strong,
-.mini-pill,
-.image-file-meta,
-.image-file-meta *,
-.logo-preview-value small {
-  color: var(--data-text-color) !important;
-  opacity: 1;
+.red-date-control {
+  position: relative;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
 }
 
-input::placeholder,
-textarea::placeholder {
-  color: var(--system-text-color) !important;
-  opacity: 1;
+.red-date-control input[type="date"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100% !important;
+  min-height: 100% !important;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
 }
 
-select:has(option[value=""]:checked) {
-  color: var(--system-text-color) !important;
-}
-
-select option {
-  color: var(--data-text-color);
-}
-
-select option[value=""] {
-  color: var(--system-text-color);
-}
-
-.date-input.empty,
-input[type="date"]:placeholder-shown,
-input[type="date"]:invalid {
-  color: var(--system-text-color) !important;
-}
-
-.date-input.has-value,
-input[type="date"]:valid {
-  color: var(--data-text-color) !important;
-}
-
-.primary-btn,
-.primary-btn *,
-.success-btn,
-.success-btn *,
-.sidebar button,
-.sidebar button *,
-.sidebar-parent,
-.sidebar-parent *,
-.sidebar-subitem.active,
-.sidebar-subitem.active *,
-.sidebar-logout,
-.sidebar-logout *,
-.badge,
-.badge * {
-  color: inherit !important;
-}
-
-.badge-blue,
-.badge-blue * { color: #1d4ed8 !important; }
-.badge-amber,
-.badge-amber * { color: #b45309 !important; }
-.badge-violet,
-.badge-violet * { color: #6d28d9 !important; }
-.badge-green,
-.badge-green * { color: #047857 !important; }
-.badge-gray,
-.badge-gray * { color: #52525b !important; }
-.badge-red,
-.badge-red * { color: #be123c !important; }
-
-.primary-btn,
-.success-btn {
+.red-date-pill {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto !important;
+  min-width: 126px;
+  min-height: 40px !important;
+  height: auto !important;
+  border: 0;
+  border-radius: 999px;
+  background: var(--zunion-red);
   color: #fff !important;
+  padding: 10px 18px !important;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 10px 22px rgba(237, 28, 36, .18);
 }
 
-.ghost-btn,
-.ghost-btn *,
-.actions button,
-.actions button *,
-.account-buttons button,
-.pagination button,
-.hamburger-btn {
-  color: var(--system-text-color) !important;
-}
-
-button:disabled,
-button:disabled * {
-  color: #4b5563 !important;
-}
-
-.sidebar button.sidebar-parent,
-.sidebar button.sidebar-parent *,
-.sidebar button.sidebar-logout,
-.sidebar button.sidebar-logout *,
-.sidebar-close,
-.sidebar-close * {
+.red-date-pill:hover,
+.red-date-pill:focus-visible {
+  background: var(--zunion-red-dark);
   color: #fff !important;
-}
-
-.sidebar button.sidebar-subitem,
-.sidebar button.sidebar-subitem span,
-.sidebar button.sidebar-subitem svg {
-  color: var(--system-text-color) !important;
-}
-
-.sidebar button.sidebar-subitem.active,
-.sidebar button.sidebar-subitem.active span,
-.sidebar button.sidebar-subitem.active svg {
-  color: #fff !important;
-}
-
-.sidebar button.sidebar-subitem:disabled,
-.sidebar button.sidebar-subitem.disabled,
-.sidebar button.sidebar-subitem:disabled span,
-.sidebar button.sidebar-subitem.disabled span,
-.sidebar button.sidebar-subitem:disabled svg,
-.sidebar button.sidebar-subitem.disabled svg {
-  color: #4b5563 !important;
-}
-
-@media print {
-  h1,
-  h2,
-  h3,
-  label,
-  th,
-  .section-title,
-  .box strong {
-    color: var(--system-text-color) !important;
-  }
-
-  td,
-  td *,
-  .record-value,
-  .data-value,
-  input,
-  select,
-  textarea,
-  .email-text {
-    color: var(--data-text-color) !important;
-  }
 }
