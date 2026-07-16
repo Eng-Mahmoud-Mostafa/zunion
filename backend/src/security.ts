@@ -39,21 +39,45 @@ declare global {
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies?.[config.cookieName];
-  if (!token) return res.status(401).json({ message: "Unauthorized" });
-  const tokenHash = hashSecret(token);
-  const { rows } = await query<AuthUser & { session_id: string }>(
-    `select u.id, u.email, u.role, s.id as session_id
-     from sessions s
-     join users u on u.id = s.user_id
-     where s.token_hash = $1 and s.expires_at > now()
-     limit 1`,
-    [tokenHash],
-  );
-  const user = rows[0];
-  if (!user) return res.status(401).json({ message: "Unauthorized" });
-  req.user = { id: user.id, email: user.email, role: user.role };
-  await query("update sessions set last_used_at = now() where id = $1", [user.session_id]);
-  return next();
+  if (token) {
+    const tokenHash = hashSecret(token);
+    const { rows } = await query<AuthUser & { session_id: string }>(
+      `select u.id, u.email, u.role, s.id as session_id
+       from sessions s
+       join users u on u.id = s.user_id
+       where s.token_hash = $1 and s.expires_at > now()
+       limit 1`,
+      [tokenHash],
+    );
+    const user = rows[0];
+    if (user) {
+      req.user = { id: user.id, email: user.email, role: user.role };
+      await query("update sessions set last_used_at = now() where id = $1", [user.session_id]);
+      return next();
+    }
+  }
+
+  const appSessionRaw = req.cookies?.zunion_app_session;
+  if (!appSessionRaw || typeof appSessionRaw !== "string") return res.status(401).json({ message: "Unauthorized" });
+  try {
+    const appSession = JSON.parse(appSessionRaw) as { email?: string; username?: string; fullName?: string; role?: UserRole; expiresAt?: string };
+    if (!appSession.expiresAt || new Date(appSession.expiresAt).getTime() <= Date.now()) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const email = appSession.email || `${appSession.username || "user"}@zunion.local`;
+    const role = appSession.role || "Worker";
+    const { rows } = await query<AuthUser>(
+      `insert into users (email, role, username, full_name)
+       values ($1,$2,$3,$4)
+       on conflict (email) do update set role = excluded.role, username = coalesce(excluded.username, users.username), full_name = coalesce(excluded.full_name, users.full_name)
+       returning id, email, role`,
+      [email, role, appSession.username ?? null, appSession.fullName ?? null],
+    );
+    req.user = rows[0];
+    return next();
+  } catch {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
 }
 
 export function requireRole(...roles: UserRole[]) {

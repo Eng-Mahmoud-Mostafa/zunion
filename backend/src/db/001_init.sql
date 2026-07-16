@@ -4,6 +4,10 @@ do $$ begin
   create type user_role as enum ('Master', 'Helper', 'Worker', 'Finish');
 exception when duplicate_object then null; end $$;
 
+alter type user_role add value if not exists 'Operator';
+alter type user_role add value if not exists 'Supervisor';
+alter type user_role add value if not exists 'Finishing';
+
 do $$ begin
   create type order_status as enum (
     'NEW',

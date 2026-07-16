@@ -10,7 +10,7 @@ import { config, roleByEmail, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { audit, canSeeFinancials, hashSecret, otpCode, randomToken, requireAuth, requireRole } from "./security.js";
 import { sendOtpEmail, sendVerificationEmail } from "./mailer.js";
-import { customerSchema, orderSchema, statusSchema } from "./validation.js";
+import { customerSchema, orderSchema, productSchema, statusSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { validatePermissions, type PermissionKey } from "./permissions.js";
 
@@ -26,6 +26,7 @@ const serviceRoutedPrefixes = [
   "/auth",
   "/orders",
   "/customers",
+  "/products",
   "/search",
   "/monthly-periods",
   "/expenses",
@@ -392,7 +393,6 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
     confirmPassword: z.string().min(8),
   }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل" });
-  if (parsed.data.currentPassword !== "1234") return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
   if (parsed.data.newPassword.trim() !== parsed.data.newPassword || !parsed.data.newPassword.trim()) return res.status(400).json({ error: "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل" });
   if (parsed.data.newPassword === "1234") return res.status(400).json({ error: "لا يمكن استخدام كلمة المرور 1234 مرة أخرى" });
   if (parsed.data.newPassword !== parsed.data.confirmPassword) return res.status(400).json({ error: "كلمتا المرور غير متطابقتين" });
@@ -405,21 +405,27 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
   if (!validCurrent) return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
 
   if (!config.supabaseUrl || !config.supabaseServiceKey || !profile.id) {
-    return res.status(500).json({ error: "تعذر حفظ كلمة المرور في Supabase." });
+    return res.status(500).json({ error: "تعذر تغيير كلمة المرور حالياً. تأكد من إعدادات Supabase في الخادم." });
   }
 
   const salt = randomToken(12);
   const tokenVersion = Date.now();
-  await supabaseRest(`users_profile?id=eq.${profile.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({
-      password_salt: salt,
-      password_hash: passwordHash(parsed.data.newPassword, salt),
-      must_change_password: false,
-      token_version: tokenVersion,
-    }),
-  });
-  const updated = { ...profile, password_salt: salt, password_hash: passwordHash(parsed.data.newPassword, salt), must_change_password: false, token_version: tokenVersion };
+  const nextHash = passwordHash(parsed.data.newPassword, salt);
+  try {
+    await supabaseRest(`users_profile?id=eq.${profile.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        password_salt: salt,
+        password_hash: nextHash,
+        must_change_password: false,
+        token_version: tokenVersion,
+      }),
+    });
+  } catch (error) {
+    console.warn("Mandatory password change failed while updating users_profile.", error instanceof Error ? error.message : error);
+    return res.status(500).json({ error: "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى" });
+  }
+  const updated = { ...profile, password_salt: salt, password_hash: nextHash, must_change_password: false, token_version: tokenVersion };
   const { session: nextSession, maxAge } = makeSession(updated, true);
   res.cookie("zunion_app_session", JSON.stringify(nextSession), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
   audit(null, "MANDATORY_PASSWORD_CHANGED", "auth", profile.id, undefined, { username: profile.username }).catch(() => undefined);
@@ -665,7 +671,7 @@ app.get("/api/orders", requireAuth, async (req, res) => {
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
-app.post("/api/orders", requireAuth, requireRole("Master", "Helper"), async (req, res) => {
+app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const parsed = orderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid order", issues: parsed.error.issues });
   const order = parsed.data;
@@ -802,7 +808,7 @@ app.get("/api/orders/:id/files/:fileId", requireAuth, async (req, res) => {
   res.download(path.join(config.uploadDir, rows[0].path), rows[0].original_name);
 });
 
-app.get("/api/customers", requireAuth, requireRole("Master", "Helper"), async (req, res) => {
+app.get("/api/customers", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const search = String(req.query.search ?? "");
   const params = search ? [`%${search}%`] : [];
   const where = search ? "where c.name ilike $1 or c.phone ilike $1 or c.code ilike $1 or c.email ilike $1 or c.address ilike $1" : "";
@@ -816,7 +822,7 @@ app.get("/api/customers", requireAuth, requireRole("Master", "Helper"), async (r
   res.json({ customers: rows });
 });
 
-app.post("/api/customers", requireAuth, requireRole("Master", "Helper"), async (req, res) => {
+app.post("/api/customers", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const parsed = customerSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid customer", issues: parsed.error.issues });
   const customer = parsed.data;
@@ -828,7 +834,7 @@ app.post("/api/customers", requireAuth, requireRole("Master", "Helper"), async (
   res.status(201).json(rows[0]);
 });
 
-app.get("/api/customers/:id", requireAuth, requireRole("Master", "Helper"), async (req, res) => {
+app.get("/api/customers/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const id = param(req.params.id);
   const customer = await query("select * from customers where id=$1", [id]);
   if (!customer.rows[0]) return res.status(404).json({ message: "Customer not found" });
@@ -845,10 +851,72 @@ app.put("/api/customers/:id", requireAuth, requireRole("Master"), async (req, re
   res.json({ ok: true });
 });
 
-app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper"), async (req, res) => {
+app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const id = param(req.params.id);
   const { rows } = await query("select * from orders where customer_id=$1 order by created_at desc", [id]);
   res.json({ orders: rows });
+});
+
+app.get("/api/products", requireAuth, async (_req, res) => {
+  const { rows } = await query("select * from products order by updated_at desc, created_at desc");
+  res.json({ products: rows });
+});
+
+app.post("/api/products", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+  const parsed = productSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid product", issues: parsed.error.issues });
+  const product = parsed.data;
+  const { rows } = await query<{ id: string }>(
+    `insert into products (product_name, details, logo_placement, default_quantity, default_price, quality, status, product_image, logo_image)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     returning id`,
+    [
+      product.productName,
+      product.details,
+      product.logoPlacement,
+      product.defaultQuantity,
+      product.defaultPrice ?? null,
+      product.quality,
+      product.status,
+      product.productImage,
+      product.logoImage,
+    ],
+  );
+  await audit(req.user!, "PRODUCT_CREATED", "products", rows[0].id, undefined, product);
+  res.status(201).json(rows[0]);
+});
+
+app.put("/api/products/:id", requireAuth, requireRole("Master", "Supervisor"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = productSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid product", issues: parsed.error.issues });
+  const product = parsed.data;
+  await query(
+    `update products set product_name=$1, details=$2, logo_placement=$3, default_quantity=$4, default_price=$5,
+     quality=$6, status=$7, product_image=$8, logo_image=$9
+     where id=$10`,
+    [
+      product.productName,
+      product.details,
+      product.logoPlacement,
+      product.defaultQuantity,
+      product.defaultPrice ?? null,
+      product.quality,
+      product.status,
+      product.productImage,
+      product.logoImage,
+      id,
+    ],
+  );
+  await audit(req.user!, "PRODUCT_UPDATED", "products", id, undefined, product);
+  res.json({ ok: true });
+});
+
+app.delete("/api/products/:id", requireAuth, requireRole("Master"), async (req, res) => {
+  const id = param(req.params.id);
+  await query("delete from products where id=$1", [id]);
+  await audit(req.user!, "PRODUCT_DELETED", "products", id);
+  res.json({ ok: true });
 });
 
 app.get("/api/search/orders", requireAuth, async (req, res) => {

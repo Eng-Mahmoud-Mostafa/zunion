@@ -985,8 +985,187 @@ function orderForStorage(order: Order): Order {
   };
 }
 
-function useOrders() {
-  const [orders, setOrders] = useState<Order[]>(() => {
+async function backendJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
+    credentials: "include",
+    headers: options.body instanceof FormData ? undefined : { "Content-Type": "application/json", ...options.headers },
+    ...options,
+  });
+  if (!response.ok) {
+    const raw = await response.text();
+    let message = response.statusText;
+    try {
+      const body = raw ? JSON.parse(raw) as { message?: string; error?: string } : {};
+      message = body.message || body.error || message;
+    } catch {
+      message = raw || message;
+    }
+    throw new Error(message);
+  }
+  return response.json() as Promise<T>;
+}
+
+function orderStatusFromApi(status: unknown, workStage: unknown): OrderStatus {
+  const raw = String(status ?? "").trim();
+  if (raw === "DELIVERED" || raw === "CUSTOMER_MESSAGED") return "تم التسليم";
+  if (raw === "READY") return "جاهز";
+  if (raw === "FINISH_STARTED" || raw === "FINISH_DONE" || normalizeWorkStage(workStage) === "finishing") return "في التشطيب";
+  if (raw === "SENT_TO_WORKER" || raw === "WORKER_STARTED" || raw === "WORKER_DONE" || normalizeWorkStage(workStage) === "operation") return "في التشغيل";
+  return stageToStatus(normalizeWorkStage(workStage));
+}
+
+function apiStatusFromOrder(order: Order) {
+  if (order.workStage === "cancelled") return "CANCELLED";
+  if (order.order_status === "تم التسليم") return "DELIVERED";
+  if (order.order_status === "جاهز" || order.workStage === "completed") return "READY";
+  if (order.workStage === "finishing") return order.finishing_status === "تم" ? "FINISH_DONE" : "SENT_TO_FINISH";
+  if (order.workStage === "operation") return order.operation_status === "تم" ? "WORKER_DONE" : "SENT_TO_WORKER";
+  return "NEW";
+}
+
+function orderFromApi(row: Record<string, unknown>): Order {
+  const workStage = normalizeWorkStage(row.work_stage ?? row.workStage ?? row.status);
+  const order = calculate({
+    ...emptyOrder,
+    id: String(row.id ?? createId()),
+    created_by: String(row.created_by ?? row.added_by ?? ""),
+    order_number: String(row.order_number ?? ""),
+    source_person: String(row.source_party ?? row.party ?? ""),
+    client_name: String(row.customer_name_snapshot ?? row.customer_name ?? ""),
+    client_code: String(row.customer_code_snapshot ?? ""),
+    phone: String(row.phone_snapshot ?? row.phone ?? ""),
+    delivery_date: String(row.delivery_date ?? ""),
+    price: Number(row.price ?? 0),
+    quantity: Number(row.quantity ?? row.pieces_count ?? 1),
+    total: Number(row.total ?? 0),
+    paid: Number(row.paid ?? 0),
+    old_balance: Number(row.old_account ?? row.old_balance ?? 0),
+    order_type: String(row.product_name_snapshot ?? row.type ?? row.service_type ?? ""),
+    productId: String(row.product_id ?? ""),
+    productName: String(row.product_name_snapshot ?? row.type ?? row.service_type ?? ""),
+    paymentMethod: String(row.payment_method ?? "cash"),
+    customPaymentMethod: String(row.custom_payment_method ?? ""),
+    materialsStatus: normalizeMaterialsStatus(row.materials_status),
+    operationMethods: Array.isArray(row.operation_methods) ? row.operation_methods.map(String) : (() => {
+      try {
+        const parsed = JSON.parse(String(row.operation_methods ?? "[]")) as unknown[];
+        return Array.isArray(parsed) ? parsed.map(String) : [""];
+      } catch {
+        return [""];
+      }
+    })(),
+    logo_place: String(row.logo_place ?? row.logo_status ?? ""),
+    logo_status: String(row.logo_status ?? ""),
+    quality_notes: String(row.quality_notes ?? ""),
+    damaged_pieces: Number(row.damaged_pieces ?? 0),
+    operation_status: normalizedOperationStatus(row.operation_status ?? row.status),
+    finishing_status: normalizedFinishingStatus(row.finishing_status ?? row.status),
+    production_notes: String(row.production_notes ?? ""),
+    finishing_notes: String(row.finishing_notes ?? ""),
+    order_status: orderStatusFromApi(row.status ?? row.delivery_status, workStage),
+    workStage,
+    client_message: String(row.message_text ?? row.client_message ?? ""),
+    notes: String(row.notes ?? ""),
+    created_at: String(row.created_at ?? new Date().toISOString()),
+    updated_at: String(row.updated_at ?? row.created_at ?? new Date().toISOString()),
+  });
+  return order;
+}
+
+function orderToApi(order: Order) {
+  const calculated = calculate(order);
+  const operationMethods = (calculated.operationMethods || []).map((item) => item.trim()).filter(Boolean);
+  return {
+    source_party: calculated.source_person,
+    customer_name_snapshot: calculated.client_name,
+    customer_code_snapshot: calculated.client_code,
+    phone_snapshot: calculated.phone,
+    delivery_date: calculated.delivery_date || null,
+    type: calculated.order_type || calculated.productName || "",
+    productId: calculated.productId || undefined,
+    productName: calculated.productName || calculated.order_type || "",
+    paymentMethod: calculated.paymentMethod || "cash",
+    customPaymentMethod: calculated.customPaymentMethod || "",
+    materialsStatus: normalizeMaterialsStatus(calculated.materialsStatus) || "available",
+    operationMethods: operationMethods.length ? operationMethods : ["not_started"],
+    quantity: calculated.quantity,
+    price: calculated.price,
+    paid: calculated.paid,
+    old_account: calculated.old_balance,
+    status: apiStatusFromOrder(calculated),
+    workStage: calculated.workStage,
+    notes: calculated.notes,
+    message_text: calculated.client_message,
+    quality_notes: calculated.quality_notes,
+    damaged_pieces: calculated.damaged_pieces,
+    production_notes: calculated.production_notes,
+    finishing_notes: calculated.finishing_notes,
+  };
+}
+
+function customerFromApi(row: Record<string, unknown>): Customer {
+  return {
+    id: String(row.id ?? createId()),
+    source_person: String(row.source_party ?? row.source_person ?? ""),
+    client_name: String(row.name ?? row.client_name ?? ""),
+    client_code: String(row.code ?? row.client_code ?? ""),
+    phone: String(row.phone ?? ""),
+    email: String(row.email ?? ""),
+    address: String(row.address ?? ""),
+    old_balance: Number(row.old_balance ?? 0),
+    notes: String(row.notes ?? ""),
+    created_at: String(row.created_at ?? new Date().toISOString()),
+  };
+}
+
+function customerToApi(customer: Customer) {
+  return {
+    name: customer.client_name,
+    code: customer.client_code,
+    phone: customer.phone,
+    email: customer.email || "",
+    address: customer.address || "",
+    source_party: customer.source_person,
+    old_balance: customer.old_balance,
+    notes: customer.notes || "",
+  };
+}
+
+function productFromApi(row: Record<string, unknown>): Product {
+  return normalizeProduct({
+    id: String(row.id ?? createId()),
+    name: String(row.product_name ?? row.name ?? ""),
+    details: String(row.details ?? ""),
+    active: String(row.status ?? "active") !== "inactive",
+    status: String(row.status ?? "active") === "inactive" ? "inactive" : "active",
+    logoPlacement: String(row.logo_placement ?? ""),
+    defaultQuantity: Number(row.default_quantity ?? 1),
+    defaultPrice: row.default_price === null || row.default_price === undefined ? null : Number(row.default_price),
+    defaultTotal: row.default_total === null || row.default_total === undefined ? null : Number(row.default_total),
+    quality: String(row.quality ?? ""),
+    productImage: String(row.product_image ?? ""),
+    logoImage: String(row.logo_image ?? ""),
+    created_at: String(row.created_at ?? new Date().toISOString()),
+  });
+}
+
+function productToApi(product: Product) {
+  const normalized = normalizeProduct(product);
+  return {
+    productName: normalized.name,
+    details: normalized.details,
+    logoPlacement: normalized.logoPlacement || "",
+    defaultQuantity: normalized.defaultQuantity || 1,
+    defaultPrice: normalized.defaultPrice ?? normalized.price ?? null,
+    quality: normalized.quality || "",
+    status: normalized.status || (normalized.active === false ? "inactive" : "active"),
+    productImage: normalized.productImage || "",
+    logoImage: normalized.logoImage || "",
+  };
+}
+
+function useOrders(session: Session | null) {
+  const [orders, setLocalOrders] = useState<Order[]>(() => {
     try {
       const stored = localStorage.getItem(storageKey);
       const parsed = stored ? JSON.parse(stored) as Order[] : demoOrders;
@@ -1005,7 +1184,58 @@ function useOrders() {
     }
   }, [orders]);
 
+  async function refreshOrders() {
+    if (!session || session.mustChangePassword) return;
+    try {
+      const result = await backendJson<{ orders: Record<string, unknown>[] }>("/api/orders");
+      setLocalOrders(result.orders.map(orderFromApi));
+    } catch (error) {
+      console.warn("[Zunion] Shared orders fetch failed; keeping local cache.", error);
+    }
+  }
+
+  useEffect(() => {
+    if (!session || session.mustChangePassword) return;
+    refreshOrders();
+    const timer = window.setInterval(refreshOrders, 5000);
+    return () => window.clearInterval(timer);
+  }, [session?.username, session?.email, session?.mustChangePassword]);
+
+  const setOrders: React.Dispatch<React.SetStateAction<Order[]>> = (action) => {
+    setLocalOrders((current) => {
+      const previous = current;
+      const next = typeof action === "function" ? (action as (value: Order[]) => Order[])(current) : action;
+      if (session && !session.mustChangePassword) {
+        void syncOrders(previous, next).then(refreshOrders).catch((error) => console.warn("[Zunion] Shared orders sync failed.", error));
+      }
+      return next;
+    });
+  };
+
   return { orders, setOrders };
+}
+
+async function syncOrders(previous: Order[], next: Order[]) {
+  const previousIds = new Set(previous.map((order) => order.id));
+  const nextIds = new Set(next.map((order) => order.id));
+  const removed = previous.filter((order) => !nextIds.has(order.id));
+  const changed = next.filter((order) => {
+    const old = previous.find((item) => item.id === order.id);
+    return !old || JSON.stringify(orderForStorage(old)) !== JSON.stringify(orderForStorage(order));
+  });
+  await Promise.all(removed.map((order) => backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "DELETE" }).catch((error) => console.warn("[Zunion] Order delete sync failed.", order.id, error))));
+  await Promise.all(changed.map(async (order) => {
+    const body = JSON.stringify(orderToApi(order));
+    if (previousIds.has(order.id)) {
+      try {
+        await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body });
+        return;
+      } catch (error) {
+        console.warn("[Zunion] Order update failed; trying create.", error);
+      }
+    }
+    await backendJson("/api/orders", { method: "POST", body });
+  }));
 }
 
 function useStoredList<T>(key: string, fallback: T[]) {
@@ -1021,6 +1251,132 @@ function useStoredList<T>(key: string, fallback: T[]) {
     localStorage.setItem(key, JSON.stringify(items));
   }, [items, key]);
   return { items, setItems };
+}
+
+function useCustomers(session: Session | null) {
+  const fallback = useStoredList<Customer>(customersKey, []);
+  const [customers, setLocalCustomers] = useState<Customer[]>(fallback.items);
+
+  useEffect(() => {
+    setLocalCustomers(fallback.items);
+  }, []);
+
+  async function refreshCustomers() {
+    if (!session || session.mustChangePassword) return;
+    try {
+      const result = await backendJson<{ customers: Record<string, unknown>[] }>("/api/customers");
+      setLocalCustomers(result.customers.map(customerFromApi));
+    } catch (error) {
+      console.warn("[Zunion] Shared customers fetch failed; keeping local cache.", error);
+    }
+  }
+
+  useEffect(() => {
+    if (!session || session.mustChangePassword) return;
+    refreshCustomers();
+    const timer = window.setInterval(refreshCustomers, 7000);
+    return () => window.clearInterval(timer);
+  }, [session?.username, session?.email, session?.mustChangePassword]);
+
+  const setCustomers: React.Dispatch<React.SetStateAction<Customer[]>> = (action) => {
+    setLocalCustomers((current) => {
+      const previous = current;
+      const next = typeof action === "function" ? (action as (value: Customer[]) => Customer[])(current) : action;
+      fallback.setItems(next);
+      if (session && !session.mustChangePassword) {
+        void syncCustomers(previous, next).then(refreshCustomers).catch((error) => console.warn("[Zunion] Shared customers sync failed.", error));
+      }
+      return next;
+    });
+  };
+
+  return { items: customers, setItems: setCustomers };
+}
+
+async function syncCustomers(previous: Customer[], next: Customer[]) {
+  const previousIds = new Set(previous.map((customer) => customer.id));
+  const nextIds = new Set(next.map((customer) => customer.id));
+  const removed = previous.filter((customer) => !nextIds.has(customer.id));
+  const changed = next.filter((customer) => {
+    const old = previous.find((item) => item.id === customer.id);
+    return !old || JSON.stringify(old) !== JSON.stringify(customer);
+  });
+  await Promise.all(removed.map((customer) => backendJson(`/api/customers/${encodeURIComponent(customer.id)}`, { method: "DELETE" }).catch(() => undefined)));
+  await Promise.all(changed.map(async (customer) => {
+    const body = JSON.stringify(customerToApi(customer));
+    if (previousIds.has(customer.id)) {
+      try {
+        await backendJson(`/api/customers/${encodeURIComponent(customer.id)}`, { method: "PUT", body });
+        return;
+      } catch (error) {
+        console.warn("[Zunion] Customer update failed; trying create.", error);
+      }
+    }
+    await backendJson("/api/customers", { method: "POST", body });
+  }));
+}
+
+function useProducts(session: Session | null) {
+  const fallback = useStoredList<Product>(productsKey, []);
+  const [products, setLocalProducts] = useState<Product[]>(fallback.items);
+
+  useEffect(() => {
+    setLocalProducts(fallback.items);
+  }, []);
+
+  async function refreshProducts() {
+    if (!session || session.mustChangePassword) return;
+    try {
+      const result = await backendJson<{ products: Record<string, unknown>[] }>("/api/products");
+      setLocalProducts(result.products.map(productFromApi));
+    } catch (error) {
+      console.warn("[Zunion] Shared products fetch failed; keeping local cache.", error);
+    }
+  }
+
+  useEffect(() => {
+    if (!session || session.mustChangePassword) return;
+    refreshProducts();
+    const timer = window.setInterval(refreshProducts, 7000);
+    return () => window.clearInterval(timer);
+  }, [session?.username, session?.email, session?.mustChangePassword]);
+
+  const setProducts: React.Dispatch<React.SetStateAction<Product[]>> = (action) => {
+    setLocalProducts((current) => {
+      const previous = current;
+      const next = typeof action === "function" ? (action as (value: Product[]) => Product[])(current) : action;
+      fallback.setItems(next);
+      if (session && !session.mustChangePassword) {
+        void syncProducts(previous, next).then(refreshProducts).catch((error) => console.warn("[Zunion] Shared products sync failed.", error));
+      }
+      return next;
+    });
+  };
+
+  return { items: products, setItems: setProducts };
+}
+
+async function syncProducts(previous: Product[], next: Product[]) {
+  const previousIds = new Set(previous.map((product) => product.id));
+  const nextIds = new Set(next.map((product) => product.id));
+  const removed = previous.filter((product) => !nextIds.has(product.id));
+  const changed = next.filter((product) => {
+    const old = previous.find((item) => item.id === product.id);
+    return !old || JSON.stringify(normalizeProduct(old)) !== JSON.stringify(normalizeProduct(product));
+  });
+  await Promise.all(removed.map((product) => backendJson(`/api/products/${encodeURIComponent(product.id)}`, { method: "DELETE" }).catch(() => undefined)));
+  await Promise.all(changed.map(async (product) => {
+    const body = JSON.stringify(productToApi(product));
+    if (previousIds.has(product.id)) {
+      try {
+        await backendJson(`/api/products/${encodeURIComponent(product.id)}`, { method: "PUT", body });
+        return;
+      } catch (error) {
+        console.warn("[Zunion] Product update failed; trying create.", error);
+      }
+    }
+    await backendJson("/api/products", { method: "POST", body });
+  }));
 }
 
 function daysUntil(date: string) {
@@ -3604,10 +3960,10 @@ function ZunionApp() {
   const [openSection, setOpenSection] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
-  const { orders, setOrders } = useOrders();
-  const { items: customers, setItems: setCustomers } = useStoredList<Customer>(customersKey, []);
+  const { orders, setOrders } = useOrders(session);
+  const { items: customers, setItems: setCustomers } = useCustomers(session);
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
-  const { items: products, setItems: setProducts } = useStoredList<Product>(productsKey, []);
+  const { items: products, setItems: setProducts } = useProducts(session);
 
   useEffect(() => {
     const syncViewFromHash = () => setViewState(viewFromHash());
