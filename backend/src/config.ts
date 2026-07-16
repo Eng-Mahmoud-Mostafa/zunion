@@ -1,10 +1,20 @@
 import "dotenv/config";
 
+function databaseUrl() {
+  const value = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+  if (value?.trim()) return value.trim();
+  if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+    throw new Error("DATABASE_URL is not configured. Set it to the Supabase PostgreSQL connection string in the server environment.");
+  }
+  return "postgres://zunion:zunion@localhost:5432/zunion";
+}
+
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 4000),
   appOrigin: process.env.APP_ORIGIN ?? "http://127.0.0.1:5173",
-  databaseUrl: process.env.DATABASE_URL ?? "postgres://zunion:zunion@localhost:5432/zunion",
+  databaseUrl: databaseUrl(),
+  databaseSsl: process.env.DATABASE_SSL === "true" || process.env.PGSSLMODE === "require" || Boolean(process.env.VERCEL),
   supabaseUrl: process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL,
   supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY,
   cookieName: process.env.SESSION_COOKIE_NAME ?? "zunion_session",
