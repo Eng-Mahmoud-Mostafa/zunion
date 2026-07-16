@@ -186,6 +186,13 @@ alter table orders add column if not exists payment_method text not null default
 alter table orders add column if not exists custom_payment_method text;
 alter table orders add column if not exists materials_status text not null default '';
 alter table orders alter column materials_status set default '';
+update orders
+set materials_status = case
+  when materials_status in ('موجود', 'متوفرة') then 'available'
+  when materials_status in ('غير موجود', 'غير متوفرة') then 'unavailable'
+  else materials_status
+end
+where materials_status in ('موجود', 'متوفرة', 'غير موجود', 'غير متوفرة');
 alter table orders add column if not exists operation_methods jsonb not null default '[]'::jsonb;
 alter table orders drop constraint if exists orders_work_stage_check;
 alter table orders add constraint orders_work_stage_check check (work_stage in ('new', 'operation', 'finishing', 'completed', 'cancelled'));

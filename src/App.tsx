@@ -16,6 +16,7 @@ import {
   PackagePlus,
   Paintbrush,
   Plus,
+  Printer,
   Receipt,
   Search,
   Send,
@@ -482,6 +483,10 @@ const paymentMethods = [
   { value: "deferred", label: "آجل" },
   { value: "other", label: "أخرى" },
 ] as const;
+const materialStatusOptions = [
+  { value: "available", label: "متوفرة" },
+  { value: "unavailable", label: "غير متوفرة" },
+] as const;
 const workStageLabels: Record<WorkStage, string> = {
   new: "أوردر جديد",
   operation: "التشغيل",
@@ -505,6 +510,20 @@ function normalizeWorkStage(value: unknown): WorkStage {
 
 function stageLabel(stage: WorkStage) {
   return workStageLabels[stage];
+}
+
+function normalizeMaterialsStatus(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (raw === "available" || raw === "موجود" || raw === "متوفرة") return "available";
+  if (raw === "unavailable" || raw === "غير موجود" || raw === "غير متوفرة") return "unavailable";
+  return "";
+}
+
+function materialStatusLabel(value: unknown) {
+  const normalized = normalizeMaterialsStatus(value);
+  if (normalized === "available") return "متوفرة";
+  if (normalized === "unavailable") return "غير متوفرة";
+  return "—";
 }
 
 function stageToStatus(stage: WorkStage): OrderStatus {
@@ -708,6 +727,55 @@ function printableRecord(fields: Array<[string, unknown]>) {
   return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong><span class="record-value">${printableCell(value)}</span></div>`).join("")}</div>`;
 }
 
+function orderPrintHtml(order: Order) {
+  const operationItems = order.operationItems?.length
+    ? order.operationItems
+    : (order.operationMethods?.length ? order.operationMethods : []).map((method) => ({ method, logoImage: "", workOrderImage: "" }));
+  const methodsHtml = operationItems.length
+    ? `<ol>${operationItems.map((item) => `<li>${escapeHtml(item.method || "—")}</li>`).join("")}</ol>`
+    : "<p>—</p>";
+  const imagesHtml = operationItems
+    .map((item, index) => {
+      const previews = [
+        item.logoImage ? `<img src="${escapeHtml(item.logoImage)}" alt="لوجو ${index + 1}" />` : "<span>لا توجد صورة لوجو</span>",
+        item.workOrderImage ? `<img src="${escapeHtml(item.workOrderImage)}" alt="أمر شغل ${index + 1}" />` : "<span>لا توجد صورة أمر شغل</span>",
+      ];
+      return `<div class="box print-attachment"><strong>مرفقات طريقة التشغيل ${index + 1}</strong><div>${previews.join("")}</div></div>`;
+    })
+    .join("");
+  return `<style>
+    .order-print .record-value{color:#111827!important}
+    .order-print ol{margin:0;padding-inline-start:22px}
+    .order-print .print-attachment img{display:block;max-width:100%;max-height:170px;object-fit:contain;margin:6px 0;border:1px solid #e5e7eb;border-radius:6px}
+    .order-print .print-attachment span{display:block;color:#4b5563;margin:6px 0}
+  </style><div class="order-print">
+    ${printableRecord([
+      ["رقم الأوردر", order.order_number],
+      ["تاريخ إنشاء الأوردر", formatDateTimeEnglish(order.created_at || new Date())],
+      ["تاريخ التسليم", order.delivery_date],
+      ["اسم العميل", order.client_name],
+      ["كود العميل", order.client_code],
+      ["طرف", order.source_person],
+      ["نوع المنتج", order.order_type],
+      ["العدد", formatNumber(order.quantity)],
+      ["السعر", formatMoney(order.price)],
+      ["الإجمالي", formatMoney(order.total)],
+      ["المدفوع", formatMoney(order.paid)],
+      ["طريقة الدفع", paymentMethods.find((method) => method.value === order.paymentMethod)?.label || order.paymentMethod || "—"],
+      ["المتبقي", formatMoney(order.remaining)],
+      ["الخامات", materialStatusLabel(order.materialsStatus)],
+      ["المرحلة الحالية", stageLabel(order.workStage)],
+    ])}
+    <h2 class="section-title">طريقة التشغيل</h2>
+    <div class="box"><strong>طرق التشغيل</strong>${methodsHtml}</div>
+    ${imagesHtml ? `<h2 class="section-title">المرفقات</h2><div class="grid">${imagesHtml}</div>` : ""}
+  </div>`;
+}
+
+function printOrderDocument(order: Order, session?: Session | null) {
+  printDocument(`طباعة الأوردر ${order.order_number}`, orderPrintHtml(order), session);
+}
+
 const arabicColumns: Partial<Record<keyof Order, string>> = {
   id: "ID",
   created_by: "بواسطة",
@@ -725,6 +793,7 @@ const arabicColumns: Partial<Record<keyof Order, string>> = {
   old_balance: "حساب قديم",
   net_balance: "صافي حساب العميل",
   order_type: "النوع",
+  materialsStatus: "الخامات",
   details: "تفاصيل",
   logo_place: "مكان اللوجو",
   items: "المنتجات",
@@ -870,11 +939,12 @@ function isoOffset(days: number) {
 
 function calculate(order: Order): Order {
   const workStage = normalizeWorkStage(order.workStage ?? order.workflow_stage ?? order.order_status);
+  const materialsStatus = normalizeMaterialsStatus(order.materialsStatus);
   const items = (order.items || []).map((item) => ({ ...item, total: Number(item.quantity || 0) * Number(item.price || 0) }));
   const lineTotal = items.reduce((sum, item) => sum + item.total, 0);
   const total = lineTotal || Number(order.price || 0) * Number(order.quantity || 0);
   const remaining = total - Number(order.paid || 0);
-  return { ...order, workStage, workflow_stage: stageLabel(workStage) as WorkflowStage, items, total, remaining, net_balance: remaining + Number(order.old_balance || 0) };
+  return { ...order, materialsStatus, workStage, workflow_stage: stageLabel(workStage) as WorkflowStage, items, total, remaining, net_balance: remaining + Number(order.old_balance || 0) };
 }
 
 function normalizeProduct(product: Product): Product {
@@ -1736,6 +1806,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     if (paid > total) nextErrors.paid = "المدفوع لا يمكن أن يكون أكبر من الإجمالي";
     if (!form.paymentMethod) nextErrors.paymentMethod = "طريقة الدفع مطلوبة";
     if (form.paymentMethod === "other" && !form.customPaymentMethod?.trim()) nextErrors.customPaymentMethod = "اكتب طريقة الدفع";
+    if (!normalizeMaterialsStatus(form.materialsStatus)) nextErrors.materialsStatus = "يجب تحديد حالة الخامات";
     if (!form.delivery_date) nextErrors.delivery_date = "تاريخ التسليم مطلوب";
     if (methods.length === 0) nextErrors.operationMethods = "يجب إضافة طريقة تشغيل واحدة على الأقل";
     if (Object.keys(nextErrors).length) {
@@ -1751,14 +1822,15 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       productId: form.productId,
       productName: selectedName,
       order_type: selectedName,
+      materialsStatus: normalizeMaterialsStatus(form.materialsStatus),
       client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
       operationMethods: methods,
       operationItems: normalizedOperationItems.filter((item) => item.method || item.logoImage || item.workOrderImage),
-      workStage: "new",
-      workflow_stage: "أوردر جديد",
-      order_status: "جديد",
-      operation_status: "not_started",
-      finishing_status: "not_started",
+      workStage: initial ? form.workStage : "operation",
+      workflow_stage: initial ? stageLabel(form.workStage) as WorkflowStage : "التشغيل",
+      order_status: initial ? form.order_status : "في التشغيل",
+      operation_status: initial ? form.operation_status : "not_started",
+      finishing_status: initial ? form.finishing_status : "not_started",
       created_at: computed.created_at || now,
       updated_at: now,
     }));
@@ -1827,6 +1899,14 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
           </label>
           {form.paymentMethod === "other" && <label>اكتب طريقة الدفع<input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} /><ErrorText message={errors.customPaymentMethod} /></label>}
           <Readonly label="المتبقي" value={computed.remaining} />
+          <label>
+            الخامات
+            <select value={normalizeMaterialsStatus(form.materialsStatus)} onChange={(event) => set("materialsStatus", event.target.value)}>
+              <option value="">اختر حالة الخامات</option>
+              {materialStatusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+            </select>
+            <ErrorText message={errors.materialsStatus} />
+          </label>
         </div>
       </section>
       <section className="form-section order-operation-section">
@@ -2172,89 +2252,6 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
     if (!confirm("هل تريد حذف الأوردر؟")) return;
     setOrders((current) => current.filter((order) => order.id !== id));
     addAudit(session, "ORDER_DELETED", "orders", id);
-  }
-
-  function printOrder(order: Order) {
-    const money = (value: number) => formatMoney(value);
-    const rows = [
-      ["رقم الأوردر", order.order_number],
-      ["الطرف", order.source_person],
-      ["اسم العميل", order.client_name],
-      ["كود العميل", order.client_code],
-      ["رقم التليفون", order.phone],
-      ["تاريخ التسليم", order.delivery_date],
-      ["النوع", order.order_type],
-      ["العدد", order.quantity],
-      ["السعر", money(order.price)],
-      ["الإجمالي", money(order.total)],
-      ["المدفوع", money(order.paid)],
-      ["باقي الحساب", money(order.remaining)],
-      ["حساب قديم", money(order.old_balance)],
-      ["صافي حساب العميل", money(order.net_balance)],
-      ["اللوجو", order.logo_status],
-      ["مرحلة الشغل", order.workflow_stage],
-      ["الحالة", order.order_status],
-      ["التشغيل", order.operation_status],
-      ["التشطيب", order.finishing_status],
-      ["الجودة", order.quality_notes],
-      ["رسالة العميل", order.client_message],
-      ["ملاحظات", order.notes],
-    ];
-    const popup = window.open("", "_blank", "width=980,height=720");
-    if (!popup) {
-      window.print();
-      return;
-    }
-    addAudit(session, "ORDER_PRINTED", "orders", order.id);
-    popup.document.write(`<!doctype html>
-      <html lang="ar" dir="rtl">
-        <head>
-          <meta charset="utf-8" />
-          <title>أمر شغل ${order.order_number}</title>
-          <style>
-            body{font-family:Tahoma,Arial,sans-serif;margin:28px;color:#27272a}
-            .head{display:flex;align-items:center;justify-content:space-between;border-bottom:4px solid #ed1c24;padding-bottom:14px;margin-bottom:18px}
-            img{width:220px;height:auto;object-fit:contain}
-            h1{margin:0;font-size:26px}.muted{color:#71717a;margin-top:6px}
-            .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-            .box{border:1px solid #ddd;border-radius:6px;padding:10px;min-height:52px}
-            .box strong{display:block;color:#555;font-size:12px;margin-bottom:5px}
-            .signatures{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:28px}
-            .sign{height:90px;border:1px dashed #999;border-radius:6px;padding:10px}
-            .toolbar{margin-bottom:14px}.toolbar button{background:#ed1c24;color:white;border:0;border-radius:6px;padding:10px 18px;font-weight:700}
-            @media print{.toolbar{display:none}body{margin:12mm}.box,.sign{break-inside:avoid}}
-          </style>
-        </head>
-        <body>
-          <div class="toolbar"><button onclick="window.print()">طباعة</button></div>
-          <div class="head">
-            <div><h1>أمر شغل</h1><div class="muted">Zunion Quality First</div></div>
-            <img src="/zunion-logo.png" />
-          </div>
-          <div class="grid">
-            ${rows.map(([label, value]) => `<div class="box"><strong>${label}</strong>${String(value ?? "").replace(/</g, "&lt;")}</div>`).join("")}
-          </div>
-          ${(order.logo_image_url || order.work_order_image_url) ? `<h2>الملفات</h2><div class="grid">
-            ${order.logo_image_url ? `<div class="box"><strong>اللوجو</strong><img style="width:100%;max-height:260px;object-fit:contain" src="${order.logo_image_url}" /></div>` : ""}
-            ${order.work_order_image_url ? `<div class="box"><strong>أمر الشغل</strong><img style="width:100%;max-height:260px;object-fit:contain" src="${order.work_order_image_url}" /></div>` : ""}
-          </div>` : ""}
-          ${order.items?.length ? `<h2>المنتجات</h2><div class="grid">${order.items.map((item) => `<div class="box"><strong>${item.product_name || "منتج"}</strong>
-            <div>التفاصيل: ${item.details || ""}</div>
-            <div>مكان اللوجو: ${item.logo_place || ""}</div>
-            <div>العدد: ${item.quantity} | السعر: ${item.price} | الإجمالي: ${item.total}</div>
-            <div>الجودة: ${item.quality || ""} | الحالة: ${item.status || ""}</div>
-            ${item.product_image_url ? `<img style="width:100%;max-height:220px;object-fit:contain;margin-top:8px" src="${item.product_image_url}" />` : ""}
-          </div>`).join("")}</div>` : ""}
-          <div class="signatures">
-            <div class="sign">توقيع التشغيل</div>
-            <div class="sign">توقيع التشطيب</div>
-            <div class="sign">توقيع التسليم</div>
-          </div>
-        </body>
-      </html>`);
-    popup.document.close();
-    popup.focus();
-    setTimeout(() => popup.print(), 300);
   }
 
   function printAllOrders() {
@@ -2792,6 +2789,7 @@ function rowToOrder(row: Record<string, string | number>): Order {
     paid: Number(pick("المدفوع", "paid") || 0),
     old_balance: Number(pick("حساب قديم", "old_balance") || 0),
     order_type: String(pick("النوع", "order_type")),
+    materialsStatus: normalizeMaterialsStatus(pick("الخامات", "materialsStatus", "materials_status")),
     logo_status: String(pick("اللوجو", "logo_status") || "غير موجود"),
     quality_notes: String(pick("الجودة", "quality_notes")),
     operation_status: String(pick("التشغيل", "operation_status")),
@@ -3605,6 +3603,7 @@ function ZunionApp() {
   const [view, setViewState] = useState<View>(() => viewFromHash());
   const [openSection, setOpenSection] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const { orders, setOrders } = useOrders();
   const { items: customers, setItems: setCustomers } = useStoredList<Customer>(customersKey, []);
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
@@ -3619,12 +3618,14 @@ function ZunionApp() {
   function setView(nextView: View) {
     setViewState(nextView);
     window.history.replaceState(null, "", `#${nextView}`);
+    if (nextView === "new") setCreatedOrder(null);
   }
 
   function saveNew(order: Order) {
     setOrders((current) => [order, ...current]);
     addAudit(session, "ORDER_CREATED", "orders", order.id, undefined, order);
-    setView("search");
+    setCreatedOrder(order);
+    setView("worker");
   }
 
   const currentRole = session?.role ?? "Master";
@@ -3634,6 +3635,7 @@ function ZunionApp() {
   const isSupervisor = currentRole === "Supervisor" || currentRole === "Worker";
   const isFinishing = currentRole === "Finishing" || currentRole === "Finish";
   const can = (permission: PermissionKey) => hasPermission(session, permission);
+  const canPrintCreatedOrder = hasPermission(session, "orders.print") || hasPermission(session, "operation.print");
   const sidebarSections = useMemo<SidebarSectionConfig[]>(() => {
     const sections: SidebarSectionConfig[] = [
       {
@@ -3747,6 +3749,23 @@ function ZunionApp() {
         <section className="page">
           {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}
           {routeAllowed && <>
+          {createdOrder && (
+            <section className="panel created-order-panel">
+              <div>
+                <h2>تم إنشاء الأوردر وإرساله إلى التشغيل بنجاح</h2>
+                <p className="muted">رقم الأوردر: <span className="data-value">{createdOrder.order_number}</span></p>
+              </div>
+              {canPrintCreatedOrder && (
+                <button type="button" className="ghost-btn print-order-btn" onClick={() => {
+                  addAudit(session, "ORDER_PRINTED", "orders", createdOrder.id);
+                  printOrderDocument(createdOrder, session);
+                }}>
+                  <Printer size={16} />
+                  طباعة الأوردر
+                </button>
+              )}
+            </section>
+          )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} />}

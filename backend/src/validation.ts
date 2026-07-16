@@ -19,6 +19,13 @@ export const paymentMethods = ["cash", "bank_transfer", "instapay", "wallet", "d
 export const materialsStatuses = ["available", "unavailable"] as const;
 export const productStatuses = ["active", "inactive"] as const;
 
+function normalizeMaterialsStatus(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (raw === "available" || raw === "موجود" || raw === "متوفرة") return "available";
+  if (raw === "unavailable" || raw === "غير موجود" || raw === "غير متوفرة") return "unavailable";
+  return raw;
+}
+
 export const productSchema = z.object({
   productName: z.string().trim().min(1, "اسم المنتج مطلوب"),
   details: z.string().optional().default(""),
@@ -45,7 +52,7 @@ export const orderSchema = z.object({
   productName: z.string().optional().default(""),
   paymentMethod: z.enum(paymentMethods).default("cash"),
   customPaymentMethod: z.string().optional().default(""),
-  materialsStatus: z.union([z.enum(materialsStatuses), z.literal(""), z.string().trim()]).optional(),
+  materialsStatus: z.preprocess(normalizeMaterialsStatus, z.enum(materialsStatuses, { message: "يجب تحديد حالة الخامات" })),
   operationMethods: z.array(z.string().trim().min(1)).min(1).default(["not_started"]),
   quantity: z.coerce.number().int().min(1).default(1),
   price: z.coerce.number().min(0).default(0),

@@ -689,7 +689,7 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper"), async (req
         order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
         order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? "", JSON.stringify(order.operationMethods),
         order.quantity, order.price, order.paid,
-        order.old_account, "NEW", "new", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
+        order.old_account, "SENT_TO_WORKER", "operation", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
         order.production_notes, order.finishing_notes, req.user!.id,
       ],
     );
@@ -759,7 +759,7 @@ app.delete("/api/orders/:id", requireAuth, requireRole("Master"), async (req, re
   res.json({ ok: true });
 });
 
-app.get("/api/orders/:id/print", requireAuth, async (req, res) => {
+app.get("/api/orders/:id/print", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (req, res) => {
   const id = param(req.params.id);
   const order = await loadOrder(id);
   if (!order) return res.status(404).send("Order not found");

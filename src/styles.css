@@ -375,7 +375,7 @@ textarea:focus {
 }
 
 .order-finance-row {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 
 .operation-item-row {
@@ -548,6 +548,39 @@ textarea:focus {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.created-order-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: #bbf7d0 !important;
+  background: #f0fdf4 !important;
+}
+
+.created-order-panel h2 {
+  margin: 0 0 4px;
+  color: #000 !important;
+  font-size: 16px;
+}
+
+.created-order-panel p {
+  margin: 0;
+}
+
+.print-order-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-color: var(--zunion-red) !important;
+  color: var(--zunion-red) !important;
+}
+
+.print-order-btn svg {
+  color: inherit;
+  stroke: currentColor;
 }
 
 .line-items {
@@ -2065,6 +2098,11 @@ button *,
 .account-filter.active,
 .account-filter.active * {
   color: #fff !important;
+}
+
+.print-order-btn,
+.print-order-btn * {
+  color: var(--zunion-red) !important;
 }
 
 .field-error,
