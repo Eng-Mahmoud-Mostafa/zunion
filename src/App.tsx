@@ -1615,7 +1615,6 @@ function MandatoryPasswordChange({ session, onChanged }: { session: Session; onC
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (currentPassword !== "1234") return setMessage("كلمة المرور الحالية غير صحيحة");
     if (newPassword === "1234") return setMessage("لا يمكن استخدام كلمة المرور 1234 مرة أخرى");
     if (newPassword.trim() !== newPassword || newPassword.trim().length < 8) return setMessage("كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل");
     if (newPassword !== confirmPassword) return setMessage("كلمتا المرور غير متطابقتين");

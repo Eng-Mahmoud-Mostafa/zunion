@@ -99,6 +99,7 @@ type AppUser = {
   is_active?: boolean;
   must_change_password?: boolean;
   token_version?: number;
+  source?: "supabase" | "local" | "seeded";
 };
 
 const seededUsers: Record<string, AppUser & { password: string }> = {
@@ -136,13 +137,94 @@ async function loadProfile(username: string) {
   if (config.supabaseUrl && config.supabaseServiceKey) {
     try {
       const rows = await supabaseRest<AppUser[]>(`users_profile?username=eq.${encodeURIComponent(username)}&select=*`);
-      return rows[0] || seededUsers[username] || null;
+      if (rows[0]) return { ...rows[0], source: "supabase" as const };
     } catch (error) {
-      console.warn("Supabase users_profile lookup failed; using seeded user fallback.", error);
-      return seededUsers[username] || null;
+      console.warn("Supabase users_profile lookup failed; trying local users table fallback.", error instanceof Error ? error.message : error);
     }
   }
-  return seededUsers[username] || null;
+  try {
+    const { rows } = await query<AppUser>(
+      `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version
+       from users
+       where lower(username) = lower($1) or lower(email) = lower($2)
+       limit 1`,
+      [username, `${username}@zunion.local`],
+    );
+    if (rows[0]) return { ...rows[0], source: "local" as const };
+  } catch (error) {
+    console.warn("Local users profile lookup failed; using seeded fallback.", error instanceof Error ? error.message : error);
+  }
+  return seededUsers[username] ? { ...seededUsers[username], source: "seeded" as const } : null;
+}
+
+async function loadProfileById(id: string) {
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      const rows = await supabaseRest<AppUser[]>(`users_profile?id=eq.${encodeURIComponent(id)}&select=*&limit=1`);
+      if (rows[0]) return { ...rows[0], source: "supabase" as const };
+    } catch (error) {
+      console.warn("Supabase users_profile id lookup failed; trying local users table fallback.", error instanceof Error ? error.message : error);
+    }
+  }
+  try {
+    const { rows } = await query<AppUser>(
+      `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version
+       from users
+       where id = $1
+       limit 1`,
+      [id],
+    );
+    if (rows[0]) return { ...rows[0], source: "local" as const };
+  } catch (error) {
+    console.warn("Local users id lookup failed.", error instanceof Error ? error.message : error);
+  }
+  return null;
+}
+
+async function persistProfilePassword(profile: AppUser, password: string, mustChangePassword: boolean, tokenVersion = Date.now()) {
+  const salt = randomToken(12);
+  const password_hash = passwordHash(password, salt);
+  const body = {
+    password_salt: salt,
+    password_hash,
+    must_change_password: mustChangePassword,
+    token_version: tokenVersion,
+  };
+
+  if (profile.source === "supabase" && profile.id && config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      await supabaseRest(`users_profile?id=eq.${encodeURIComponent(profile.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      return { ...profile, ...body };
+    } catch (error) {
+      console.error("Supabase users_profile password update error", {
+        message: error instanceof Error ? error.message : String(error),
+        profileId: profile.id,
+      });
+      throw new Error("تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى");
+    }
+  }
+
+  const username = profile.username.trim().toLowerCase();
+  const email = profile.email || `${username}@zunion.local`;
+  const { rows } = await query<AppUser>(
+    `insert into users (email, role, username, full_name, password_salt, password_hash, must_change_password, token_version)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)
+     on conflict (email) do update set
+       role = excluded.role,
+       username = excluded.username,
+       full_name = excluded.full_name,
+       password_salt = excluded.password_salt,
+       password_hash = excluded.password_hash,
+       must_change_password = excluded.must_change_password,
+       token_version = excluded.token_version,
+       is_active = true
+     returning id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version`,
+    [email, profile.role, username, profile.full_name, salt, password_hash, mustChangePassword, tokenVersion],
+  );
+  return { ...rows[0], source: "local" as const };
 }
 
 function makeSession(user: AppUser, stayLoggedIn = true) {
@@ -368,16 +450,10 @@ app.post("/api/auth/change-password", async (req, res) => {
   }
 
   if (!result) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
-  if (config.supabaseUrl && config.supabaseServiceKey && profile.id) {
-    const salt = randomToken(12);
-    try {
-      await supabaseRest(`users_profile?id=eq.${profile.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ password_salt: salt, password_hash: passwordHash(parsed.data.newPassword, salt), must_change_password: false }),
-      });
-    } catch (error) {
-      console.warn("Supabase users_profile password update failed; seeded fallback password cannot be persisted.", error);
-    }
+  try {
+    await persistProfilePassword(profile, parsed.data.newPassword, false);
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى" });
   }
   res.clearCookie("zunion_password_code");
   audit(null, "PASSWORD_CHANGED", "auth", undefined, undefined, { username }).catch(() => undefined);
@@ -386,7 +462,7 @@ app.post("/api/auth/change-password", async (req, res) => {
 
 app.post("/api/auth/mandatory-change-password", async (req, res) => {
   const session = loadAppSessionCookie(req) as { username?: string; role?: string } | null;
-  if (!session?.username) return res.status(401).json({ error: "يجب تسجيل الدخول أولا." });
+  if (!session?.username) return res.status(401).json({ error: "انتهت الجلسة. سجل الدخول مرة أخرى" });
   const parsed = z.object({
     currentPassword: z.string().min(1),
     newPassword: z.string().min(8),
@@ -404,31 +480,16 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
     : seededUsers[session.username]?.password === parsed.data.currentPassword;
   if (!validCurrent) return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
 
-  if (!config.supabaseUrl || !config.supabaseServiceKey || !profile.id) {
-    return res.status(500).json({ error: "تعذر تغيير كلمة المرور حالياً. تأكد من إعدادات Supabase في الخادم." });
-  }
-
-  const salt = randomToken(12);
   const tokenVersion = Date.now();
-  const nextHash = passwordHash(parsed.data.newPassword, salt);
+  let updated: AppUser;
   try {
-    await supabaseRest(`users_profile?id=eq.${profile.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        password_salt: salt,
-        password_hash: nextHash,
-        must_change_password: false,
-        token_version: tokenVersion,
-      }),
-    });
+    updated = await persistProfilePassword(profile, parsed.data.newPassword, false, tokenVersion);
   } catch (error) {
-    console.warn("Mandatory password change failed while updating users_profile.", error instanceof Error ? error.message : error);
-    return res.status(500).json({ error: "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى" });
+    return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى" });
   }
-  const updated = { ...profile, password_salt: salt, password_hash: nextHash, must_change_password: false, token_version: tokenVersion };
   const { session: nextSession, maxAge } = makeSession(updated, true);
   res.cookie("zunion_app_session", JSON.stringify(nextSession), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
-  audit(null, "MANDATORY_PASSWORD_CHANGED", "auth", profile.id, undefined, { username: profile.username }).catch(() => undefined);
+  audit(null, "MANDATORY_PASSWORD_CHANGED", "auth", updated.id || profile.id, undefined, { username: profile.username }).catch(() => undefined);
   return res.json({ ok: true, session: nextSession });
 });
 
@@ -509,13 +570,11 @@ app.post("/api/users/:id/reset-password", requireAppPermission("users.resetPassw
   const id = param(req.params.id);
   const parsed = z.object({ password: z.string().min(4), mustChangePassword: z.boolean().default(true) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "كلمة المرور الجديدة غير صحيحة", issues: parsed.error.issues });
-  const salt = randomToken(12);
   try {
-    await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ password_salt: salt, password_hash: passwordHash(parsed.data.password, salt), must_change_password: parsed.data.mustChangePassword }),
-    });
-    await audit(null, "PASSWORD_RESET_BY_MASTER", "users_profile", id, undefined, { mustChangePassword: parsed.data.mustChangePassword });
+    const profile = await loadProfileById(id);
+    if (!profile) return res.status(404).json({ message: "تعذر العثور على حساب تسجيل الدخول لهذا المستخدم" });
+    const updated = await persistProfilePassword(profile, parsed.data.password, parsed.data.mustChangePassword);
+    await audit(null, "PASSWORD_RESET_BY_MASTER", "users_profile", updated.id || id, undefined, { mustChangePassword: parsed.data.mustChangePassword });
     return res.json({ ok: true });
   } catch (error) {
     return res.status(500).json({ message: "تعذر تغيير كلمة المرور", details: error instanceof Error ? error.message : String(error) });
