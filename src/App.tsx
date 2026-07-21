@@ -303,20 +303,20 @@ const roleByEmail: Record<string, Role> = {
 };
 
 const localUsers: Record<string, { fullName: string; role: Role; password: string; email: string; mustChangePassword: boolean }> = {
-  mahmoud: { fullName: "Mahmoud", role: "Master", password: "1234", email: "mahmoud@zunion.local", mustChangePassword: true },
-  reda: { fullName: "Reda", role: "Master", password: "1234", email: "reda@zunion.local", mustChangePassword: true },
-  hassan: { fullName: "Hassan", role: "Master", password: "1234", email: "hassan@zunion.local", mustChangePassword: true },
-  omar: { fullName: "Omar", role: "Operator", password: "1234", email: "omar@zunion.local", mustChangePassword: true },
-  youssef: { fullName: "Youssef", role: "Operator", password: "1234", email: "youssef@zunion.local", mustChangePassword: true },
-  khalifa: { fullName: "Khalifa", role: "Operator", password: "1234", email: "khalifa@zunion.local", mustChangePassword: true },
-  "opr 1": { fullName: "Opr 1", role: "Operator", password: "1234", email: "opr1@zunion.local", mustChangePassword: true },
-  "opr 2": { fullName: "Opr 2", role: "Operator", password: "1234", email: "opr2@zunion.local", mustChangePassword: true },
-  "opr 3": { fullName: "Opr 3", role: "Operator", password: "1234", email: "opr3@zunion.local", mustChangePassword: true },
-  "supervisor 1": { fullName: "Supervisor 1", role: "Supervisor", password: "1234", email: "supervisor1@zunion.local", mustChangePassword: true },
-  "supervisor 2": { fullName: "Supervisor 2", role: "Supervisor", password: "1234", email: "supervisor2@zunion.local", mustChangePassword: true },
-  "supervisor 3": { fullName: "Supervisor 3", role: "Supervisor", password: "1234", email: "supervisor3@zunion.local", mustChangePassword: true },
-  "finishing 1": { fullName: "Finishing 1", role: "Finishing", password: "1234", email: "finishing1@zunion.local", mustChangePassword: true },
-  "finishing 2": { fullName: "Finishing 2", role: "Finishing", password: "1234", email: "finishing2@zunion.local", mustChangePassword: true },
+  mahmoud: { fullName: "Mahmoud", role: "Master", password: "1234", email: "mahmoud@zunion.local", mustChangePassword: false },
+  reda: { fullName: "Reda", role: "Master", password: "1234", email: "reda@zunion.local", mustChangePassword: false },
+  hassan: { fullName: "Hassan", role: "Master", password: "1234", email: "hassan@zunion.local", mustChangePassword: false },
+  omar: { fullName: "Omar", role: "Operator", password: "1234", email: "omar@zunion.local", mustChangePassword: false },
+  youssef: { fullName: "Youssef", role: "Operator", password: "1234", email: "youssef@zunion.local", mustChangePassword: false },
+  khalifa: { fullName: "Khalifa", role: "Operator", password: "1234", email: "khalifa@zunion.local", mustChangePassword: false },
+  "opr 1": { fullName: "Opr 1", role: "Operator", password: "1234", email: "opr1@zunion.local", mustChangePassword: false },
+  "opr 2": { fullName: "Opr 2", role: "Operator", password: "1234", email: "opr2@zunion.local", mustChangePassword: false },
+  "opr 3": { fullName: "Opr 3", role: "Operator", password: "1234", email: "opr3@zunion.local", mustChangePassword: false },
+  "supervisor 1": { fullName: "Supervisor 1", role: "Supervisor", password: "1234", email: "supervisor1@zunion.local", mustChangePassword: false },
+  "supervisor 2": { fullName: "Supervisor 2", role: "Supervisor", password: "1234", email: "supervisor2@zunion.local", mustChangePassword: false },
+  "supervisor 3": { fullName: "Supervisor 3", role: "Supervisor", password: "1234", email: "supervisor3@zunion.local", mustChangePassword: false },
+  "finishing 1": { fullName: "Finishing 1", role: "Finishing", password: "1234", email: "finishing1@zunion.local", mustChangePassword: false },
+  "finishing 2": { fullName: "Finishing 2", role: "Finishing", password: "1234", email: "finishing2@zunion.local", mustChangePassword: false },
 };
 
 const roleDefaultPermissions: Record<string, PermissionKey[]> = {
@@ -411,7 +411,7 @@ function getLocalUser(username: string) {
     role: managed.role as Role,
     password: managed.password,
     email: managed.email,
-    mustChangePassword: managed.mustChangePassword,
+    mustChangePassword: false,
     status: managed.status,
   };
   const base = localUsers[username];
@@ -420,7 +420,7 @@ function getLocalUser(username: string) {
   return {
     ...base,
     password: saved?.password || base.password,
-    mustChangePassword: saved?.mustChangePassword ?? base.mustChangePassword,
+    mustChangePassword: false,
   };
 }
 
@@ -464,7 +464,6 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   reports: "reports.view",
   import: "import.export",
   audit: "audit.view",
-  settings: "settings.view",
   alerts: "orders.view",
 };
 
@@ -1185,7 +1184,7 @@ function useOrders(session: Session | null) {
   }, [orders]);
 
   async function refreshOrders() {
-    if (!session || session.mustChangePassword) return;
+    if (!session) return;
     try {
       const result = await backendJson<{ orders: Record<string, unknown>[] }>("/api/orders");
       setLocalOrders(result.orders.map(orderFromApi));
@@ -1195,17 +1194,17 @@ function useOrders(session: Session | null) {
   }
 
   useEffect(() => {
-    if (!session || session.mustChangePassword) return;
+    if (!session) return;
     refreshOrders();
     const timer = window.setInterval(refreshOrders, 5000);
     return () => window.clearInterval(timer);
-  }, [session?.username, session?.email, session?.mustChangePassword]);
+  }, [session?.username, session?.email]);
 
   const setOrders: React.Dispatch<React.SetStateAction<Order[]>> = (action) => {
     setLocalOrders((current) => {
       const previous = current;
       const next = typeof action === "function" ? (action as (value: Order[]) => Order[])(current) : action;
-      if (session && !session.mustChangePassword) {
+      if (session) {
         void syncOrders(previous, next).then(refreshOrders).catch((error) => console.warn("[Zunion] Shared orders sync failed.", error));
       }
       return next;
@@ -1262,7 +1261,7 @@ function useCustomers(session: Session | null) {
   }, []);
 
   async function refreshCustomers() {
-    if (!session || session.mustChangePassword) return;
+    if (!session) return;
     try {
       const result = await backendJson<{ customers: Record<string, unknown>[] }>("/api/customers");
       setLocalCustomers(result.customers.map(customerFromApi));
@@ -1272,18 +1271,18 @@ function useCustomers(session: Session | null) {
   }
 
   useEffect(() => {
-    if (!session || session.mustChangePassword) return;
+    if (!session) return;
     refreshCustomers();
     const timer = window.setInterval(refreshCustomers, 7000);
     return () => window.clearInterval(timer);
-  }, [session?.username, session?.email, session?.mustChangePassword]);
+  }, [session?.username, session?.email]);
 
   const setCustomers: React.Dispatch<React.SetStateAction<Customer[]>> = (action) => {
     setLocalCustomers((current) => {
       const previous = current;
       const next = typeof action === "function" ? (action as (value: Customer[]) => Customer[])(current) : action;
       fallback.setItems(next);
-      if (session && !session.mustChangePassword) {
+      if (session) {
         void syncCustomers(previous, next).then(refreshCustomers).catch((error) => console.warn("[Zunion] Shared customers sync failed.", error));
       }
       return next;
@@ -1325,7 +1324,7 @@ function useProducts(session: Session | null) {
   }, []);
 
   async function refreshProducts() {
-    if (!session || session.mustChangePassword) return;
+    if (!session) return;
     try {
       const result = await backendJson<{ products: Record<string, unknown>[] }>("/api/products");
       setLocalProducts(result.products.map(productFromApi));
@@ -1335,18 +1334,18 @@ function useProducts(session: Session | null) {
   }
 
   useEffect(() => {
-    if (!session || session.mustChangePassword) return;
+    if (!session) return;
     refreshProducts();
     const timer = window.setInterval(refreshProducts, 7000);
     return () => window.clearInterval(timer);
-  }, [session?.username, session?.email, session?.mustChangePassword]);
+  }, [session?.username, session?.email]);
 
   const setProducts: React.Dispatch<React.SetStateAction<Product[]>> = (action) => {
     setLocalProducts((current) => {
       const previous = current;
       const next = typeof action === "function" ? (action as (value: Product[]) => Product[])(current) : action;
       fallback.setItems(next);
-      if (session && !session.mustChangePassword) {
+      if (session) {
         void syncProducts(previous, next).then(refreshProducts).catch((error) => console.warn("[Zunion] Shared products sync failed.", error));
       }
       return next;
@@ -1439,6 +1438,10 @@ function roleOrders(role: Role, orders: Order[]) {
 const useServerAuth = import.meta.env.VITE_USE_SERVER_AUTH === "true";
 const isLocalHost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
+function apiErrorMessage(payload: Record<string, unknown>, fallback: string) {
+  return String(payload.error || payload.message || payload.details || fallback);
+}
+
 function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [username, setUsername] = useState("mahmoud");
   const [password, setPassword] = useState("1234");
@@ -1463,8 +1466,8 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
           body: JSON.stringify({ username: normalizedUsername, password, stayLoggedIn }),
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.error || "اسم المستخدم أو كلمة المرور غير صحيحة.");
-        const session = { ...(payload.session as Session), mustChangePassword: Boolean(payload.mustChangePassword ?? payload.session?.mustChangePassword) };
+        if (!response.ok) throw new Error(apiErrorMessage(payload, "اسم المستخدم أو كلمة المرور غير صحيحة."));
+        const session = { ...(payload.session as Session), mustChangePassword: false };
         localStorage.setItem(sessionKey, JSON.stringify(session));
         addAudit(session, "LOGIN", "auth", undefined, undefined, { username: normalizedUsername, role: session.role });
         onLogin(session);
@@ -1477,7 +1480,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     const user = getLocalUser(normalizedUsername);
     if (!user || user.status === "inactive" || user.password !== password) return setMessage("اسم المستخدم أو كلمة المرور غير صحيحة.");
     const expiresAt = new Date(Date.now() + (stayLoggedIn ? 14 * 24 : 8) * 60 * 60 * 1000).toISOString();
-    const session = { email: user.email, username: normalizedUsername, fullName: user.fullName, role: user.role, loggedInAt: new Date().toISOString(), expiresAt, mustChangePassword: user.mustChangePassword };
+    const session = { email: user.email, username: normalizedUsername, fullName: user.fullName, role: user.role, loggedInAt: new Date().toISOString(), expiresAt, mustChangePassword: false };
     localStorage.setItem(sessionKey, JSON.stringify(session));
     saveManagedUsers(loadManagedUsers().map((item) => item.username === normalizedUsername ? { ...item, lastLoginAt: new Date().toISOString() } : item));
     addAudit(session, "LOGIN", "auth", undefined, undefined, { username: normalizedUsername, role: user.role });
@@ -1499,12 +1502,12 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
           body: JSON.stringify({ username: normalizedUsername }),
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.error || "تعذر إرسال كود التحقق. تأكد من إعدادات Resend أو أضف دومين موثق.");
+        if (!response.ok) throw new Error(apiErrorMessage(payload, "تعذر إرسال كود التحقق حالياً"));
         setIssuedPasswordCode("");
         setMessage(payload.devCode ? `كود التحقق التجريبي: ${payload.devCode}` : "تم إرسال كود التحقق إلى البريد المسؤول.");
         return;
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "تعذر إرسال كود التحقق. تأكد من إعدادات Resend أو أضف دومين موثق.");
+        setMessage(error instanceof Error ? error.message : "تعذر إرسال كود التحقق حالياً");
         return;
       }
     }
@@ -1531,7 +1534,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
           body: JSON.stringify({ username: normalizedUsername, oldPassword, newPassword, code: verificationCode }),
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.error || "تعذر تغيير كلمة المرور.");
+        if (!response.ok) throw new Error(apiErrorMessage(payload, "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى"));
         setPassword(newPassword);
         setOldPassword("");
         setNewPassword("");
@@ -1541,7 +1544,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         setMessage("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
         return;
       } catch (error) {
-        setMessage(error instanceof Error ? error.message : "تعذر تغيير كلمة المرور.");
+        setMessage(error instanceof Error ? error.message : "تعذر الاتصال بالخادم. حاول مرة أخرى");
         return;
       }
     }
@@ -1606,17 +1609,16 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   );
 }
 
-function MandatoryPasswordChange({ session, onChanged }: { session: Session; onChanged: (session: Session) => void }) {
+function OptionalPasswordChangePanel({ session, onChanged }: { session: Session; onChanged?: (session: Session) => void }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [message, setMessage] = useState("يجب تغيير كلمة المرور المؤقتة");
+  const [message, setMessage] = useState("");
   const username = session.username || "";
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (newPassword === "1234") return setMessage("لا يمكن استخدام كلمة المرور 1234 مرة أخرى");
-    if (newPassword.trim() !== newPassword || newPassword.trim().length < 8) return setMessage("كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل");
+    if (newPassword.trim() !== newPassword || newPassword.trim().length < 4) return setMessage("كلمة المرور الجديدة يجب أن تكون 4 أحرف على الأقل");
     if (newPassword !== confirmPassword) return setMessage("كلمتا المرور غير متطابقتين");
 
     if (useServerAuth || !isLocalHost) {
@@ -1628,13 +1630,17 @@ function MandatoryPasswordChange({ session, onChanged }: { session: Session; onC
           body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(payload.error || "تعذر تغيير كلمة المرور.");
+        if (!response.ok) throw new Error(apiErrorMessage(payload, "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى"));
         const nextSession = { ...(payload.session as Session), mustChangePassword: false };
         localStorage.setItem(sessionKey, JSON.stringify(nextSession));
-        onChanged(nextSession);
+        onChanged?.(nextSession);
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setMessage("تم تغيير كلمة المرور بنجاح");
         return;
       } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر تغيير كلمة المرور.");
+        return setMessage(error instanceof Error ? error.message : "تعذر الاتصال بالخادم. حاول مرة أخرى");
       }
     }
 
@@ -1643,16 +1649,21 @@ function MandatoryPasswordChange({ session, onChanged }: { session: Session; onC
     saveLocalPassword(username, newPassword);
     const nextSession = { ...session, mustChangePassword: false };
     localStorage.setItem(sessionKey, JSON.stringify(nextSession));
-    addAudit(nextSession, "MANDATORY_PASSWORD_CHANGED", "auth", username, undefined, { username });
-    onChanged(nextSession);
+    addAudit(nextSession, "PASSWORD_CHANGED", "auth", username, undefined, { username });
+    onChanged?.(nextSession);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setMessage("تم تغيير كلمة المرور بنجاح");
   }
 
   return (
-    <main className="login-page" dir="rtl">
-      <form className="login-card" onSubmit={submit}>
-        <BrandLogo className="login-logo" />
-        <h1>تغيير كلمة المرور الإجباري</h1>
-        <p>يجب تغيير كلمة المرور المؤقتة قبل استخدام النظام.</p>
+    <section className="panel">
+      <div className="panel-head">
+        <h2>تغيير كلمة المرور</h2>
+        <span className="badge badge-gray">اختياري</span>
+      </div>
+      <form className="settings-form" onSubmit={submit}>
         <label>كلمة المرور الحالية</label>
         <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" />
         <label>كلمة المرور الجديدة</label>
@@ -1662,7 +1673,7 @@ function MandatoryPasswordChange({ session, onChanged }: { session: Session; onC
         {message && <div className="notice">{message}</div>}
         <button className="primary-btn">تغيير كلمة المرور</button>
       </form>
-    </main>
+    </section>
   );
 }
 
@@ -3217,7 +3228,7 @@ function managedUserFromServer(row: ServerUserRow): ManagedUser {
     role: row.role || "Operator",
     password: "",
     status: row.is_active === false ? "inactive" : "active",
-    mustChangePassword: row.must_change_password !== false,
+    mustChangePassword: Boolean(row.must_change_password),
     permissionOverrides: normalizePermissionOverride(row.permission_overrides),
     createdAt: row.created_at || new Date().toISOString(),
     lastLoginAt: row.last_login_at,
@@ -3240,7 +3251,7 @@ function managedRoleFromServer(row: ServerRoleRow): ManagedRole {
 function SettingsPage({ session }: { session: Session }) {
   const [users, setUsers] = useState<ManagedUser[]>(() => loadManagedUsers());
   const [roles, setRoles] = useState<ManagedRole[]>(() => loadManagedRoles());
-  const [userForm, setUserForm] = useState({ username: "", fullName: "", password: "", confirmPassword: "", role: "Operator", status: "active" as "active" | "inactive", mustChangePassword: true });
+  const [userForm, setUserForm] = useState({ username: "", fullName: "", password: "", confirmPassword: "", role: "Operator", status: "active" as "active" | "inactive", mustChangePassword: false });
   const [roleForm, setRoleForm] = useState({ name: "", description: "" });
   const [message, setMessage] = useState("");
   const [permissionSearch, setPermissionSearch] = useState("");
@@ -3280,7 +3291,7 @@ function SettingsPage({ session }: { session: Session }) {
   }
 
   async function resetAllPasswords() {
-    const typed = window.prompt("سيتم تغيير كلمة مرور جميع المستخدمين إلى 1234، وتسجيل خروجهم من جميع الأجهزة، وإجبارهم على تغيير كلمة المرور عند تسجيل الدخول القادم.\n\nاكتب RESET 1234 للتأكيد");
+    const typed = window.prompt("سيتم تغيير كلمة مرور جميع المستخدمين النشطين إلى 1234، وتسجيل خروج الجلسة الحالية للأمان. لن يتم إجبار المستخدمين على تغييرها عند تسجيل الدخول القادم.\n\nاكتب RESET 1234 للتأكيد");
     if (typed !== "RESET 1234") return setMessage("قيمة التأكيد غير صحيحة");
     if (useRemoteSettings) {
       try {
@@ -3297,7 +3308,7 @@ function SettingsPage({ session }: { session: Session }) {
       }
     }
 
-    const next = users.map((user) => user.status === "active" ? { ...user, password: "1234", mustChangePassword: true } : user);
+    const next = users.map((user) => user.status === "active" ? { ...user, password: "1234", mustChangePassword: false } : user);
     persistUsers(next, "BULK_PASSWORD_RESET", undefined, { actingMaster: session.username, affectedUsers: next.filter((user) => user.status === "active").length, at: new Date().toISOString() });
     localStorage.removeItem(sessionKey);
     setMessage("تمت إعادة تعيين كلمات المرور. يجب تسجيل الدخول مرة أخرى.");
@@ -3346,7 +3357,7 @@ function SettingsPage({ session }: { session: Session }) {
       }
     }
     persistUsers([nextUser, ...users], "USER_CREATED", nextUser.id, { username, role: nextUser.role });
-    setUserForm({ username: "", fullName: "", password: "", confirmPassword: "", role: "Operator", status: "active", mustChangePassword: true });
+    setUserForm({ username: "", fullName: "", password: "", confirmPassword: "", role: "Operator", status: "active", mustChangePassword: false });
     setMessage("تم إضافة المستخدم بنجاح");
   }
 
@@ -3358,13 +3369,13 @@ function SettingsPage({ session }: { session: Session }) {
       try {
         await settingsRequest(`/api/users/${encodeURIComponent(user.id)}/reset-password`, {
           method: "POST",
-          body: JSON.stringify({ password, mustChangePassword: true }),
+          body: JSON.stringify({ password, mustChangePassword: false }),
         });
       } catch (error) {
         return setMessage(error instanceof Error ? error.message : "تعذر تغيير كلمة المرور");
       }
     }
-    persistUsers(users.map((item) => item.id === user.id ? { ...item, password, mustChangePassword: true } : item), "PASSWORD_RESET_BY_MASTER", user.id, { username: user.username });
+    persistUsers(users.map((item) => item.id === user.id ? { ...item, password, mustChangePassword: false } : item), "PASSWORD_RESET_BY_MASTER", user.id, { username: user.username });
     setMessage("تم تغيير كلمة المرور بنجاح");
   }
 
@@ -3526,7 +3537,7 @@ function SettingsPage({ session }: { session: Session }) {
     permissions: group.permissions.filter((permission) => `${group.group} ${permission.label} ${permission.action} ${permission.key}`.toLowerCase().includes(permissionSearch.trim().toLowerCase())),
   })).filter((group) => group.permissions.length);
 
-  if (!isMaster) return <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />;
+  if (!isMaster) return <div className="stack"><OptionalPasswordChangePanel session={session} /></div>;
 
   return (
     <div className="stack">
@@ -3538,7 +3549,7 @@ function SettingsPage({ session }: { session: Session }) {
         <div className="settings-danger-zone">
           <div>
             <strong>إعادة تعيين كلمات مرور جميع المستخدمين</strong>
-            <p className="muted">سيتم ضبط كلمة المرور المؤقتة إلى 1234، وإجبار كل مستخدم نشط على تغييرها عند تسجيل الدخول القادم.</p>
+            <p className="muted">سيتم ضبط كلمة المرور إلى 1234 للمستخدمين النشطين بدون إجبارهم على تغييرها عند تسجيل الدخول القادم.</p>
           </div>
           {hasPermission(session, "users.resetAllPasswords") && <button type="button" className="primary-btn" onClick={resetAllPasswords}>إعادة تعيين كلمات مرور جميع المستخدمين</button>}
         </div>
@@ -3549,6 +3560,7 @@ function SettingsPage({ session }: { session: Session }) {
           <StatCard title="الشعار" icon={Image} value={<span className="logo-preview-value"><BrandLogo /><small>src/assets/logo.png</small></span>} />
         </div>
       </section>
+      <OptionalPasswordChangePanel session={session} />
       <section className="panel">
         <div className="panel-head">
           <h2>إدارة المستخدمين</h2>
@@ -3561,7 +3573,6 @@ function SettingsPage({ session }: { session: Session }) {
           <input placeholder="تأكيد كلمة المرور" type="password" value={userForm.confirmPassword} onChange={(event) => setUserForm((current) => ({ ...current, confirmPassword: event.target.value }))} />
           <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}>{roles.map((role) => <option key={role.id}>{role.name}</option>)}</select>
           <select value={userForm.status} onChange={(event) => setUserForm((current) => ({ ...current, status: event.target.value as "active" | "inactive" }))}><option value="active">مفعل</option><option value="inactive">موقوف</option></select>
-          <label className="check"><input type="checkbox" checked={userForm.mustChangePassword} onChange={(event) => setUserForm((current) => ({ ...current, mustChangePassword: event.target.checked }))} /> إجبار تغيير كلمة المرور</label>
           <button className="primary-btn">إضافة مستخدم جديد</button>
         </form>
         {message && <p className="notice">{message}</p>}
@@ -3592,7 +3603,6 @@ function SettingsPage({ session }: { session: Session }) {
                   <td className="actions">
                     <button type="button" onClick={() => resetPassword(user)}>تغيير كلمة المرور</button>
                     <button type="button" onClick={() => toggleUserStatus(user)}>{user.status === "active" ? "إيقاف المستخدم" : "تفعيل المستخدم"}</button>
-                    <button type="button" onClick={() => updateUser(user.id, { mustChangePassword: !user.mustChangePassword })}>{user.mustChangePassword ? "إلغاء الإجبار" : "إجبار التغيير"}</button>
                     <button type="button" className="danger-text" onClick={() => deleteUser(user)}>حذف المستخدم</button>
                   </td>
                 </tr>
@@ -4046,7 +4056,7 @@ function ZunionApp() {
         icon: Cog,
         items: [
           { id: "audit", label: "سجل العمليات", visible: can("audit.view"), icon: ClipboardList },
-          { id: "settings", label: "الإعدادات", visible: can("settings.view"), icon: Cog },
+          { id: "settings", label: "الإعدادات", visible: true, icon: Cog },
         ],
       },
     ];
@@ -4077,7 +4087,6 @@ function ZunionApp() {
   }
 
   if (!session) return <Login onLogin={setSession} />;
-  if (session.mustChangePassword) return <MandatoryPasswordChange session={session} onChanged={setSession} />;
   const routeAllowed = canAccessView(session, view);
 
   return (

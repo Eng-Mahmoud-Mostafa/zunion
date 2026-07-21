@@ -49,6 +49,7 @@ app.use((req, _res, next) => {
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 const otpRate = new Map<string, number[]>();
+const passwordCodeRate = new Map<string, number[]>();
 const upload = multer({
   dest: config.uploadDir,
   limits: { fileSize: 10 * 1024 * 1024, files: 5 },
@@ -235,7 +236,7 @@ function makeSession(user: AppUser, stayLoggedIn = true) {
       username: user.username,
       fullName: user.full_name,
       role: user.role,
-      mustChangePassword: user.must_change_password ?? false,
+      mustChangePassword: false,
       tokenVersion: user.token_version ?? 0,
       loggedInAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + maxAge).toISOString(),
@@ -291,7 +292,7 @@ const userAdminSchema = z.object({
   password: z.string().min(4).optional(),
   roleId: z.string().min(1),
   status: z.enum(["active", "inactive"]).default("active"),
-  mustChangePassword: z.boolean().default(true),
+  mustChangePassword: z.boolean().default(false),
   permissionOverrides: permissionOverridesSchema,
 });
 
@@ -320,7 +321,7 @@ app.post("/api/auth/login", async (req, res) => {
     }).catch((error) => console.warn("Supabase users_profile last_login_at update failed.", error));
   }
   res.cookie("zunion_app_session", JSON.stringify(session), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
-  return res.json({ ok: true, session, mustChangePassword: profile.must_change_password ?? true });
+  return res.json({ ok: true, session, mustChangePassword: false });
 });
 
 app.post("/api/auth/request-otp", async (req, res) => {
@@ -377,6 +378,10 @@ app.post("/api/auth/request-password-code", async (req, res) => {
   const parsed = z.object({ username: z.string().min(1) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "اسم المستخدم مطلوب." });
   const username = parsed.data.username.trim().toLowerCase();
+  const now = Date.now();
+  const events = (passwordCodeRate.get(username) ?? []).filter((time) => now - time < 15 * 60 * 1000);
+  if (events.length >= 5) return res.status(429).json({ error: "تم إرسال عدد كبير من الطلبات. حاول مرة أخرى لاحقاً" });
+  passwordCodeRate.set(username, [...events, now]);
   const profile = await loadProfile(username);
   if (!profile) return res.status(404).json({ error: "المستخدم غير موجود." });
   const code = otpCode();
@@ -465,12 +470,11 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
   if (!session?.username) return res.status(401).json({ error: "انتهت الجلسة. سجل الدخول مرة أخرى" });
   const parsed = z.object({
     currentPassword: z.string().min(1),
-    newPassword: z.string().min(8),
-    confirmPassword: z.string().min(8),
+    newPassword: z.string().min(4),
+    confirmPassword: z.string().min(4),
   }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل" });
-  if (parsed.data.newPassword.trim() !== parsed.data.newPassword || !parsed.data.newPassword.trim()) return res.status(400).json({ error: "كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل" });
-  if (parsed.data.newPassword === "1234") return res.status(400).json({ error: "لا يمكن استخدام كلمة المرور 1234 مرة أخرى" });
+  if (!parsed.success) return res.status(400).json({ error: "كلمة المرور الجديدة يجب أن تكون 4 أحرف على الأقل" });
+  if (parsed.data.newPassword.trim() !== parsed.data.newPassword || !parsed.data.newPassword.trim()) return res.status(400).json({ error: "كلمة المرور الجديدة يجب أن تكون 4 أحرف على الأقل" });
   if (parsed.data.newPassword !== parsed.data.confirmPassword) return res.status(400).json({ error: "كلمتا المرور غير متطابقتين" });
 
   const profile = await loadProfile(session.username);
@@ -489,7 +493,7 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
   }
   const { session: nextSession, maxAge } = makeSession(updated, true);
   res.cookie("zunion_app_session", JSON.stringify(nextSession), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
-  audit(null, "MANDATORY_PASSWORD_CHANGED", "auth", updated.id || profile.id, undefined, { username: profile.username }).catch(() => undefined);
+  audit(null, "PASSWORD_CHANGED", "auth", updated.id || profile.id, undefined, { username: profile.username }).catch(() => undefined);
   return res.json({ ok: true, session: nextSession });
 });
 
@@ -568,7 +572,7 @@ app.patch("/api/users/:id", requireAppPermission("users.edit"), async (req, res)
 
 app.post("/api/users/:id/reset-password", requireAppPermission("users.resetPassword"), async (req, res) => {
   const id = param(req.params.id);
-  const parsed = z.object({ password: z.string().min(4), mustChangePassword: z.boolean().default(true) }).safeParse(req.body);
+  const parsed = z.object({ password: z.string().min(4), mustChangePassword: z.boolean().default(false) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "كلمة المرور الجديدة غير صحيحة", issues: parsed.error.issues });
   try {
     const profile = await loadProfileById(id);
@@ -595,7 +599,7 @@ app.post("/api/users/reset-all-passwords", requireAppPermission("users.resetAllP
       body: JSON.stringify({
         password_salt: salt,
         password_hash: passwordHash("1234", salt),
-        must_change_password: true,
+        must_change_password: false,
         token_version: tokenVersion,
       }),
     });

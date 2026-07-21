@@ -10,7 +10,7 @@ create table if not exists public.users_profile (
   password_hash text not null,
   password_salt text not null,
   is_active boolean not null default true,
-  must_change_password boolean not null default true,
+  must_change_password boolean not null default false,
   permission_overrides jsonb not null default '{"allow":[],"deny":[]}'::jsonb,
   token_version integer not null default 0,
   last_login_at timestamptz,
@@ -24,7 +24,9 @@ alter table public.users_profile add column if not exists token_version integer 
 alter table public.users_profile add column if not exists last_login_at timestamptz;
 alter table public.users_profile add column if not exists updated_at timestamptz not null default now();
 alter table public.users_profile add column if not exists is_active boolean not null default true;
-alter table public.users_profile add column if not exists must_change_password boolean not null default true;
+alter table public.users_profile add column if not exists must_change_password boolean not null default false;
+alter table public.users_profile alter column must_change_password set default false;
+update public.users_profile set must_change_password = false where must_change_password = true;
 
 create table if not exists public.roles (
   id uuid primary key default gen_random_uuid(),
@@ -321,23 +323,24 @@ on conflict (name) do update set
 
 insert into public.users_profile (username, full_name, email, role, password_salt, password_hash, must_change_password)
 values
-  ('mahmoud', 'Mahmoud', 'mahmoud@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('reda', 'Reda', 'reda@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('hassan', 'Hassan', 'hassan@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('omar', 'Omar', 'omar@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('youssef', 'Youssef', 'youssef@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('khalifa', 'Khalifa', 'khalifa@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('opr 1', 'Opr 1', 'opr1@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('opr 2', 'Opr 2', 'opr2@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('opr 3', 'Opr 3', 'opr3@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('supervisor 1', 'Supervisor 1', 'supervisor1@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('supervisor 2', 'Supervisor 2', 'supervisor2@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('supervisor 3', 'Supervisor 3', 'supervisor3@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('finishing 1', 'Finishing 1', 'finishing1@zunion.local', 'Finishing', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true),
-  ('finishing 2', 'Finishing 2', 'finishing2@zunion.local', 'Finishing', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), true)
+  ('mahmoud', 'Mahmoud', 'mahmoud@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('reda', 'Reda', 'reda@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('hassan', 'Hassan', 'hassan@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('omar', 'Omar', 'omar@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('youssef', 'Youssef', 'youssef@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('khalifa', 'Khalifa', 'khalifa@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('opr 1', 'Opr 1', 'opr1@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('opr 2', 'Opr 2', 'opr2@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('opr 3', 'Opr 3', 'opr3@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('supervisor 1', 'Supervisor 1', 'supervisor1@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('supervisor 2', 'Supervisor 2', 'supervisor2@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('supervisor 3', 'Supervisor 3', 'supervisor3@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('finishing 1', 'Finishing 1', 'finishing1@zunion.local', 'Finishing', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
+  ('finishing 2', 'Finishing 2', 'finishing2@zunion.local', 'Finishing', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false)
 on conflict (username) do update set
   full_name = excluded.full_name,
   role = excluded.role,
+  must_change_password = false,
   is_active = true;
 
 insert into public.company_settings (company_name, logo_url, primary_color)

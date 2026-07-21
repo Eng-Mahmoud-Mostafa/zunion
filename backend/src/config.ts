@@ -9,6 +9,16 @@ function databaseUrl() {
   return "postgres://zunion:zunion@localhost:5432/zunion";
 }
 
+function requireProductionEmailConfig() {
+  if ((process.env.NODE_ENV === "production" || process.env.VERCEL) && !process.env.RESEND_API_KEY && !process.env.SMTP_HOST) {
+    throw new Error("Email delivery is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL, or configure SMTP_HOST server-side.");
+  }
+}
+
+requireProductionEmailConfig();
+
+const resendFromEmail = process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev";
+
 export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 4000),
@@ -23,7 +33,8 @@ export const config = {
   otpDevMode: process.env.OTP_DEV_MODE === "true",
   resend: {
     apiKey: process.env.RESEND_API_KEY,
-    from: process.env.RESEND_FROM ?? `Zunion <${process.env.RESEND_FROM_EMAIL ?? "onboarding@resend.dev"}>`,
+    from: process.env.RESEND_FROM ?? `Zunion <${resendFromEmail}>`,
+    fromEmail: resendFromEmail,
     passwordChangeEmail: process.env.PASSWORD_CHANGE_EMAIL ?? "mahmoud_foly@icloud.com",
   },
   smtp: {
