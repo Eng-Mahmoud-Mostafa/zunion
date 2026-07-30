@@ -1,4 +1,4 @@
-import { Component, Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
 import {
   ArrowDownCircle,
@@ -3922,7 +3922,7 @@ function SidebarSection({ section, activeView, open, onToggle, onSelect }: { sec
   );
 }
 
-function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSection, onSelect, onLogout, onCloseDrawer }: {
+function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSection, onSelect, onLogout, onCloseDrawer, onLogoSecretClick }: {
   sections: SidebarSectionConfig[];
   activeView: View;
   openSection: string;
@@ -3931,12 +3931,15 @@ function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSectio
   onSelect: (view: View) => void;
   onLogout: () => void;
   onCloseDrawer: () => void;
+  onLogoSecretClick: () => void;
 }) {
   return (
     <>
       <aside className={`sidebar${drawerOpen ? " drawer-open" : ""}`}>
         <button type="button" className="sidebar-close" aria-label="إغلاق القائمة" onClick={onCloseDrawer}><X size={22} /></button>
-        <BrandLogo className="sidebar-logo" />
+        <button type="button" className="logo-secret-button sidebar-logo-button" aria-label="شعار Zunion" onClick={onLogoSecretClick}>
+          <BrandLogo className="sidebar-logo" />
+        </button>
         <nav className="sidebar-menu" aria-label="القائمة الرئيسية">
           {sections.map((section) => (
             <SidebarSection
@@ -3969,6 +3972,7 @@ function ZunionApp() {
   const [openSection, setOpenSection] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const logoClickRef = useRef({ count: 0, firstClickAt: 0 });
   const { orders, setOrders } = useOrders(session);
   const { items: customers, setItems: setCustomers } = useCustomers(session);
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
@@ -4086,6 +4090,26 @@ function ZunionApp() {
     setSession(null);
   }
 
+  function handleLogoSecretClick() {
+    const now = Date.now();
+    const current = logoClickRef.current;
+    if (now - current.firstClickAt > 3000) {
+      current.count = 0;
+      current.firstClickAt = now;
+    }
+    current.count += 1;
+    if (current.count < 5) return;
+    current.count = 0;
+    current.firstClickAt = 0;
+    if (session?.role !== "Master") {
+      window.alert("حساب الإدارة متاح لحساب Master فقط.");
+      return;
+    }
+    setOpenSection("system");
+    setDrawerOpen(false);
+    setView("settings");
+  }
+
   if (!session) return <Login onLogin={setSession} />;
   const routeAllowed = canAccessView(session, view);
 
@@ -4100,6 +4124,7 @@ function ZunionApp() {
         onSelect={selectSidebarView}
         onLogout={logout}
         onCloseDrawer={() => setDrawerOpen(false)}
+        onLogoSecretClick={handleLogoSecretClick}
       />
       <main className="content">
         <header className="topbar">
@@ -4108,7 +4133,9 @@ function ZunionApp() {
             <h1>نظام Zunion لإدارة الأوردرات</h1>
             <p>{session.fullName || session.username ? `${session.fullName || session.username} - ${session.role}` : <><EmailText email={session.email} className="account-email" /> - {session.role}</>}</p>
           </div>
-          <BrandLogo className="top-logo" />
+          <button type="button" className="logo-secret-button top-logo-button" aria-label="شعار Zunion" onClick={handleLogoSecretClick}>
+            <BrandLogo className="top-logo" />
+          </button>
         </header>
         <section className="page">
           {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}

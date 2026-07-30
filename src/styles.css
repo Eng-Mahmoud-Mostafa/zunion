@@ -207,6 +207,42 @@ textarea:focus {
   border-radius: 4px;
 }
 
+.logo-secret-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.logo-secret-button:focus-visible {
+  outline: 3px solid rgba(217, 4, 22, .35);
+  outline-offset: 3px;
+}
+
+.sidebar button.logo-secret-button,
+.sidebar-logo-button {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  margin: 0 0 10px;
+  padding: 0 !important;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+.sidebar button.logo-secret-button:hover {
+  background: transparent;
+  transform: none;
+}
+
+.top-logo-button {
+  flex: 0 0 auto;
+}
+
 .sidebar button {
   border: 0;
   border-radius: 7px;
@@ -3073,4 +3109,27 @@ input[type="date"] {
     position: static;
     color: #000 !important;
   }
+}
+
+.sidebar button.logo-secret-button {
+  display: block !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: 0 !important;
+  margin: 0 0 10px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.sidebar button.logo-secret-button:hover {
+  background: transparent !important;
+  transform: none !important;
+}
+
+.sidebar button.logo-secret-button .sidebar-logo {
+  margin: 0 auto 14px !important;
 }
