@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -6,13 +7,15 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import multer from "multer";
 import { z } from "zod";
-import { config, roleByEmail, type UserRole } from "./config.js";
+import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
-import { audit, canSeeFinancials, hashSecret, otpCode, randomToken, requireAuth, requireRole } from "./security.js";
-import { sendOtpEmail, sendVerificationEmail } from "./mailer.js";
+import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
+import { sendVerificationEmail } from "./email.js";
 import { customerSchema, orderSchema, productSchema, statusSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
-import { validatePermissions, type PermissionKey } from "./permissions.js";
+import { effectivePermissions, validatePermissions, type PermissionKey } from "./permissions.js";
+import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
+import { ensureSeededUsers } from "./seed.js";
 
 const app = express();
 fs.mkdirSync(config.uploadDir, { recursive: true });
@@ -48,8 +51,8 @@ app.use((req, _res, next) => {
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-const otpRate = new Map<string, number[]>();
 const passwordCodeRate = new Map<string, number[]>();
+const resetAttemptRate = new Map<string, number[]>();
 const upload = multer({
   dest: config.uploadDir,
   limits: { fileSize: 10 * 1024 * 1024, files: 5 },
@@ -100,17 +103,35 @@ type AppUser = {
   is_active?: boolean;
   must_change_password?: boolean;
   token_version?: number;
+  permission_overrides?: { allow?: string[]; deny?: string[] };
   source?: "supabase" | "local" | "seeded";
 };
 
-const seededUsers: Record<string, AppUser & { password: string }> = {
-  mahmoud: { username: "mahmoud", full_name: "Mahmoud", email: "mahmoud@zunion.local", role: "Master", password: "1234" },
-  reda: { username: "reda", full_name: "Reda", email: "reda@zunion.local", role: "Master", password: "1234" },
-  hassan: { username: "hassan", full_name: "Hassan", email: "hassan@zunion.local", role: "Master", password: "1234" },
-};
+function seededPasswordSalt(username: string) {
+  return crypto.createHash("sha256").update(`zunion-seeded-salt:${username}`).digest("hex").slice(0, 16);
+}
+
+const seededUsers: Record<string, AppUser> = Object.fromEntries(
+  SEED_USERS.map((user) => {
+    const password_salt = seededPasswordSalt(user.username);
+    return [user.username, { ...user, password_salt, password_hash: hashSecret(`${password_salt}:${SEED_PASSWORD}`), source: "seeded" as const }];
+  }),
+);
 
 function passwordHash(password: string, salt: string) {
   return hashSecret(`${salt}:${password}`);
+}
+
+function passwordValid(profile: AppUser, password: string) {
+  return Boolean(profile.password_hash && profile.password_salt && profile.password_hash === passwordHash(password, profile.password_salt));
+}
+
+function rateLimited(key: string, map: Map<string, number[]>, limit: number, windowMs = 15 * 60 * 1000) {
+  const now = Date.now();
+  const events = (map.get(key) ?? []).filter((time) => now - time < windowMs);
+  if (events.length >= limit) return true;
+  map.set(key, [...events, now]);
+  return false;
 }
 
 async function supabaseRest<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -145,7 +166,7 @@ async function loadProfile(username: string) {
   }
   try {
     const { rows } = await query<AppUser>(
-      `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version
+      `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version, permission_overrides
        from users
        where lower(username) = lower($1) or lower(email) = lower($2)
        limit 1`,
@@ -156,6 +177,34 @@ async function loadProfile(username: string) {
     console.warn("Local users profile lookup failed; using seeded fallback.", error instanceof Error ? error.message : error);
   }
   return seededUsers[username] ? { ...seededUsers[username], source: "seeded" as const } : null;
+}
+
+async function findProfileByEmail(identifier: string) {
+  const value = identifier.trim().toLowerCase();
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      const rows = await supabaseRest<AppUser[]>(
+        `users_profile?or=(email.eq.${encodeURIComponent(value)},username.eq.${encodeURIComponent(value)})&select=*&limit=1`,
+      );
+      if (rows[0]) return { ...rows[0], source: "supabase" as const };
+    } catch (error) {
+      console.warn("Supabase profile email lookup failed; trying local fallback.", error instanceof Error ? error.message : error);
+    }
+  }
+  try {
+    const { rows } = await query<AppUser>(
+      `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version, permission_overrides
+       from users
+       where lower(email) = lower($1) or lower(username) = lower($1) or lower(username || '@zunion.local') = lower($1)
+       limit 1`,
+      [value],
+    );
+    if (rows[0]) return { ...rows[0], source: "local" as const };
+  } catch (error) {
+    console.warn("Local profile email lookup failed.", error instanceof Error ? error.message : error);
+  }
+  const seedMatch = Object.entries(seededUsers).find(([username, user]) => username.toLowerCase() === value || user.email.toLowerCase() === value);
+  return seedMatch ? { ...seedMatch[1], source: "seeded" as const } : null;
 }
 
 async function loadProfileById(id: string) {
@@ -169,7 +218,7 @@ async function loadProfileById(id: string) {
   }
   try {
     const { rows } = await query<AppUser>(
-      `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version
+      `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version, permission_overrides
        from users
        where id = $1
        limit 1`,
@@ -182,23 +231,23 @@ async function loadProfileById(id: string) {
   return null;
 }
 
-async function persistProfilePassword(profile: AppUser, password: string, mustChangePassword: boolean, tokenVersion = Date.now()) {
+async function persistProfilePassword(profile: AppUser, password: string, mustChangePassword: boolean, tokenVersion = nextTokenVersion(profile.token_version)) {
   const salt = randomToken(12);
   const password_hash = passwordHash(password, salt);
-  const body = {
-    password_salt: salt,
-    password_hash,
-    must_change_password: mustChangePassword,
-    token_version: tokenVersion,
-  };
+  const username = (profile.username || "").trim().toLowerCase();
+  const email = profile.email || `${username}@zunion.local`;
 
   if (profile.source === "supabase" && profile.id && config.supabaseUrl && config.supabaseServiceKey) {
     try {
       await supabaseRest(`users_profile?id=eq.${encodeURIComponent(profile.id)}`, {
         method: "PATCH",
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          password_salt: salt,
+          password_hash,
+          must_change_password: mustChangePassword,
+          token_version: tokenVersion,
+        }),
       });
-      return { ...profile, ...body };
     } catch (error) {
       console.error("Supabase users_profile password update error", {
         message: error instanceof Error ? error.message : String(error),
@@ -208,24 +257,31 @@ async function persistProfilePassword(profile: AppUser, password: string, mustCh
     }
   }
 
-  const username = profile.username.trim().toLowerCase();
-  const email = profile.email || `${username}@zunion.local`;
-  const { rows } = await query<AppUser>(
-    `insert into users (email, role, username, full_name, password_salt, password_hash, must_change_password, token_version)
-     values ($1,$2,$3,$4,$5,$6,$7,$8)
-     on conflict (email) do update set
-       role = excluded.role,
-       username = excluded.username,
-       full_name = excluded.full_name,
-       password_salt = excluded.password_salt,
-       password_hash = excluded.password_hash,
-       must_change_password = excluded.must_change_password,
-       token_version = excluded.token_version,
-       is_active = true
-     returning id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version`,
-    [email, profile.role, username, profile.full_name, salt, password_hash, mustChangePassword, tokenVersion],
-  );
-  return { ...rows[0], source: "local" as const };
+  try {
+    const { rows } = await query<AppUser>(
+      `insert into users (email, role, username, full_name, password_salt, password_hash, must_change_password, token_version)
+       values ($1,$2,$3,$4,$5,$6,$7,$8)
+       on conflict (email) do update set
+         role = excluded.role,
+         username = coalesce(nullif(excluded.username, ''), users.username),
+         full_name = coalesce(excluded.full_name, users.full_name),
+         password_salt = excluded.password_salt,
+         password_hash = excluded.password_hash,
+         must_change_password = excluded.must_change_password,
+         token_version = excluded.token_version,
+         is_active = true
+       returning id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version, permission_overrides`,
+      [email, profile.role, username, profile.full_name, salt, password_hash, mustChangePassword, tokenVersion],
+    );
+    return { ...rows[0], source: profile.source === "supabase" ? ("supabase" as const) : ("local" as const) };
+  } catch (error) {
+    if (profile.source === "supabase") {
+      console.warn("Local users password sync failed; users_profile was updated.", error);
+      return { ...profile, password_hash, password_salt: salt, must_change_password: mustChangePassword, token_version: tokenVersion, source: "supabase" as const };
+    }
+    console.error("Local users password update error", error);
+    throw new Error("تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى");
+  }
 }
 
 function makeSession(user: AppUser, stayLoggedIn = true) {
@@ -236,8 +292,9 @@ function makeSession(user: AppUser, stayLoggedIn = true) {
       username: user.username,
       fullName: user.full_name,
       role: user.role,
-      mustChangePassword: false,
+      mustChangePassword: user.must_change_password === true,
       tokenVersion: user.token_version ?? 0,
+      permissions: effectivePermissions(user),
       loggedInAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + maxAge).toISOString(),
     },
@@ -245,31 +302,35 @@ function makeSession(user: AppUser, stayLoggedIn = true) {
   };
 }
 
-function loadAppSessionCookie(req: express.Request) {
-  const raw = req.cookies.zunion_app_session;
-  if (!raw || typeof raw !== "string") return null;
-  try {
-    const session = JSON.parse(raw) as { role?: string; expiresAt?: string };
-    if (!session.expiresAt || new Date(session.expiresAt).getTime() <= Date.now()) return null;
-    return session;
-  } catch {
-    return null;
-  }
+function loadAppSessionCookie(req: express.Request): AppSession | null {
+  const raw = req.cookies?.zunion_app_session;
+  if (typeof raw !== "string") return null;
+  const session = verifyAppSession(raw);
+  return appSessionLive(session) ? session : null;
+}
+
+function setAppSessionCookie(res: express.Response, session: object, maxAge: number) {
+  res.cookie("zunion_app_session", signAppSession(session as AppSession), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: config.nodeEnv === "production",
+    maxAge,
+  });
 }
 
 function requireFinanceSession(req: express.Request, res: express.Response, next: express.NextFunction) {
   const session = loadAppSessionCookie(req);
   if (!session) return res.status(401).json({ error: "يجب تسجيل الدخول أولا." });
-  if (!["Master", "Helper", "Operator"].includes(String(session.role || ""))) {
+  if (!["Master", "Helper"].includes(String(session.role || ""))) {
     return res.status(403).json({ error: "ليس لديك صلاحية لحفظ المعاملات المالية." });
   }
   return next();
 }
 
-function appSessionHasPermission(session: { role?: string } | null, permission: PermissionKey) {
+function appSessionHasPermission(session: AppSession | null, permission: PermissionKey) {
   if (!session) return false;
   if (session.role === "Master") return true;
-  return false;
+  return Array.isArray(session.permissions) && session.permissions.includes(permission);
 }
 
 function requireAppPermission(permission: PermissionKey) {
@@ -309,10 +370,7 @@ app.post("/api/auth/login", async (req, res) => {
   const username = parsed.data.username.trim().toLowerCase();
   const profile = await loadProfile(username);
   if (!profile || profile.is_active === false) return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
-  const validPassword = profile.password_hash && profile.password_salt
-    ? profile.password_hash === passwordHash(parsed.data.password, profile.password_salt)
-    : seededUsers[username]?.password === parsed.data.password;
-  if (!validPassword) return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
+  if (!passwordValid(profile, parsed.data.password)) return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
   const { session, maxAge } = makeSession(profile, parsed.data.stayLoggedIn);
   if (config.supabaseUrl && config.supabaseServiceKey && profile.id) {
     supabaseRest(`users_profile?id=eq.${encodeURIComponent(profile.id)}`, {
@@ -320,70 +378,42 @@ app.post("/api/auth/login", async (req, res) => {
       body: JSON.stringify({ last_login_at: new Date().toISOString() }),
     }).catch((error) => console.warn("Supabase users_profile last_login_at update failed.", error));
   }
-  res.cookie("zunion_app_session", JSON.stringify(session), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
-  return res.json({ ok: true, session, mustChangePassword: false });
+  setAppSessionCookie(res, session, maxAge);
+  return res.json({ ok: true, session, mustChangePassword: session.mustChangePassword === true });
 });
 
-app.post("/api/auth/request-otp", async (req, res) => {
-  const parsed = z.object({ email: z.string().email() }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "Invalid email" });
-  const email = parsed.data.email.toLowerCase();
-  if (!(email in roleByEmail)) return res.status(403).json({ message: "Email is not allowed" });
-  const now = Date.now();
-  const events = (otpRate.get(email) ?? []).filter((time) => now - time < 15 * 60 * 1000);
-  if (events.length >= 5) return res.status(429).json({ message: "Too many OTP requests" });
-  otpRate.set(email, [...events, now]);
-
-  const otp = otpCode();
-  await query("insert into otp_codes (email, otp_hash, expires_at) values ($1,$2,now() + interval '10 minutes')", [email, hashSecret(otp)]);
-  await audit(null, "OTP_REQUESTED", "auth", undefined, undefined, { email });
-  await sendOtpEmail(email, otp);
-  return res.json({ ok: true, devOtp: config.otpDevMode ? otp : undefined });
+app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+  const parsed = z.object({ oldPassword: z.string().min(1), newPassword: z.string().min(4) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "كلمة المرور القديمة مطلوبة وكلمة المرور الجديدة يجب ألا تقل عن 4 أحرف." });
+  const profile = await findProfileByEmail(req.user!.email);
+  if (!profile || profile.is_active === false) return res.status(404).json({ error: "المستخدم غير موجود." });
+  if (!passwordValid(profile, parsed.data.oldPassword)) return res.status(401).json({ error: "كلمة المرور القديمة غير صحيحة." });
+  try {
+    const updated = await persistProfilePassword(profile, parsed.data.newPassword, false);
+    const { session: nextSession, maxAge } = makeSession(updated, true);
+    setAppSessionCookie(res, nextSession, maxAge);
+    res.clearCookie("zunion_password_code");
+    await audit(req.user!, "PASSWORD_CHANGED", "auth", updated.id || profile.id, undefined, { username: profile.username });
+    return res.json({ ok: true, session: nextSession });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى" });
+  }
 });
 
-app.post("/api/auth/verify-otp", async (req, res) => {
-  const parsed = z.object({ email: z.string().email(), otp: z.string().min(4), stayLoggedIn: z.boolean().optional() }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "Invalid OTP request" });
-  const email = parsed.data.email.toLowerCase();
-  if (!(email in roleByEmail)) return res.status(403).json({ message: "Email is not allowed" });
-  const otpHash = hashSecret(parsed.data.otp);
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const parsed = z.object({ email: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "البريد الإلكتروني مطلوب." });
+  const email = parsed.data.email.trim().toLowerCase();
+  if (rateLimited(email, passwordCodeRate, 5)) {
+    return res.status(429).json({ error: "تم إرسال عدد كبير من الطلبات. حاول مرة أخرى لاحقاً" });
+  }
 
-  const result = await tx(async (client) => {
-    const otp = await client.query<{ id: string }>(
-      `select id from otp_codes where email=$1 and otp_hash=$2 and used_at is null and expires_at > now()
-       order by created_at desc limit 1 for update`,
-      [email, otpHash],
-    );
-    if (!otp.rows[0]) return null;
-    await client.query("update otp_codes set used_at = now() where id = $1", [otp.rows[0].id]);
-    const user = await client.query<{ id: string; email: string; role: UserRole }>("select id, email, role from users where email = $1", [email]);
-    const token = randomToken();
-    const expires = parsed.data.stayLoggedIn ? "14 days" : "8 hours";
-    await client.query("insert into sessions (user_id, token_hash, expires_at) values ($1,$2,now() + $3::interval)", [user.rows[0].id, hashSecret(token), expires]);
-    return { user: user.rows[0], token, maxAge: parsed.data.stayLoggedIn ? 14 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000 };
-  });
-
-  if (!result) return res.status(401).json({ message: "Invalid or expired OTP" });
-  res.cookie(config.cookieName, result.token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: config.nodeEnv === "production",
-    maxAge: result.maxAge,
-  });
-  await audit(result.user, "LOGIN", "auth", undefined, undefined, { email });
-  return res.json({ user: result.user });
-});
-
-app.post("/api/auth/request-password-code", async (req, res) => {
-  const parsed = z.object({ username: z.string().min(1) }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "اسم المستخدم مطلوب." });
-  const username = parsed.data.username.trim().toLowerCase();
-  const now = Date.now();
-  const events = (passwordCodeRate.get(username) ?? []).filter((time) => now - time < 15 * 60 * 1000);
-  if (events.length >= 5) return res.status(429).json({ error: "تم إرسال عدد كبير من الطلبات. حاول مرة أخرى لاحقاً" });
-  passwordCodeRate.set(username, [...events, now]);
-  const profile = await loadProfile(username);
-  if (!profile) return res.status(404).json({ error: "المستخدم غير موجود." });
+  const profile = await findProfileByEmail(email);
+  if (!profile) {
+    audit(null, "PASSWORD_RESET_REQUESTED", "auth", undefined, undefined, { email, matched: false }).catch(() => undefined);
+    return res.json({ ok: true });
+  }
+  const username = profile.username.trim().toLowerCase();
   const code = otpCode();
   const codeHash = hashSecret(`${username}:${code}`);
   if (config.supabaseUrl && config.supabaseServiceKey) {
@@ -401,37 +431,69 @@ app.post("/api/auth/request-password-code", async (req, res) => {
       [username, codeHash],
     );
   }
+  const sendTo = email.endsWith("@zunion.local") ? config.resend.passwordChangeEmail : email;
   try {
-    await sendVerificationEmail(config.resend.passwordChangeEmail, code, "كود تغيير كلمة مرور Zunion");
+    await sendVerificationEmail(sendTo, code, "كود استعادة كلمة مرور Zunion");
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر إرسال كود التحقق. تأكد من إعدادات Resend أو أضف دومين موثق." });
   }
   res.cookie("zunion_password_code", codeHash, { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge: 10 * 60 * 1000 });
-  audit(null, "PASSWORD_CODE_REQUESTED", "auth", undefined, undefined, { username }).catch(() => undefined);
+  audit(null, "PASSWORD_RESET_REQUESTED", "auth", undefined, undefined, { email, matched: true }).catch(() => undefined);
   return res.json({ ok: true, devCode: config.otpDevMode ? code : undefined });
 });
 
-app.post("/api/auth/change-password", async (req, res) => {
-  const parsed = z.object({
-    username: z.string().min(1),
-    oldPassword: z.string().min(1),
-    newPassword: z.string().min(4),
-    code: z.string().min(4),
-  }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "كل الحقول مطلوبة." });
-  const username = parsed.data.username.trim().toLowerCase();
+app.post("/api/auth/verify-reset-code", async (req, res) => {
+  const parsed = z.object({ email: z.string().min(1), code: z.string().min(4) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "البريد الإلكتروني وكود التحقق مطلوبان." });
+  const email = parsed.data.email.trim().toLowerCase();
+  if (rateLimited(email, resetAttemptRate, 10)) {
+    return res.status(429).json({ error: "محاولات كثيرة. حاول مرة أخرى لاحقاً" });
+  }
+  const profile = await findProfileByEmail(email);
+  if (!profile) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
+  const username = profile.username.trim().toLowerCase();
   const codeHash = hashSecret(`${username}:${parsed.data.code}`);
-  const profile = await loadProfile(username);
-  if (!profile) return res.status(404).json({ error: "المستخدم غير موجود." });
-  const validOldPassword = profile.password_hash && profile.password_salt
-    ? profile.password_hash === passwordHash(parsed.data.oldPassword, profile.password_salt)
-    : seededUsers[username]?.password === parsed.data.oldPassword;
-  if (!validOldPassword) return res.status(401).json({ error: "كلمة المرور القديمة غير صحيحة." });
+
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      const rows = await supabaseRest<Array<{ id: string }>>(
+        `password_reset_codes?username=eq.${encodeURIComponent(username)}&code_hash=eq.${encodeURIComponent(codeHash)}&used=eq.false&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id&order=created_at.desc&limit=1`,
+      );
+      if (!rows[0]) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
+      return res.json({ ok: true });
+    } catch (error) {
+      console.warn("Supabase password_reset_codes verification failed; using secure cookie fallback.", error);
+      if (req.cookies?.zunion_password_code === codeHash) return res.json({ ok: true });
+      return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
+    }
+  }
+
+  const { rows } = await query<{ id: string }>(
+    `select id from password_reset_codes where username=$1 and code_hash=$2 and used_at is null and expires_at > now() order by created_at desc limit 1`,
+    [username, codeHash],
+  );
+  if (!rows[0]) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
+  return res.json({ ok: true });
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  const parsed = z.object({ email: z.string().min(1), code: z.string().min(4), newPassword: z.string().min(4) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "كل الحقول مطلوبة وكلمة المرور الجديدة يجب ألا تقل عن 4 أحرف." });
+  const email = parsed.data.email.trim().toLowerCase();
+  if (rateLimited(email, resetAttemptRate, 10)) {
+    return res.status(429).json({ error: "محاولات كثيرة. حاول مرة أخرى لاحقاً" });
+  }
+  const profile = await findProfileByEmail(email);
+  if (!profile) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
+  const username = profile.username.trim().toLowerCase();
+  const codeHash = hashSecret(`${username}:${parsed.data.code}`);
 
   let result = false;
   if (config.supabaseUrl && config.supabaseServiceKey) {
     try {
-      const rows = await supabaseRest<Array<{ id: string }>>(`password_reset_codes?username=eq.${encodeURIComponent(username)}&code_hash=eq.${encodeURIComponent(codeHash)}&used=eq.false&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id&order=created_at.desc&limit=1`);
+      const rows = await supabaseRest<Array<{ id: string }>>(
+        `password_reset_codes?username=eq.${encodeURIComponent(username)}&code_hash=eq.${encodeURIComponent(codeHash)}&used=eq.false&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=id&order=created_at.desc&limit=1`,
+      );
       result = Boolean(rows[0]);
       if (rows[0]) {
         await supabaseRest(`password_reset_codes?id=eq.${rows[0].id}`, { method: "PATCH", body: JSON.stringify({ used: true }) });
@@ -441,7 +503,7 @@ app.post("/api/auth/change-password", async (req, res) => {
       result = req.cookies?.zunion_password_code === codeHash;
     }
   } else {
-    result = req.cookies?.zunion_password_code === codeHash || await tx(async (client) => {
+    result = await tx(async (client) => {
       const code = await client.query<{ id: string }>(
         `select id from password_reset_codes
          where username=$1 and code_hash=$2 and used_at is null and expires_at > now()
@@ -456,12 +518,16 @@ app.post("/api/auth/change-password", async (req, res) => {
 
   if (!result) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
   try {
-    await persistProfilePassword(profile, parsed.data.newPassword, false);
+    const updated = await persistProfilePassword(profile, parsed.data.newPassword, false);
+    if (updated.id) {
+      await query("delete from sessions where user_id = $1", [updated.id]).catch(() => undefined);
+    }
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى" });
   }
   res.clearCookie("zunion_password_code");
-  audit(null, "PASSWORD_CHANGED", "auth", undefined, undefined, { username }).catch(() => undefined);
+  res.clearCookie("zunion_app_session");
+  audit(null, "PASSWORD_RESET", "auth", profile.id, undefined, { username, email }).catch(() => undefined);
   return res.json({ ok: true });
 });
 
@@ -479,12 +545,9 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
 
   const profile = await loadProfile(session.username);
   if (!profile || profile.is_active === false) return res.status(404).json({ error: "المستخدم غير موجود." });
-  const validCurrent = profile.password_hash && profile.password_salt
-    ? profile.password_hash === passwordHash(parsed.data.currentPassword, profile.password_salt)
-    : seededUsers[session.username]?.password === parsed.data.currentPassword;
-  if (!validCurrent) return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
+  if (!passwordValid(profile, parsed.data.currentPassword)) return res.status(401).json({ error: "كلمة المرور الحالية غير صحيحة" });
 
-  const tokenVersion = Date.now();
+  const tokenVersion = nextTokenVersion(profile.token_version);
   let updated: AppUser;
   try {
     updated = await persistProfilePassword(profile, parsed.data.newPassword, false, tokenVersion);
@@ -492,26 +555,46 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
     return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى" });
   }
   const { session: nextSession, maxAge } = makeSession(updated, true);
-  res.cookie("zunion_app_session", JSON.stringify(nextSession), { httpOnly: true, sameSite: "lax", secure: config.nodeEnv === "production", maxAge });
+  setAppSessionCookie(res, nextSession, maxAge);
   audit(null, "PASSWORD_CHANGED", "auth", updated.id || profile.id, undefined, { username: profile.username }).catch(() => undefined);
   return res.json({ ok: true, session: nextSession });
 });
 
-app.post("/api/auth/logout", requireAuth, async (req, res) => {
-  const token = req.cookies?.[config.cookieName];
-  if (token) await query("delete from sessions where token_hash=$1", [hashSecret(token)]);
-  res.clearCookie(config.cookieName);
+app.post("/api/auth/logout", requireAuth, async (_req, res) => {
+  res.clearCookie("zunion_app_session");
+  res.clearCookie("zunion_password_code");
   return res.json({ ok: true });
 });
 
-app.get("/api/auth/me", requireAuth, (req, res) => res.json({ user: req.user }));
+app.get("/api/auth/me", requireAuth, async (req, res) => {
+  const user = req.user as { id?: string; email: string; role: string };
+  try {
+    const profile = await findProfileByEmail(user.email);
+    if (profile) {
+      const session = makeSession(profile, true).session;
+      return res.json({ user, session });
+    }
+  } catch (error) {
+    console.warn("me: profile lookup failed; returning minimal session.", error instanceof Error ? error.message : error);
+  }
+  return res.json({ user });
+});
 
 app.get("/api/users", requireAppPermission("users.view"), async (_req, res) => {
   try {
     const users = await supabaseRest("users_profile?select=id,username,full_name,email,role,is_active,must_change_password,permission_overrides,created_at,last_login_at&order=created_at.desc");
     return res.json({ users });
   } catch (error) {
-    return res.status(500).json({ message: "تعذر تحميل المستخدمين", details: error instanceof Error ? error.message : String(error) });
+    console.warn("Supabase users_profile read failed; using local users table.", error instanceof Error ? error.message : error);
+    try {
+      const { rows } = await query(
+        `select id, username, full_name, email, role::text as role, is_active, must_change_password, permission_overrides, created_at, last_login_at
+         from users order by created_at desc`,
+      );
+      return res.json({ users: rows });
+    } catch (localError) {
+      return res.status(500).json({ message: "تعذر تحميل المستخدمين", details: localError instanceof Error ? localError.message : String(localError) });
+    }
   }
 });
 
@@ -591,27 +674,45 @@ app.post("/api/users/reset-all-passwords", requireAppPermission("users.resetAllP
   if (!session || session.role !== "Master") return res.status(403).json({ message: "غير مصرح لك بتنفيذ هذا الإجراء" });
   if (!parsed.success) return res.status(400).json({ message: "قيمة التأكيد غير صحيحة" });
   try {
-    const activeUsers = await supabaseRest<Array<{ id: string; username: string }>>("users_profile?is_active=eq.true&select=id,username");
     const salt = randomToken(12);
-    const tokenVersion = Date.now();
-    await supabaseRest("users_profile?is_active=eq.true", {
-      method: "PATCH",
-      body: JSON.stringify({
-        password_salt: salt,
-        password_hash: passwordHash("1234", salt),
-        must_change_password: false,
-        token_version: tokenVersion,
-      }),
-    });
+    const tokenVersion = nextTokenVersion();
+    const password_hash = passwordHash("1234", salt);
+    let affectedUsers = 0;
+    if (config.supabaseUrl && config.supabaseServiceKey) {
+      const activeUsers = await supabaseRest<Array<{ id: string; username: string }>>("users_profile?is_active=eq.true&select=id,username");
+      affectedUsers = activeUsers.length;
+      await supabaseRest("users_profile?is_active=eq.true", {
+        method: "PATCH",
+        body: JSON.stringify({
+          password_salt: salt,
+          password_hash,
+          must_change_password: false,
+          token_version: tokenVersion,
+        }),
+      });
+    }
+    await query(
+      `insert into users (email, role, username, full_name, password_salt, password_hash, must_change_password, token_version, is_active)
+       select email, role, username, full_name, $1, $2, false, $3, true from users where is_active = true
+       on conflict (email) do update set
+         password_salt = excluded.password_salt,
+         password_hash = excluded.password_hash,
+         must_change_password = false,
+         token_version = excluded.token_version,
+         is_active = true`,
+      [salt, password_hash, tokenVersion],
+    );
+    const localCount = await query<{ n: number }>("select count(*)::int as n from users where is_active = true");
+    affectedUsers = Math.max(affectedUsers, localCount.rows[0]?.n ?? 0);
     await audit(null, "BULK_PASSWORD_RESET", "users_profile", undefined, undefined, {
       actingMaster: session.username,
-      affectedUsers: activeUsers.length,
+      affectedUsers,
       at: new Date().toISOString(),
       ip: req.ip,
       userAgent: req.get("user-agent") || "",
     });
     res.clearCookie("zunion_app_session");
-    return res.json({ ok: true, affectedUsers: activeUsers.length });
+    return res.json({ ok: true, affectedUsers });
   } catch (error) {
     return res.status(500).json({ message: "تعذر إعادة تعيين كلمات المرور", details: error instanceof Error ? error.message : String(error) });
   }
@@ -646,7 +747,13 @@ app.get("/api/roles", requireAppPermission("roles.view"), async (_req, res) => {
     const roles = await supabaseRest("roles?select=*&order=created_at.desc");
     return res.json({ roles });
   } catch (error) {
-    return res.status(500).json({ message: "تعذر تحميل الأدوار", details: error instanceof Error ? error.message : String(error) });
+    console.warn("Supabase roles read failed; using local roles table.", error instanceof Error ? error.message : error);
+    try {
+      const { rows } = await query("select id, name, description, status, permissions, is_system_role, created_at from roles order by created_at desc");
+      return res.json({ roles: rows });
+    } catch (localError) {
+      return res.status(500).json({ message: "تعذر تحميل الأدوار", details: localError instanceof Error ? localError.message : String(localError) });
+    }
   }
 });
 
@@ -776,7 +883,7 @@ app.get("/api/orders/:id", requireAuth, async (req, res) => {
   res.json({ order: stripFinancial(order, req.user!.role), files: files.rows });
 });
 
-app.put("/api/orders/:id", requireAuth, async (req, res) => {
+app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const id = param(req.params.id);
   const oldOrder = await loadOrder(id);
   if (!oldOrder) return res.status(404).json({ message: "Order not found" });
@@ -841,7 +948,7 @@ app.get("/api/orders/:id/print", requireAuth, requireRole("Master", "Helper", "O
   </div></body></html>`);
 });
 
-app.post("/api/orders/:id/files", requireAuth, requireRole("Master", "Helper", "Worker", "Finish"), upload.array("files", 5), async (req, res) => {
+app.post("/api/orders/:id/files", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), upload.array("files", 5), async (req, res) => {
   const id = param(req.params.id);
   const order = await loadOrder(id);
   if (!order) return res.status(404).json({ message: "Order not found" });
@@ -871,7 +978,7 @@ app.get("/api/orders/:id/files/:fileId", requireAuth, async (req, res) => {
   res.download(path.join(config.uploadDir, rows[0].path), rows[0].original_name);
 });
 
-app.get("/api/customers", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.get("/api/customers", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const search = String(req.query.search ?? "");
   const params = search ? [`%${search}%`] : [];
   const where = search ? "where c.name ilike $1 or c.phone ilike $1 or c.code ilike $1 or c.email ilike $1 or c.address ilike $1" : "";
@@ -885,7 +992,7 @@ app.get("/api/customers", requireAuth, requireRole("Master", "Helper", "Operator
   res.json({ customers: rows });
 });
 
-app.post("/api/customers", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.post("/api/customers", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const parsed = customerSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid customer", issues: parsed.error.issues });
   const customer = parsed.data;
@@ -897,7 +1004,7 @@ app.post("/api/customers", requireAuth, requireRole("Master", "Helper", "Operato
   res.status(201).json(rows[0]);
 });
 
-app.get("/api/customers/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.get("/api/customers/:id", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const id = param(req.params.id);
   const customer = await query("select * from customers where id=$1", [id]);
   if (!customer.rows[0]) return res.status(404).json({ message: "Customer not found" });
@@ -914,7 +1021,7 @@ app.put("/api/customers/:id", requireAuth, requireRole("Master"), async (req, re
   res.json({ ok: true });
 });
 
-app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const id = param(req.params.id);
   const { rows } = await query("select * from orders where customer_id=$1 order by created_at desc", [id]);
   res.json({ orders: rows });
@@ -1012,7 +1119,7 @@ app.post("/api/orders/:id/items", requireAuth, requireRole("Master", "Helper"), 
   res.status(201).json(rows[0]);
 });
 
-app.put("/api/orders/:id/items/:itemId", requireAuth, requireRole("Master", "Helper", "Worker", "Finish"), async (req, res) => {
+app.put("/api/orders/:id/items/:itemId", requireAuth, requireRole("Master", "Helper", "Worker", "Finishing", "Finish"), async (req, res) => {
   const id = param(req.params.id);
   const itemId = param(req.params.itemId);
   const parsed = itemBody.safeParse(req.body);
@@ -1173,3 +1280,9 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 });
 
 app.listen(config.port, () => console.log(`Zunion API listening on ${config.port}`));
+
+if (config.nodeEnv === "production") {
+  console.log("Production mode: auto-seeding disabled. Run `npm run seed` explicitly if needed.");
+} else {
+  ensureSeededUsers({ forcePassword: false }).catch(() => undefined);
+}

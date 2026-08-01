@@ -15,6 +15,11 @@ export type PermissionKey = typeof permissionKeys[number];
 
 export const allPermissionKeys: PermissionKey[] = [...permissionKeys];
 
+export const masterProtectedPermissions: PermissionKey[] = [
+  "users.view", "users.create", "users.edit", "users.deactivate", "users.delete", "users.resetPassword", "users.resetAllPasswords",
+  "roles.view", "roles.create", "roles.edit", "roles.delete", "permissions.manage", "audit.view", "settings.view",
+];
+
 export const roleDefaultPermissions: Record<string, PermissionKey[]> = {
   Master: [...allPermissionKeys],
   Helper: [
@@ -54,28 +59,6 @@ export const roleDefaultPermissions: Record<string, PermissionKey[]> = {
   ],
 };
 
-export function effectivePermissions(user: { role?: string; permission_overrides?: { allow?: unknown; deny?: unknown } }): PermissionKey[] {
-  const base = new Set<PermissionKey>(roleDefaultPermissions[user.role ?? ""] ?? []);
-  const overrides = user.permission_overrides ?? {};
-  for (const value of Array.isArray(overrides.allow) ? overrides.allow : []) {
-    if (isPermissionKey(value)) base.add(value);
-  }
-  for (const value of Array.isArray(overrides.deny) ? overrides.deny : []) {
-    if (isPermissionKey(value)) base.delete(value);
-  }
-  return Array.from(base);
-}
-
 export function isPermissionKey(value: unknown): value is PermissionKey {
   return typeof value === "string" && (permissionKeys as readonly string[]).includes(value);
-}
-
-export function validatePermissions(values: unknown): PermissionKey[] {
-  if (!Array.isArray(values)) return [];
-  const unique = new Set<PermissionKey>();
-  for (const value of values) {
-    if (!isPermissionKey(value)) throw new Error(`Unknown permission: ${String(value)}`);
-    unique.add(value);
-  }
-  return Array.from(unique);
 }

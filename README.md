@@ -45,18 +45,9 @@ OTP_PEPPER=long-random-secret
 OTP_DEV_MODE=false
 ```
 
-If the password-change screen shows `كود التحقق المحلي`, the deployment is not using server auth. Set `VITE_USE_SERVER_AUTH=true` and `OTP_DEV_MODE=false` in Vercel, then redeploy.
+If the password-change screen shows `كود التحقق المحلي`, the deployment is not using server auth. Set `VITE_USE_SERVER_AUTH=true` and `OTP_DEV_MODE=false`, then redeploy.
 
-Only these emails are allowed:
-
-```text
-mahmoudmostafa3104@gmail.com / Master
-mahmoudelwensh2007@gmail.com / Helper
-mahmoudodo20072021@gmail.com / Worker
-mahmoud.foly.2007@gmail.com / Finish
-```
-
-The Resend API key, Supabase service-role key, and Supabase secret key are used only by Vercel API routes under `/api/auth/*`. They must never be added as `VITE_` variables.
+The Resend API key, Supabase service-role key, Supabase secret key, and COOKIE_SECRET are server-only values for the backend (`backend/src/server.ts`). They must never be added as `VITE_` variables.
 
 ## Supabase Setup
 

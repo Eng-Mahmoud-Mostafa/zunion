@@ -7,7 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "db:migrate": "tsx src/migrate.ts"
+    "db:migrate": "tsx src/migrate.ts",
+    "seed:users": "tsx src/seed.ts",
+    "reset:passwords": "tsx src/reset-all-passwords.ts"
   },
   "dependencies": {
     "cookie-parser": "1.4.7",

@@ -43,6 +43,7 @@ import {
   type OperationStats,
   type ReportsData,
 } from "./services/statsService";
+import { allPermissionKeys, masterProtectedPermissions, roleDefaultPermissions, type PermissionKey } from "../shared/permissions";
 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
@@ -189,20 +190,10 @@ const customersKey = "zunion-local-customers-v1";
 const financeKey = "zunion-local-finance-v1";
 const productsKey = "zunion-local-products-v1";
 const localPasswordsKey = "zunion-local-passwords-v1";
+const resetCodeKey = "zunion-local-reset-v1";
 const managedUsersKey = "zunion-managed-users-v1";
 const managedRolesKey = "zunion-managed-roles-v1";
 const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
-
-type PermissionKey =
-  | "dashboard.view" | "orders.view" | "orders.create" | "orders.edit" | "orders.delete" | "orders.print"
-  | "customers.view" | "customers.create" | "customers.edit" | "customers.delete" | "customers.print"
-  | "products.view" | "products.create" | "products.edit" | "products.delete" | "products.print"
-  | "search.use" | "expenses.view" | "expenses.create" | "expenses.print" | "revenues.view" | "revenues.create" | "revenues.print"
-  | "operation.view" | "operation.update" | "operation.upload" | "operation.print"
-  | "finishing.view" | "finishing.update" | "finishing.upload" | "finishing.print"
-  | "reports.view" | "reports.print" | "import.export"
-  | "users.view" | "users.create" | "users.edit" | "users.deactivate" | "users.delete" | "users.resetPassword" | "users.resetAllPasswords"
-  | "roles.view" | "roles.create" | "roles.edit" | "roles.delete" | "permissions.manage" | "audit.view" | "settings.view";
 
 type PermissionOverride = { allow: PermissionKey[]; deny: PermissionKey[] };
 type ManagedUser = {
@@ -259,6 +250,8 @@ const permissionGroups: Array<{ group: string; permissions: Array<{ key: Permiss
     { key: "revenues.view", label: "عرض الإيرادات", action: "عرض" },
     { key: "revenues.create", label: "إضافة إيراد", action: "إضافة" },
     { key: "revenues.print", label: "الإيرادات", action: "طباعة" },
+    { key: "dailyAccounts.view", label: "الحسابات اليومية", action: "عرض" },
+    { key: "salaries.view", label: "المرتبات", action: "عرض" },
   ] },
   { group: "التشغيل", permissions: [
     { key: "operation.view", label: "أوردرات التشغيل", action: "عرض" },
@@ -292,8 +285,6 @@ const permissionGroups: Array<{ group: string; permissions: Array<{ key: Permiss
     { key: "permissions.manage", label: "الصلاحيات", action: "إدارة" },
   ] },
 ];
-const allPermissionKeys = permissionGroups.flatMap((group) => group.permissions.map((permission) => permission.key));
-const masterProtectedPermissions: PermissionKey[] = ["users.view", "users.create", "users.edit", "users.deactivate", "users.delete", "users.resetPassword", "users.resetAllPasswords", "roles.view", "roles.create", "roles.edit", "permissions.manage", "audit.view", "settings.view"];
 
 const roleByEmail: Record<string, Role> = {
   "mahmoudmostafa3104@gmail.com": "Master",
@@ -317,16 +308,6 @@ const localUsers: Record<string, { fullName: string; role: Role; password: strin
   "supervisor 3": { fullName: "Supervisor 3", role: "Supervisor", password: "1234", email: "supervisor3@zunion.local", mustChangePassword: false },
   "finishing 1": { fullName: "Finishing 1", role: "Finishing", password: "1234", email: "finishing1@zunion.local", mustChangePassword: false },
   "finishing 2": { fullName: "Finishing 2", role: "Finishing", password: "1234", email: "finishing2@zunion.local", mustChangePassword: false },
-};
-
-const roleDefaultPermissions: Record<string, PermissionKey[]> = {
-  Master: allPermissionKeys,
-  Helper: ["dashboard.view", "orders.view", "orders.create", "orders.edit", "orders.print", "customers.view", "customers.create", "customers.print", "products.view", "products.create", "search.use", "operation.view", "operation.update", "operation.upload", "operation.print", "finishing.view", "finishing.print"],
-  Operator: ["dashboard.view", "orders.view", "orders.create", "orders.edit", "orders.print", "customers.view", "customers.create", "products.view", "products.create", "search.use", "expenses.view", "expenses.create", "revenues.view", "revenues.create", "operation.view", "operation.update", "operation.upload"],
-  Supervisor: ["dashboard.view", "orders.view", "orders.edit", "orders.print", "customers.view", "products.view", "search.use", "operation.view", "operation.update", "operation.upload", "operation.print"],
-  Worker: ["orders.view", "orders.edit", "operation.view", "operation.update", "operation.upload", "operation.print"],
-  Finishing: ["orders.view", "orders.edit", "finishing.view", "finishing.update", "finishing.upload", "finishing.print"],
-  Finish: ["orders.view", "orders.edit", "finishing.view", "finishing.update", "finishing.upload", "finishing.print"],
 };
 
 function seedRoles(): ManagedRole[] {
@@ -363,7 +344,15 @@ function loadManagedRoles(): ManagedRole[] {
   try {
     const saved = JSON.parse(localStorage.getItem(managedRolesKey) || "[]") as ManagedRole[];
     const byName = new Map(seedRoles().map((role) => [role.name.toLowerCase(), role]));
-    for (const role of saved) byName.set(role.name.toLowerCase(), { ...role, permissions: role.name === "Master" ? Array.from(new Set([...role.permissions, ...masterProtectedPermissions])) : role.permissions });
+    for (const role of saved) {
+      const seed = byName.get(role.name.toLowerCase());
+      const isSystem = seed?.isSystemRole ?? false;
+      byName.set(role.name.toLowerCase(), {
+        ...seed,
+        ...role,
+        permissions: isSystem ? [...(seed?.permissions ?? [])] : role.permissions,
+      });
+    }
     return Array.from(byName.values());
   } catch {
     localStorage.removeItem(managedRolesKey);
@@ -434,6 +423,26 @@ function saveLocalPassword(username: string, password: string) {
   saveManagedUsers(users.map((user) => user.username === username ? { ...user, password, mustChangePassword: false } : user));
 }
 
+function loadResetCode(): { email: string; code: string; expiresAt: number } | null {
+  try {
+    return JSON.parse(localStorage.getItem(resetCodeKey) || "null") as { email: string; code: string; expiresAt: number } | null;
+  } catch {
+    return null;
+  }
+}
+
+function localUsernameByEmail(email: string) {
+  const normalized = email.trim().toLowerCase();
+  for (const user of loadManagedUsers()) {
+    if (user.email.toLowerCase() === normalized || user.username.toLowerCase() === normalized || `${user.username}@zunion.local`.toLowerCase() === normalized) return user.username;
+  }
+  for (const username of Object.keys(localUsers)) {
+    const user = localUsers[username];
+    if (user.email.toLowerCase() === normalized || username.toLowerCase() === normalized || `${username}@zunion.local`.toLowerCase() === normalized) return username;
+  }
+  return null;
+}
+
 function resolvePermissionsForSession(session: Session | null, roles = loadManagedRoles(), users = loadManagedUsers()): Set<PermissionKey> {
   if (!session) return new Set();
   if (session.role === "Master") return new Set(allPermissionKeys);
@@ -460,16 +469,24 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   worker: "operation.view",
   finish: "finishing.view",
   customers: "customers.view",
-  finance: "expenses.view",
+  finance: "dailyAccounts.view",
   reports: "reports.view",
   import: "import.export",
   audit: "audit.view",
+  settings: "settings.view",
   alerts: "orders.view",
 };
 
 function canAccessView(session: Session | null, view: View) {
   const key = routePermissions[view];
   return !key || hasPermission(session, key);
+}
+
+function firstAllowedView(session: Session | null): View {
+  for (const view of knownViews) {
+    if (canAccessView(session, view)) return view;
+  }
+  return "dashboard";
 }
 
 const workflowStages: WorkflowStage[] = ["أوردر جديد", "يروح للتشغيل", "التشغيل", "يروح للتشطيب", "التشطيب", "الشغل جاهز", "تم التسليم"];
@@ -1447,12 +1464,11 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [password, setPassword] = useState("1234");
   const [stayLoggedIn, setStayLoggedIn] = useState(true);
   const [message, setMessage] = useState("");
-  const [changeMode, setChangeMode] = useState(false);
-  const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
-  const [issuedPasswordCode, setIssuedPasswordCode] = useState("");
+  const [resetStep, setResetStep] = useState<"email" | "code" | "newPassword" | null>(null);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetCodeInput, setResetCodeInput] = useState("");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -1463,11 +1479,12 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         const response = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({ username: normalizedUsername, password, stayLoggedIn }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(apiErrorMessage(payload, "اسم المستخدم أو كلمة المرور غير صحيحة."));
-        const session = { ...(payload.session as Session), mustChangePassword: false };
+        const session = { ...(payload.session as Session), mustChangePassword: Boolean(payload.mustChangePassword) };
         localStorage.setItem(sessionKey, JSON.stringify(session));
         addAudit(session, "LOGIN", "auth", undefined, undefined, { username: normalizedUsername, role: session.role });
         onLogin(session);
@@ -1487,104 +1504,165 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     onLogin(session);
   }
 
-  async function requestPasswordCode() {
-    const normalizedUsername = username.trim().toLowerCase();
-    if (!normalizedUsername) return setMessage("اكتب اسم المستخدم أولا.");
-    if (newPassword.length < 4) return setMessage("كلمة المرور الجديدة يجب ألا تقل عن 4 أحرف.");
-    if (newPassword !== confirmPassword) return setMessage("تأكيد كلمة المرور غير مطابق.");
-
+  async function forgotPassword(event: React.FormEvent) {
+    event.preventDefault();
+    const email = resetEmail.trim().toLowerCase();
+    if (!email) return setMessage("اكتب البريد الإلكتروني أولا.");
     if (useServerAuth || !isLocalHost) {
       try {
         setMessage("جار إرسال كود التحقق...");
-        const response = await fetch("/api/auth/request-password-code", {
+        const response = await fetch("/api/auth/forgot-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: normalizedUsername }),
+          body: JSON.stringify({ email }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(apiErrorMessage(payload, "تعذر إرسال كود التحقق حالياً"));
-        setIssuedPasswordCode("");
-        setMessage(payload.devCode ? `كود التحقق التجريبي: ${payload.devCode}` : "تم إرسال كود التحقق إلى البريد المسؤول.");
+        setResetStep("code");
+        setResetCodeInput("");
+        setMessage(payload.devCode ? `كود التحقق التجريبي: ${payload.devCode}` : "إذا كان البريد مسجلاً في النظام، سيصلك كود تحقق صالح لمدة 10 دقائق.");
         return;
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "تعذر إرسال كود التحقق حالياً");
         return;
       }
     }
-
-    const user = getLocalUser(normalizedUsername);
-    if (!user || user.password !== oldPassword) return setMessage("كلمة المرور القديمة غير صحيحة.");
+    const localUsername = localUsernameByEmail(email);
+    if (!localUsername) {
+      setResetStep("code");
+      setResetCodeInput("");
+      setMessage("إذا كان البريد مسجلاً في النظام، سيصلك كود تحقق صالح لمدة 10 دقائق.");
+      return;
+    }
     const code = String(Math.floor(100000 + Math.random() * 900000));
-    setIssuedPasswordCode(code);
+    localStorage.setItem(resetCodeKey, JSON.stringify({ email, code, expiresAt: Date.now() + 10 * 60 * 1000 }));
+    setResetStep("code");
+    setResetCodeInput("");
     setMessage(`كود التحقق المحلي: ${code}`);
   }
 
-  async function changePassword(event: React.FormEvent) {
+  async function submitResetCode(event: React.FormEvent) {
     event.preventDefault();
-    const normalizedUsername = username.trim().toLowerCase();
-    if (newPassword.length < 4) return setMessage("كلمة المرور الجديدة يجب ألا تقل عن 4 أحرف.");
-    if (newPassword !== confirmPassword) return setMessage("تأكيد كلمة المرور غير مطابق.");
-
-    if (useServerAuth) {
+    const email = resetEmail.trim().toLowerCase();
+    const code = resetCodeInput.trim();
+    if (!email || !code) return setMessage("اكتب البريد الإلكتروني وكود التحقق.");
+    if (useServerAuth || !isLocalHost) {
       try {
-        setMessage("جار تغيير كلمة المرور...");
-        const response = await fetch("/api/auth/change-password", {
+        setMessage("جار التحقق من الكود...");
+        const response = await fetch("/api/auth/verify-reset-code", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: normalizedUsername, oldPassword, newPassword, code: verificationCode }),
+          body: JSON.stringify({ email, code }),
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(apiErrorMessage(payload, "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى"));
-        setPassword(newPassword);
-        setOldPassword("");
-        setNewPassword("");
-        setConfirmPassword("");
-        setVerificationCode("");
-        setChangeMode(false);
-        setMessage("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
+        if (!response.ok) throw new Error(apiErrorMessage(payload, "كود التحقق غير صحيح أو انتهت صلاحيته."));
+        setResetStep("newPassword");
+        setMessage("");
+        return;
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "كود التحقق غير صحيح أو انتهت صلاحيته.");
+        return;
+      }
+    }
+    const stored = loadResetCode();
+    if (!stored || stored.email !== email || stored.code !== code) return setMessage("كود التحقق غير صحيح.");
+    if (Date.now() > stored.expiresAt) return setMessage("انتهت صلاحية الكود. اطلب كودا جديدا.");
+    setResetStep("newPassword");
+    setMessage("");
+  }
+
+  async function submitResetPassword(event: React.FormEvent) {
+    event.preventDefault();
+    const email = resetEmail.trim().toLowerCase();
+    const code = resetCodeInput.trim();
+    if (newPassword.length < 4) return setMessage("كلمة المرور الجديدة يجب ألا تقل عن 4 أحرف.");
+    if (newPassword !== confirmPassword) return setMessage("تأكيد كلمة المرور غير مطابق.");
+    if (useServerAuth || !isLocalHost) {
+      try {
+        setMessage("جار حفظ كلمة المرور الجديدة...");
+        const response = await fetch("/api/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, code, newPassword }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(apiErrorMessage(payload, "تعذر تغيير كلمة المرور. حاول مرة أخرى"));
+        finishReset("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
         return;
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "تعذر الاتصال بالخادم. حاول مرة أخرى");
         return;
       }
     }
-
-    const user = getLocalUser(normalizedUsername);
-    if (!user || user.password !== oldPassword) return setMessage("كلمة المرور القديمة غير صحيحة.");
-    if (!issuedPasswordCode || verificationCode !== issuedPasswordCode) return setMessage("كود التحقق غير صحيح.");
-    saveLocalPassword(normalizedUsername, newPassword);
-    addAudit(null, "PASSWORD_CHANGED", "auth", normalizedUsername, undefined, { username: normalizedUsername });
-    setPassword(newPassword);
-    setOldPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    setVerificationCode("");
-    setIssuedPasswordCode("");
-    setChangeMode(false);
-    setMessage("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
+    const stored = loadResetCode();
+    if (!stored || stored.email !== email || stored.code !== code || Date.now() > stored.expiresAt) return setMessage("كود التحقق غير صالح أو انتهت صلاحيته. أعد طلب الكود.");
+    const localUsername = localUsernameByEmail(email);
+    if (!localUsername) return setMessage("البريد غير مسجل في النظام.");
+    saveLocalPassword(localUsername, newPassword);
+    localStorage.removeItem(resetCodeKey);
+    addAudit(null, "PASSWORD_RESET", "auth", undefined, undefined, { email });
+    finishReset("تم تغيير كلمة المرور بنجاح. يمكنك تسجيل الدخول الآن.");
   }
 
-  if (changeMode) {
+  function finishReset(successMessage: string) {
+    setPassword(newPassword);
+    setNewPassword("");
+    setConfirmPassword("");
+    setResetCodeInput("");
+    setResetEmail("");
+    setResetStep(null);
+    setMessage(successMessage);
+  }
+
+  if (resetStep === "email") {
     return (
       <main className="login-page" dir="rtl">
-        <form className="login-card" onSubmit={changePassword}>
+        <form className="login-card" onSubmit={forgotPassword}>
           <BrandLogo className="login-logo" />
-          <h1>تغيير كلمة المرور</h1>
-          <p>سيتم إرسال كود التحقق إلى بريد المسؤول المحدد في إعدادات Resend.</p>
-          <label>اسم المستخدم</label>
-          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
-          <label>كلمة المرور القديمة</label>
-          <input value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} type="password" />
-          <label>كلمة المرور الجديدة</label>
-          <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" />
-          <label>تأكيد كلمة المرور الجديدة</label>
-          <input value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} type="password" />
-          <button className="ghost-btn" type="button" onClick={requestPasswordCode}>إرسال كود التحقق</button>
-          <label>كود التحقق</label>
-          <input value={verificationCode} onChange={(event) => setVerificationCode(event.target.value)} inputMode="numeric" />
+          <h1>استعادة كلمة المرور</h1>
+          <p>اكتب بريدك الإلكتروني وسيتم إرسال كود تحقق مكون من 6 أرقام، صالح لمدة 10 دقائق.</p>
+          <label>البريد الإلكتروني</label>
+          <input value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} type="email" autoComplete="email" placeholder="example@email.com" />
           {message && <div className="notice">{message}</div>}
-          <button className="primary-btn">حفظ كلمة المرور الجديدة</button>
-          <button className="ghost-btn" type="button" onClick={() => { setChangeMode(false); setMessage(""); }}>العودة لتسجيل الدخول</button>
+          <button className="primary-btn">إرسال كود التحقق</button>
+          <button className="ghost-btn" type="button" onClick={() => { setResetStep(null); setResetEmail(""); setMessage(""); }}>العودة لتسجيل الدخول</button>
+        </form>
+      </main>
+    );
+  }
+
+  if (resetStep === "code") {
+    return (
+      <main className="login-page" dir="rtl">
+        <form className="login-card" onSubmit={submitResetCode}>
+          <BrandLogo className="login-logo" />
+          <h1>كود التحقق</h1>
+          <p>أدخل كود التحقق المكون من 6 أرقام الذي تم إرساله للبريد: <strong>{resetEmail}</strong></p>
+          <label>كود التحقق</label>
+          <input value={resetCodeInput} onChange={(event) => setResetCodeInput(event.target.value)} inputMode="numeric" maxLength={6} autoComplete="one-time-code" />
+          {message && <div className="notice">{message}</div>}
+          <button className="primary-btn">تحقق من الكود</button>
+          <button className="ghost-btn" type="button" onClick={forgotPassword}>إعادة إرسال الكود</button>
+          <button className="ghost-btn" type="button" onClick={() => { setResetStep(null); setResetEmail(""); setResetCodeInput(""); setMessage(""); }}>العودة لتسجيل الدخول</button>
+        </form>
+      </main>
+    );
+  }
+
+  if (resetStep === "newPassword") {
+    return (
+      <main className="login-page" dir="rtl">
+        <form className="login-card" onSubmit={submitResetPassword}>
+          <BrandLogo className="login-logo" />
+          <h1>كلمة مرور جديدة</h1>
+          <p>اختر كلمة مرور جديدة لا تقل عن 4 أحرف.</p>
+          <label>كلمة المرور الجديدة</label>
+          <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" />
+          <label>تأكيد كلمة المرور الجديدة</label>
+          <input value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} type="password" autoComplete="new-password" />
+          {message && <div className="notice">{message}</div>}
+          <button className="primary-btn">حفظ كلمة المرور</button>
+          <button className="ghost-btn" type="button" onClick={() => { setResetStep("code"); setNewPassword(""); setConfirmPassword(""); setMessage(""); }}>رجوع</button>
         </form>
       </main>
     );
@@ -1600,7 +1678,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
         <label>كلمة المرور</label>
         <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" />
-        <button className="ghost-btn" type="button" onClick={() => { setChangeMode(true); setMessage(""); }}>تغيير كلمة المرور</button>
+        <button className="ghost-btn" type="button" onClick={() => { setResetStep("email"); setResetEmail(username.trim().toLowerCase()); setMessage(""); }}>نسيت كلمة المرور؟</button>
         <label className="check stay-check"><input type="checkbox" checked={stayLoggedIn} onChange={(event) => setStayLoggedIn(event.target.checked)} /> البقاء مسجلا لمدة 14 يوم</label>
         {message && <div className="notice">{message}</div>}
         <button className="primary-btn">دخول لوحة التحكم</button>
@@ -3968,6 +4046,7 @@ function viewFromHash(): View {
 
 function ZunionApp() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
+  const [sessionReady, setSessionReady] = useState(!useServerAuth);
   const [view, setViewState] = useState<View>(() => viewFromHash());
   const [openSection, setOpenSection] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -3979,10 +4058,33 @@ function ZunionApp() {
   const { items: products, setItems: setProducts } = useProducts(session);
 
   useEffect(() => {
+    if (!useServerAuth) return;
+    fetch("/api/auth/me", { credentials: "include" })
+      .then((response) => response.json().catch(() => ({})))
+      .then((payload) => {
+        if (payload?.session?.email && payload?.session?.role) {
+          const nextSession = payload.session as Session;
+          localStorage.setItem(sessionKey, JSON.stringify(nextSession));
+          setSession(nextSession);
+        } else {
+          localStorage.removeItem(sessionKey);
+          setSession(null);
+        }
+      })
+      .catch(() => setSession(null))
+      .finally(() => setSessionReady(true));
+  }, []);
+
+  useEffect(() => {
     const syncViewFromHash = () => setViewState(viewFromHash());
     window.addEventListener("hashchange", syncViewFromHash);
     return () => window.removeEventListener("hashchange", syncViewFromHash);
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    if (!canAccessView(session, view)) setView(firstAllowedView(session));
+  }, [session, view]);
 
   function setView(nextView: View) {
     setViewState(nextView);
@@ -4060,7 +4162,7 @@ function ZunionApp() {
         icon: Cog,
         items: [
           { id: "audit", label: "سجل العمليات", visible: can("audit.view"), icon: ClipboardList },
-          { id: "settings", label: "الإعدادات", visible: true, icon: Cog },
+          { id: "settings", label: "الإعدادات", visible: can("settings.view"), icon: Cog },
         ],
       },
     ];
@@ -4085,6 +4187,9 @@ function ZunionApp() {
   }
 
   function logout() {
+    if (useServerAuth) {
+      fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
+    }
     localStorage.removeItem(sessionKey);
     addAudit(session, "LOGOUT", "auth");
     setSession(null);
@@ -4108,6 +4213,17 @@ function ZunionApp() {
     setOpenSection("system");
     setDrawerOpen(false);
     setView("settings");
+  }
+
+  if (useServerAuth && !sessionReady) {
+    return (
+      <main className="login-page" dir="rtl">
+        <div className="login-card">
+          <BrandLogo className="login-logo" />
+          <p className="muted">جار التحقق من الجلسة...</p>
+        </div>
+      </main>
+    );
   }
 
   if (!session) return <Login onLogin={setSession} />;

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build --configLoader native",
     "local": "npm run build && node scripts/serve-local.cjs",
     "preview": "vite preview",
-    "preview-local": "vite preview --host 127.0.0.1 --port 5195 --strictPort --configLoader native"
+    "preview-local": "vite preview --host 127.0.0.1 --port 5195 --strictPort --configLoader native",
+    "check:permissions": "D=$(mktemp -d); tsc shared/permissions.ts backend/src/permissions.ts scripts/check-permissions.ts --outDir \"$D\" --module commonjs --target es2020 --esModuleInterop --skipLibCheck --strict && node \"$D/scripts/check-permissions.js\"; rc=$?; rm -rf \"$D\"; exit $rc"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.88.0",

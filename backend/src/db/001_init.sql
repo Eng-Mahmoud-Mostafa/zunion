@@ -353,11 +353,27 @@ create trigger calculate_order_items_total before insert or update on order_item
 drop trigger if exists calculate_expenses_total on expenses;
 create trigger calculate_expenses_total before insert or update on expenses for each row execute function calculate_expense_total();
 
-insert into users (email, role) values
-  ('mahmoudmostafa3104@gmail.com', 'Master'),
-  ('mahmoudelwensh2007@gmail.com', 'Helper'),
-  ('mahmoudodo20072021@gmail.com', 'Worker'),
-  ('mahmoud.foly.2007@gmail.com', 'Finish')
+-- Seed named users. Passwords are HMAC-SHA256(cookieSecret, "<salt>:<password>")
+-- with cookieSecret defaulting to 'dev-change-me' (see backend/src/config.ts).
+-- If COOKIE_SECRET is customized, re-run: backend -> npm run seed:users
+insert into users (email, role, username, full_name, password_salt, password_hash, must_change_password) values
+  ('mahmoudmostafa3104@gmail.com', 'Master', NULL, NULL, NULL, NULL, false),
+  ('mahmoudelwensh2007@gmail.com', 'Helper', NULL, NULL, NULL, NULL, false),
+  ('mahmoudodo20072021@gmail.com', 'Worker', NULL, NULL, NULL, NULL, false),
+  ('mahmoud.foly.2007@gmail.com', 'Finish', NULL, NULL, NULL, NULL, false),
+  ('reda@zunion.local', 'Master', 'reda', 'Reda', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('hassan@zunion.local', 'Master', 'hassan', 'Hassan', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('omar@zunion.local', 'Operator', 'omar', 'Omar', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('youssef@zunion.local', 'Operator', 'youssef', 'Youssef', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('khalifa@zunion.local', 'Operator', 'khalifa', 'Khalifa', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr1@zunion.local', 'Operator', 'opr 1', 'Opr 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr2@zunion.local', 'Operator', 'opr 2', 'Opr 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr3@zunion.local', 'Operator', 'opr 3', 'Opr 3', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor1@zunion.local', 'Supervisor', 'supervisor 1', 'Supervisor 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor2@zunion.local', 'Supervisor', 'supervisor 2', 'Supervisor 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor3@zunion.local', 'Supervisor', 'supervisor 3', 'Supervisor 3', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing1@zunion.local', 'Finishing', 'finishing 1', 'Finishing 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing2@zunion.local', 'Finishing', 'finishing 2', 'Finishing 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false)
 on conflict (email) do update set role = excluded.role;
 
 with default_permissions(name, description, permissions) as (
@@ -367,6 +383,7 @@ with default_permissions(name, description, permissions) as (
       'customers.view','customers.create','customers.edit','customers.delete','customers.print',
       'products.view','products.create','products.edit','products.delete','products.print',
       'search.use','expenses.view','expenses.create','expenses.print','revenues.view','revenues.create','revenues.print',
+      'dailyAccounts.view','salaries.view',
       'operation.view','operation.update','operation.upload','operation.print',
       'finishing.view','finishing.update','finishing.upload','finishing.print',
       'reports.view','reports.print','import.export',
@@ -378,21 +395,23 @@ with default_permissions(name, description, permissions) as (
       'customers.view','customers.create','customers.edit','customers.print',
       'products.view','search.use','import.export'
     ]::text[]),
-    ('Operator', 'Operation team access', array[
-      'dashboard.view','orders.view','orders.edit','orders.print',
-      'customers.view','products.view','search.use',
-      'operation.view','operation.update','operation.upload','operation.print'
-    ]::text[]),
-    ('Supervisor', 'Supervisor access', array[
+    ('Operator', 'Operation team access - every module except Salaries and Daily Accounts', array[
       'dashboard.view','orders.view','orders.create','orders.edit','orders.print',
       'customers.view','customers.create','customers.edit','customers.print',
       'products.view','products.create','products.edit','products.print',
-      'search.use','operation.view','operation.update','operation.print',
-      'finishing.view','finishing.update','finishing.print','reports.view','reports.print'
+      'search.use',
+      'operation.view','operation.update','operation.upload','operation.print',
+      'finishing.view','finishing.update','finishing.upload','finishing.print',
+      'reports.view','reports.print','import.export'
     ]::text[]),
-    ('Finishing', 'Finishing team access', array[
-      'dashboard.view','orders.view','orders.edit','orders.print',
-      'customers.view','products.view','search.use',
+    ('Supervisor', 'Supervisor access - every module except Salaries, Daily Accounts, Customer Accounts and Finishing', array[
+      'dashboard.view','orders.view','orders.create','orders.edit','orders.print',
+      'products.view','products.create','products.edit','products.print',
+      'search.use',
+      'operation.view','operation.update','operation.upload','operation.print',
+      'reports.view','reports.print','import.export'
+    ]::text[]),
+    ('Finishing', 'Finishing team access - finishing only', array[
       'finishing.view','finishing.update','finishing.upload','finishing.print'
     ]::text[]),
     ('Worker', 'Worker access', array[
@@ -400,8 +419,8 @@ with default_permissions(name, description, permissions) as (
       'products.view','operation.view','operation.update','operation.upload','operation.print'
     ]::text[]),
     ('Finish', 'Legacy finishing role', array[
-      'dashboard.view','orders.view','orders.edit','orders.print',
-      'products.view','finishing.view','finishing.update','finishing.upload','finishing.print'
+      'orders.view','orders.edit','orders.print',
+      'finishing.view','finishing.update','finishing.upload','finishing.print'
     ]::text[])
 )
 insert into roles (name, description, status, permissions, is_system_role)

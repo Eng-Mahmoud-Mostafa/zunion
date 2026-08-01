@@ -275,6 +275,7 @@ with default_permissions(name, description, permissions) as (
       'customers.view','customers.create','customers.edit','customers.delete','customers.print',
       'products.view','products.create','products.edit','products.delete','products.print',
       'search.use','expenses.view','expenses.create','expenses.print','revenues.view','revenues.create','revenues.print',
+      'dailyAccounts.view','salaries.view',
       'operation.view','operation.update','operation.upload','operation.print',
       'finishing.view','finishing.update','finishing.upload','finishing.print',
       'reports.view','reports.print','import.export',
@@ -286,21 +287,23 @@ with default_permissions(name, description, permissions) as (
       'customers.view','customers.create','customers.edit','customers.print',
       'products.view','search.use','import.export'
     ]::text[]),
-    ('Operator', 'Operation team access', array[
-      'dashboard.view','orders.view','orders.edit','orders.print',
-      'customers.view','products.view','search.use',
-      'operation.view','operation.update','operation.upload','operation.print'
-    ]::text[]),
-    ('Supervisor', 'Supervisor access', array[
+    ('Operator', 'Operation team access - every module except Salaries and Daily Accounts', array[
       'dashboard.view','orders.view','orders.create','orders.edit','orders.print',
       'customers.view','customers.create','customers.edit','customers.print',
       'products.view','products.create','products.edit','products.print',
-      'search.use','operation.view','operation.update','operation.print',
-      'finishing.view','finishing.update','finishing.print','reports.view','reports.print'
+      'search.use',
+      'operation.view','operation.update','operation.upload','operation.print',
+      'finishing.view','finishing.update','finishing.upload','finishing.print',
+      'reports.view','reports.print','import.export'
     ]::text[]),
-    ('Finishing', 'Finishing team access', array[
-      'dashboard.view','orders.view','orders.edit','orders.print',
-      'customers.view','products.view','search.use',
+    ('Supervisor', 'Supervisor access - every module except Salaries, Daily Accounts, Customer Accounts and Finishing', array[
+      'dashboard.view','orders.view','orders.create','orders.edit','orders.print',
+      'products.view','products.create','products.edit','products.print',
+      'search.use',
+      'operation.view','operation.update','operation.upload','operation.print',
+      'reports.view','reports.print','import.export'
+    ]::text[]),
+    ('Finishing', 'Finishing team access - finishing only', array[
       'finishing.view','finishing.update','finishing.upload','finishing.print'
     ]::text[]),
     ('Worker', 'Worker access', array[
@@ -308,8 +311,8 @@ with default_permissions(name, description, permissions) as (
       'products.view','operation.view','operation.update','operation.upload','operation.print'
     ]::text[]),
     ('Finish', 'Legacy finishing role', array[
-      'dashboard.view','orders.view','orders.edit','orders.print',
-      'products.view','finishing.view','finishing.update','finishing.upload','finishing.print'
+      'orders.view','orders.edit','orders.print',
+      'finishing.view','finishing.update','finishing.upload','finishing.print'
     ]::text[])
 )
 insert into public.roles (name, description, status, permissions, is_system_role)
@@ -321,22 +324,25 @@ on conflict (name) do update set
   permissions = excluded.permissions,
   is_system_role = true;
 
+-- Seed the 12 named users. The app verifies passwords as
+-- HMAC-SHA256(cookieSecret, "<salt>:<password>") where cookieSecret defaults to 'dev-change-me'.
+-- If COOKIE_SECRET is customized, re-run: backend -> npm run seed:users
 insert into public.users_profile (username, full_name, email, role, password_salt, password_hash, must_change_password)
 values
-  ('mahmoud', 'Mahmoud', 'mahmoud@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('reda', 'Reda', 'reda@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('hassan', 'Hassan', 'hassan@zunion.local', 'Master', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('omar', 'Omar', 'omar@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('youssef', 'Youssef', 'youssef@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('khalifa', 'Khalifa', 'khalifa@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('opr 1', 'Opr 1', 'opr1@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('opr 2', 'Opr 2', 'opr2@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('opr 3', 'Opr 3', 'opr3@zunion.local', 'Operator', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('supervisor 1', 'Supervisor 1', 'supervisor1@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('supervisor 2', 'Supervisor 2', 'supervisor2@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('supervisor 3', 'Supervisor 3', 'supervisor3@zunion.local', 'Supervisor', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('finishing 1', 'Finishing 1', 'finishing1@zunion.local', 'Finishing', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false),
-  ('finishing 2', 'Finishing 2', 'finishing2@zunion.local', 'Finishing', 'zunion-default', encode(digest('zunion-default:1234', 'sha256'), 'hex'), false)
+  ('mahmoud', 'Mahmoud', 'mahmoud@zunion.local', 'Master', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('reda', 'Reda', 'reda@zunion.local', 'Master', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('hassan', 'Hassan', 'hassan@zunion.local', 'Master', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('omar', 'Omar', 'omar@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('youssef', 'Youssef', 'youssef@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('khalifa', 'Khalifa', 'khalifa@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr 1', 'Opr 1', 'opr1@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr 2', 'Opr 2', 'opr2@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr 3', 'Opr 3', 'opr3@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor 1', 'Supervisor 1', 'supervisor1@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor 2', 'Supervisor 2', 'supervisor2@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor 3', 'Supervisor 3', 'supervisor3@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing 1', 'Finishing 1', 'finishing1@zunion.local', 'Finishing', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing 2', 'Finishing 2', 'finishing2@zunion.local', 'Finishing', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false)
 on conflict (username) do update set
   full_name = excluded.full_name,
   role = excluded.role,
