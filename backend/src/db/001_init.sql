@@ -488,3 +488,41 @@ where order_number = '26-6-8-000112'
 and not exists (
   select 1 from order_items where order_items.order_id = orders.id
 );
+
+-- users_profile: Supabase-managed user directory used by the server's REST admin routes.
+-- This lives alongside the pg `users` table; both are kept in sync by the backend.
+create table if not exists users_profile (
+  id uuid primary key default gen_random_uuid(),
+  username text unique not null,
+  full_name text not null,
+  email text,
+  role text not null,
+  password_hash text not null,
+  password_salt text not null,
+  is_active boolean not null default true,
+  must_change_password boolean not null default false,
+  permission_overrides jsonb not null default '{"allow":[],"deny":[]}'::jsonb,
+  token_version integer not null default 0,
+  last_login_at timestamptz,
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+alter table users_profile add column if not exists permission_overrides jsonb not null default '{"allow":[],"deny":[]}'::jsonb;
+alter table users_profile add column if not exists token_version integer not null default 0;
+alter table users_profile add column if not exists last_login_at timestamptz;
+alter table users_profile add column if not exists updated_at timestamptz not null default now();
+alter table users_profile add column if not exists is_active boolean not null default true;
+alter table users_profile add column if not exists must_change_password boolean not null default false;
+alter table users_profile alter column must_change_password set default false;
+
+drop trigger if exists set_users_profile_updated_at on users_profile;
+create trigger set_users_profile_updated_at before update on users_profile for each row execute function set_updated_at();
+
+-- Only the backend's service-role access may read/modify the user directory.
+alter table users_profile enable row level security;
+do $$ begin
+  if exists (select 1 from pg_roles where rolname in ('anon', 'authenticated')) then
+    revoke all on users_profile from anon, authenticated;
+  end if;
+end $$;

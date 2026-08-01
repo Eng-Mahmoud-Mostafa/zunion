@@ -49,7 +49,25 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.get("/api/health", async (_req, res) => {
+  let dbStatus: string;
+  if (!config.databaseConfigured) {
+    dbStatus = "not_configured";
+  } else {
+    try {
+      await query("select 1");
+      dbStatus = "ok";
+    } catch (error) {
+      dbStatus = error instanceof Error ? error.message : "error";
+    }
+  }
+  res.status(200).json({
+    ok: true,
+    db: dbStatus,
+    email: config.resend.apiKey ? "configured" : "not_configured",
+    time: new Date().toISOString(),
+  });
+});
 
 const passwordCodeRate = new Map<string, number[]>();
 const resetAttemptRate = new Map<string, number[]>();
