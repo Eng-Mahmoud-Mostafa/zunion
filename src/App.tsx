@@ -4000,7 +4000,7 @@ function SidebarSection({ section, activeView, open, onToggle, onSelect }: { sec
   );
 }
 
-function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSection, onSelect, onLogout, onCloseDrawer, onLogoSecretClick }: {
+function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSection, onSelect, onLogout, onCloseDrawer, onLogoClick }: {
   sections: SidebarSectionConfig[];
   activeView: View;
   openSection: string;
@@ -4009,13 +4009,13 @@ function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSectio
   onSelect: (view: View) => void;
   onLogout: () => void;
   onCloseDrawer: () => void;
-  onLogoSecretClick: () => void;
+  onLogoClick: () => void;
 }) {
   return (
     <>
       <aside className={`sidebar${drawerOpen ? " drawer-open" : ""}`}>
         <button type="button" className="sidebar-close" aria-label="إغلاق القائمة" onClick={onCloseDrawer}><X size={22} /></button>
-        <button type="button" className="logo-secret-button sidebar-logo-button" aria-label="شعار Zunion" onClick={onLogoSecretClick}>
+        <button type="button" className="logo-secret-button sidebar-logo-button" aria-label="شعار Zunion - الانتقال إلى الصفحة الرئيسية" title="الصفحة الرئيسية" onClick={onLogoClick}>
           <BrandLogo className="sidebar-logo" />
         </button>
         <nav className="sidebar-menu" aria-label="القائمة الرئيسية">
@@ -4215,6 +4215,12 @@ function ZunionApp() {
     setView("settings");
   }
 
+  function handleSidebarLogoClick() {
+    setView("dashboard");
+    setDrawerOpen(false);
+    handleLogoSecretClick();
+  }
+
   if (useServerAuth && !sessionReady) {
     return (
       <main className="login-page" dir="rtl">
@@ -4240,7 +4246,7 @@ function ZunionApp() {
         onSelect={selectSidebarView}
         onLogout={logout}
         onCloseDrawer={() => setDrawerOpen(false)}
-        onLogoSecretClick={handleLogoSecretClick}
+        onLogoClick={handleSidebarLogoClick}
       />
       <main className="content">
         <header className="topbar">

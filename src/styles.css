@@ -236,7 +236,7 @@ textarea:focus {
 
 .sidebar button.logo-secret-button:hover {
   background: transparent;
-  transform: none;
+  transform: scale(1.03);
 }
 
 .top-logo-button {
@@ -3123,11 +3123,17 @@ input[type="date"] {
   border-radius: 12px !important;
   background: transparent !important;
   box-shadow: none !important;
+  cursor: pointer !important;
+  transition: transform 0.15s ease, filter 0.15s ease !important;
 }
 
 .sidebar button.logo-secret-button:hover {
   background: transparent !important;
-  transform: none !important;
+  transform: scale(1.03) !important;
+}
+
+.sidebar button.logo-secret-button:active {
+  transform: scale(0.97) !important;
 }
 
 .sidebar button.logo-secret-button .sidebar-logo {
