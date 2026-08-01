@@ -21,11 +21,13 @@ function loadEnv(file: string) {
 }
 
 function root() {
-  return resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
+  try {
+    const here = import.meta?.url ? fileURLToPath(new URL(".", import.meta.url)) : process.cwd();
+    return resolve(here, "..", "..");
+  } catch {
+    return process.cwd();
+  }
 }
-
-loadEnv(".env");
-loadEnv("backend/.env");
 
 export type SeedOptions = {
   forcePassword?: boolean;
@@ -207,6 +209,8 @@ export async function ensureSeededUsers(options: SeedOptions = {}, log: (msg: st
 }
 
 async function main() {
+  loadEnv(".env");
+  loadEnv("backend/.env");
   const force = process.argv.includes("--force");
   const dryRun = process.argv.includes("--dry-run");
   await ensureSeededUsers({ forcePassword: force, dryRun });

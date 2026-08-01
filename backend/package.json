@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "build:vercel": "esbuild src/server.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/server.js",
     "start": "node dist/server.js",
     "db:migrate": "tsx src/migrate.ts",
     "seed:users": "tsx src/seed.ts",
@@ -31,6 +32,7 @@
     "@types/node": "25.0.3",
     "@types/nodemailer": "7.0.4",
     "@types/pg": "8.16.0",
+    "esbuild": "0.27.7",
     "tsx": "4.21.0",
     "typescript": "5.9.3"
   }
