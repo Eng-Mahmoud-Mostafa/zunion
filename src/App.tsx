@@ -4216,9 +4216,7 @@ function ZunionApp() {
   }
 
   function handleSidebarLogoClick() {
-    setView("dashboard");
-    setDrawerOpen(false);
-    handleLogoSecretClick();
+    selectSidebarView("dashboard");
   }
 
   if (useServerAuth && !sessionReady) {
