@@ -1029,6 +1029,34 @@ app.get("/api/customers/:id", requireAuth, requireRole("Master", "Helper", "Oper
   res.json({ customer: customer.rows[0] });
 });
 
+app.get("/api/customers/:id/details", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const id = param(req.params.id);
+  const customerResult = await query("select * from customers where id=$1", [id]);
+  if (!customerResult.rows[0]) return res.status(404).json({ message: "Customer not found" });
+  const customer = customerResult.rows[0];
+  const statsResult = await query(
+    `select
+       count(*)::int as total_orders,
+       count(*) filter (where order_status = 'جديد' or work_stage = 'new')::int as pending_orders,
+       count(*) filter (where order_status = 'في التشغيل' or work_stage = 'operation')::int as running_orders,
+       count(*) filter (where order_status = 'جاهز' or order_status = 'تم التسليم' or work_stage = 'completed')::int as completed_orders,
+       count(*) filter (where order_status = 'مشكلة جودة')::int as cancelled_orders,
+       coalesce(sum(pieces_count), 0)::int as total_quantity,
+       coalesce(sum(total), 0)::numeric as total_revenue
+     from orders where customer_id = $1`,
+    [id],
+  );
+  const ordersResult = await query(
+    "select * from orders where customer_id=$1 order by created_at desc",
+    [id],
+  );
+  res.json({
+    customer,
+    statistics: statsResult.rows[0] || { total_orders: 0, pending_orders: 0, running_orders: 0, completed_orders: 0, cancelled_orders: 0, total_quantity: 0, total_revenue: 0 },
+    orders: ordersResult.rows,
+  });
+});
+
 app.put("/api/customers/:id", requireAuth, requireRole("Master"), async (req, res) => {
   const id = param(req.params.id);
   const parsed = customerSchema.safeParse(req.body);

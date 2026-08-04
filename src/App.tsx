@@ -5,22 +5,31 @@ import {
   ArrowUpDown,
   BadgeInfo,
   Banknote,
+  Building2,
+  Calendar,
   CircleDollarSign,
   ClipboardList,
   Cog,
+  Copy,
   FilePlus,
+  FileText,
   Image,
   KeyRound,
   Landmark,
+  Mail,
+  MapPin,
   Menu,
   PackagePlus,
   Paintbrush,
+  Phone,
   Plus,
   Printer,
   Receipt,
   Search,
   Send,
+  ShoppingBag,
   Truck,
+  User,
   UserPlus,
   Users,
   Wallet,
@@ -135,6 +144,7 @@ type Alert = { label: string; order: Order; tone?: "late" };
 
 type Order = {
   id: string;
+  customer_id?: string;
   created_by: string;
   order_number: string;
   source_person: string;
@@ -1044,6 +1054,7 @@ function orderFromApi(row: Record<string, unknown>): Order {
   const order = calculate({
     ...emptyOrder,
     id: String(row.id ?? createId()),
+    customer_id: String(row.customer_id ?? ""),
     created_by: String(row.created_by ?? row.added_by ?? ""),
     order_number: String(row.order_number ?? ""),
     source_person: String(row.source_party ?? row.party ?? ""),
@@ -1916,17 +1927,179 @@ function ordersListPrintRow(order: OrdersListRecord) {
   ];
 }
 
-function OrdersListRow({ order }: { order: OrdersListRecord }) {
+function CustomerDrawer({ open, onClose, customerCode, customerName, customers, orders, session, setView }: {
+  open: boolean;
+  onClose: () => void;
+  customerCode: string;
+  customerName: string;
+  customers: Customer[];
+  orders: Order[];
+  session: Session;
+  setView: (view: View) => void;
+}) {
+  const [drawerQuery, setDrawerQuery] = useState("");
+  const [drawerStatus, setDrawerStatus] = useState("");
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  const customer = useMemo(() => {
+    if (!customers.length) return null;
+    return customers.find((c) => (customerCode && c.client_code === customerCode) || (customerName && c.client_name === customerName)) || null;
+  }, [customers, customerCode, customerName]);
+
+  const customerOrders = useMemo(() => {
+    if (!customerCode && !customerName) return [];
+    return orders.filter((o) => (customerCode && o.client_code === customerCode) || (customerName && o.client_name === customerName));
+  }, [orders, customerCode, customerName]);
+
+  const stats = useMemo(() => {
+    const total = customerOrders.length;
+    const pending = customerOrders.filter((o) => o.order_status === "جديد").length;
+    const running = customerOrders.filter((o) => o.order_status === "في التشغيل").length;
+    const completed = customerOrders.filter((o) => ["جاهز", "تم التسليم"].includes(o.order_status)).length;
+    const cancelled = customerOrders.filter((o) => o.order_status === "مشكلة جودة").length;
+    const totalQuantity = customerOrders.reduce((s, o) => s + (o.quantity || 0), 0);
+    const totalRevenue = customerOrders.reduce((s, o) => s + (o.total || 0), 0);
+    return { total, pending, running, completed, cancelled, totalQuantity, totalRevenue };
+  }, [customerOrders]);
+
+  const filteredOrders = useMemo(() => {
+    return customerOrders.filter((o) => {
+      const matchQ = !drawerQuery || `${o.order_number} ${o.order_type} ${o.productName || ""} ${o.client_name}`.toLowerCase().includes(drawerQuery.toLowerCase());
+      const matchS = !drawerStatus || o.order_status === drawerStatus;
+      return matchQ && matchS;
+    });
+  }, [customerOrders, drawerQuery, drawerStatus]);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (open) { document.body.style.overflow = "hidden"; drawerRef.current?.focus(); }
+    else document.body.style.overflow = "";
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  const displayName = customer?.client_name || customerName || "--";
+  const displayCode = customer?.client_code || customerCode || "";
+  const displayPhone = customer?.phone || customerOrders[0]?.phone || "";
+  const displayEmail = customer?.email || "";
+  const displayAddress = customer?.address || "";
+  const displayNotes = customer?.notes || "";
+  const displaySource = customer?.source_person || "";
+  const displayCreatedAt = customer?.created_at || "";
+  const initials = displayName.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  const copyText = (t: string) => { navigator.clipboard.writeText(t).catch(() => {}); };
+
+  if (!open) return null;
+
+  return (
+    <>
+      <div className="cd-overlay" onClick={onClose} aria-hidden="true" />
+      <div className={`cd-drawer${open ? " cd-open" : ""}`} ref={drawerRef} role="dialog" aria-modal="true" aria-label={`بيانات العميل ${displayName}`} tabIndex={-1}>
+        <button className="cd-close" onClick={onClose} aria-label="إغلاق"><X size={20} /></button>
+
+        <div className="cd-header">
+          <div className="cd-avatar">{initials || <User size={24} />}</div>
+          <div className="cd-header-info">
+            <h2>{displayName}</h2>
+            {displayCode && <span className="cd-code">C-{displayCode}</span>}
+          </div>
+        </div>
+
+        <div className="cd-section">
+          <h3 className="cd-section-title"><User size={16} /> بيانات العميل</h3>
+          <div className="cd-info-grid">
+            {displayPhone && <div className="cd-info-row"><Phone size={14} /><span>{displayPhone}</span><button className="cd-copy-btn" onClick={() => copyText(displayPhone)} title="نسخ"><Copy size={12} /></button></div>}
+            {displayEmail && <div className="cd-info-row"><Mail size={14} /><span>{displayEmail}</span></div>}
+            {displayAddress && <div className="cd-info-row"><MapPin size={14} /><span>{displayAddress}</span></div>}
+            {displaySource && <div className="cd-info-row"><Building2 size={14} /><span>{displaySource}</span></div>}
+            {displayNotes && <div className="cd-info-row"><FileText size={14} /><span>{displayNotes}</span></div>}
+            {displayCreatedAt && <div className="cd-info-row"><Calendar size={14} /><span>{formatDateArabic(displayCreatedAt)}</span></div>}
+          </div>
+        </div>
+
+        <div className="cd-section">
+          <h3 className="cd-section-title"><ClipboardList size={16} /> الإحصائيات</h3>
+          <div className="cd-stats-grid">
+            <div className="cd-stat"><span className="cd-stat-value">{stats.total}</span><span className="cd-stat-label">إجمالي</span></div>
+            <div className="cd-stat cd-stat-amber"><span className="cd-stat-value">{stats.pending}</span><span className="cd-stat-label">جديد</span></div>
+            <div className="cd-stat cd-stat-blue"><span className="cd-stat-value">{stats.running}</span><span className="cd-stat-label">جاري</span></div>
+            <div className="cd-stat cd-stat-green"><span className="cd-stat-value">{stats.completed}</span><span className="cd-stat-label">مكتمل</span></div>
+            <div className="cd-stat cd-stat-red"><span className="cd-stat-value">{stats.cancelled}</span><span className="cd-stat-label">ملغي</span></div>
+            <div className="cd-stat"><span className="cd-stat-value">{formatNumber(stats.totalQuantity)}</span><span className="cd-stat-label">الكمية</span></div>
+            <div className="cd-stat"><span className="cd-stat-value cd-revenue">{formatMoney(stats.totalRevenue)}</span><span className="cd-stat-label">الإيراد</span></div>
+          </div>
+        </div>
+
+        <div className="cd-section">
+          <div className="cd-search-bar"><Search size={16} /><input placeholder="بحث برقم الأوردر / المنتج..." value={drawerQuery} onChange={(e) => setDrawerQuery(e.target.value)} /></div>
+          <div className="cd-filters">
+            {[["", "الكل"], ["جديد", "جديد"], ["في التشغيل", "جاري"], ["جاهز", "جاهز"], ["تم التسليم", "تم التسليم"], ["مشكلة جودة", "ملغي"]].map(([val, label]) => (
+              <button key={val} className={`cd-filter-btn${drawerStatus === val ? " active" : ""}`} onClick={() => setDrawerStatus(val)}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="cd-section">
+          <h3 className="cd-section-title"><ShoppingBag size={16} /> سجل الأوردرات ({filteredOrders.length})</h3>
+          <div className="cd-orders-wrap">
+            <table className="cd-orders-table">
+              <thead><tr><th>رقم الأوردر</th><th>التسليم</th><th>المنتج</th><th>العدد</th><th>الحالة</th><th>التشغيل</th><th>التشطيب</th></tr></thead>
+              <tbody>
+                {filteredOrders.length === 0 && <tr><td colSpan={7} className="cd-empty">لا توجد أوردرات مطابقة</td></tr>}
+                {filteredOrders.map((o) => (
+                  <tr key={o.id}>
+                    <td className="cd-order-num">{o.order_number}</td>
+                    <td>{formatDateArabic(o.delivery_date)}</td>
+                    <td>{o.order_type || o.productName || "--"}</td>
+                    <td>{o.quantity}</td>
+                    <td><span className={listBadgeClass(o.order_status)}>{o.order_status}</span></td>
+                    <td><span className={listBadgeClass(normalizedOperationStatus(o.operation_status))}>{normalizedOperationStatus(o.operation_status)}</span></td>
+                    <td><span className={listBadgeClass(normalizedFinishingStatus(o.finishing_status))}>{normalizedFinishingStatus(o.finishing_status)}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="cd-section cd-actions">
+          {customer && <button className="cd-action-btn" onClick={() => { onClose(); setView("customers"); }}><Users size={14} /> تعديل العميل</button>}
+          <button className="cd-action-btn cd-action-primary" onClick={() => { onClose(); setView("new"); }}><Plus size={14} /> أوردر جديد</button>
+          {displayPhone && <a href={`tel:${displayPhone}`} className="cd-action-btn"><Phone size={14} /> اتصال</a>}
+          {displayPhone && <button className="cd-action-btn" onClick={() => copyText(displayPhone)}><Copy size={14} /> نسخ الهاتف</button>}
+          {displayCode && <button className="cd-action-btn" onClick={() => copyText(`C-${displayCode}`)}><Copy size={14} /> نسخ الكود</button>}
+          <button className="cd-action-btn" onClick={() => { printDocument(`بيانات العميل ${displayName}`, printableRecord([["اسم العميل", displayName], ["الكود", displayCode], ["الهاتف", displayPhone], ["البريد", displayEmail], ["العنوان", displayAddress], ["المصدر", displaySource], ["ملاحظات", displayNotes], ["إجمالي الأوردرات", stats.total], ["إجمالي الكمية", stats.totalQuantity], ["إجمالي الإيراد", stats.totalRevenue]]), session); }}><Printer size={14} /> طباعة</button>
+          <button className="cd-action-btn" onClick={() => {
+            const csv = [["رقم الأوردر", "التسليم", "المنتج", "العدد", "الحالة"]].concat(filteredOrders.map((o) => [o.order_number, o.delivery_date, o.order_type || o.productName || "", String(o.quantity), o.order_status]));
+            const blob = new Blob([csv.map((r) => r.join(",")).join("\n")], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a"); a.href = url; a.download = `orders-${displayName}.csv`; a.click(); URL.revokeObjectURL(url);
+          }}><FileText size={14} /> تصدير</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function OrdersListRow({ order, onCustomerClick }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void }) {
   const operationStatus = normalizedOperationStatus(order.operation_status);
   const finishingStatus = normalizedFinishingStatus(order.finishing_status);
   const readyStatus = orderReadyStatus(order);
   const createdBy = orderCreatedBy(order);
+  const clientName = valueText(order.client_name || order.customer_name);
+  const clientCode = String(order.client_code || "");
+  const handleClick = onCustomerClick && clientName !== "--" ? () => onCustomerClick(clientCode, clientName) : undefined;
   return (
     <tr>
       <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
       <td>{orderDisplayNumber(order)}</td>
-      <td>{orderDisplayClient(order)}</td>
+      <td>{handleClick ? <button type="button" className="cd-client-link" onClick={handleClick}>{clientName}</button> : clientName}</td>
       <td>{orderDisplayType(order)}</td>
       <td>{orderDisplayLogo(order)}</td>
       <td>{orderDisplayQuantity(order)}</td>
@@ -2735,7 +2908,7 @@ function Textarea({ label, value, onChange, className }: { label: string; value:
   return <label className={className}>{label}<textarea rows={3} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
-function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" }) {
+function OrdersPage({ orders, setOrders, session, queue, onCustomerClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -2809,7 +2982,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
         </section>
         <section className="table-wrap accounts-table orders-list-table-wrap"><table className="orders-list-table"><thead><tr>{renderOrdersListHeaders()}</tr></thead><tbody>
           {visibleRemote.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
-          {visibleRemote.map((order) => <OrdersListRow key={order.id} order={order} />)}
+          {visibleRemote.map((order) => <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} />)}
         </tbody></table></section>
         <div className="pagination"><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}>السابق</button><span>{page} / {pagesRemote}</span><button disabled={page === pagesRemote} onClick={() => setPage((value) => value + 1)}>التالي</button></div>
       </div>
@@ -2895,7 +3068,7 @@ function OrdersPage({ orders, setOrders, session, queue }: { orders: Order[]; se
           </thead>
           <tbody>
             {visible.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
-            {visible.map((order) => <OrdersListRow key={order.id} order={order} />)}
+            {visible.map((order) => <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} />)}
           </tbody>
         </table>
       </section>
@@ -3088,8 +3261,8 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
   );
 }
 
-function SearchPage({ orders, setOrders, session }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session }) {
-  return <OrdersPage orders={orders} setOrders={setOrders} session={session} />;
+function SearchPage({ orders, setOrders, session, onCustomerClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void }) {
+  return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={onCustomerClick} />;
 }
 
 function FinancePage({ session }: { session: Session }) {
@@ -4223,6 +4396,7 @@ function ZunionApp() {
   const [openSection, setOpenSection] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const logoClickRef = useRef({ count: 0, firstClickAt: 0 });
   const { orders, setOrders } = useOrders(session);
   const { items: customers, setItems: setCustomers } = useCustomers(session);
@@ -4450,13 +4624,13 @@ function ZunionApp() {
             </section>
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
-          {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} />}
+          {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onCancel={() => setView("search")} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
-          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} />}
-          {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" />}
-          {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" />}
+          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
+          {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
+          {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
           {view === "finance" && <FinancePageModern session={session} />}
           {view === "reports" && <ReportsPage session={session} />}
@@ -4467,6 +4641,7 @@ function ZunionApp() {
           </>}
         </section>
       </main>
+      <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={setView} />
     </div>
   );
 }
