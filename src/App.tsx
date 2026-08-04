@@ -7,8 +7,10 @@ import {
   Banknote,
   Building2,
   Calendar,
+  CheckCircle,
   CircleDollarSign,
   ClipboardList,
+  Clock,
   Cog,
   Copy,
   FilePlus,
@@ -36,6 +38,7 @@ import {
   WalletCards,
   Wrench,
   X,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
@@ -2086,7 +2089,265 @@ function CustomerDrawer({ open, onClose, customerCode, customerName, customers, 
   );
 }
 
-function OrdersListRow({ order, onCustomerClick }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void }) {
+function OrderDetailsDrawer({ open, onClose, order, customers, setOrders, session, setView, onCustomerClick }: {
+  open: boolean;
+  onClose: () => void;
+  order: Order | null;
+  customers: Customer[];
+  setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
+  session: Session;
+  setView: (view: View) => void;
+  onCustomerClick?: (code: string, name: string) => void;
+}) {
+  const [notesExpanded, setNotesExpanded] = useState(true);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  const customer = useMemo(() => {
+    if (!order || !customers.length) return null;
+    return customers.find((c) => c.client_code === order.client_code) || null;
+  }, [order, customers]);
+
+  const auditEntries = useMemo(() => {
+    if (!order) return [];
+    return loadAudit().filter((e) => e.entity_type === "orders" && e.entity_id === order.id);
+  }, [order]);
+
+  const paymentLabel = (v?: string) => paymentMethods.find((m) => m.value === v)?.label || v || "--";
+  const materialLabel = (v?: string) => materialStatusOptions.find((m) => m.value === v)?.label || v || "--";
+
+  const timeline = useMemo(() => {
+    if (!order) return [];
+    const events: Array<{ label: string; time?: string; active: boolean }> = [];
+    const s = order.order_status;
+    const ws = order.workStage;
+    const created = order.created_at;
+    const updated = order.updated_at;
+    events.push({ label: "تم إنشاء الأوردر", time: created, active: true });
+    if (ws === "operation" || ws === "finishing" || ws === "completed") events.push({ label: "بدأ التشغيل", time: created, active: true });
+    else events.push({ label: "بدأ التشغيل", active: false });
+    if (normalizedOperationStatus(order.operation_status) === "تم") events.push({ label: "انتهى التشغيل", time: updated, active: true });
+    else events.push({ label: "انتهى التشغيل", active: false });
+    if (ws === "finishing" || ws === "completed") events.push({ label: "بدأ التشطيب", time: updated, active: true });
+    else events.push({ label: "بدأ التشطيب", active: false });
+    if (normalizedFinishingStatus(order.finishing_status) === "تم") events.push({ label: "انتهى التشطيب", time: updated, active: true });
+    else events.push({ label: "انتهى التشطيب", active: false });
+    if (s === "جاهز" || s === "تم التسليم") events.push({ label: "جاهز", time: updated, active: true });
+    else events.push({ label: "جاهز", active: false });
+    if (s === "تم التسليم") events.push({ label: "تم التسليم", time: updated, active: true });
+    else events.push({ label: "تم التسليم", active: false });
+    if (s === "مشكلة جودة") events.push({ label: "مشكلة جودة", time: updated, active: true });
+    return events;
+  }, [order]);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (open) { document.body.style.overflow = "hidden"; drawerRef.current?.focus(); }
+    else document.body.style.overflow = "";
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  if (!open || !order) return null;
+
+  const op = normalizedOperationStatus(order.operation_status);
+  const fn = normalizedFinishingStatus(order.finishing_status);
+  const operationItems = order.operationItems || [];
+  const logoImages = operationItems.filter((i) => i.logoImage).map((i) => ({ src: i.logoImage, name: i.logoFileName || "لوجو", method: i.method }));
+  const workImages = operationItems.filter((i) => i.workOrderImage).map((i) => ({ src: i.workOrderImage, name: i.workOrderFileName || "أمر شغل", method: i.method }));
+  const hasImages = logoImages.length > 0 || workImages.length > 0;
+
+  return (
+    <>
+      <div className="cd-overlay" onClick={onClose} aria-hidden="true" />
+      <div className={`cd-drawer od-drawer${open ? " cd-open" : ""}`} ref={drawerRef} role="dialog" aria-modal="true" aria-label={`تفاصيل الأوردر ${order.order_number}`} tabIndex={-1}>
+        <button className="cd-close" onClick={onClose} aria-label="إغلاق"><X size={20} /></button>
+
+        {/* Header */}
+        <div className="od-header">
+          <div className="od-header-top">
+            <div>
+              <h2 className="od-order-num">{order.order_number}</h2>
+              <div className="od-badges">
+                <span className={listBadgeClass(order.order_status)}>{order.order_status}</span>
+                <span className={listBadgeClass(op)}>{op}</span>
+                <span className={listBadgeClass(fn)}>{fn}</span>
+              </div>
+            </div>
+          </div>
+          <div className="od-header-meta">
+            <span><Calendar size={13} /> التسليم: {formatDateArabic(order.delivery_date)}</span>
+            <span><Clock size={13} /> الإنشاء: {formatDateTimeEnglish(order.created_at)}</span>
+            <span><User size={13} /> بواسطة: {order.created_by || "--"}</span>
+          </div>
+        </div>
+
+        {/* Section 2: Customer Information */}
+        {order.client_name && (
+          <div className="cd-section">
+            <h3 className="cd-section-title"><User size={16} /> بيانات العميل</h3>
+            <div className="cd-info-grid">
+              <div className="cd-info-row">
+                <User size={14} />
+                <span className="cd-client-name-link" onClick={() => { if (onCustomerClick) { onClose(); onCustomerClick(order.client_code, order.client_name); } }}>{order.client_name}</span>
+              </div>
+              {order.client_code && <div className="cd-info-row"><BadgeInfo size={14} /><span>C-{order.client_code}</span><button className="cd-copy-btn" onClick={() => navigator.clipboard.writeText(`C-${order.client_code}`).catch(() => {})} title="نسخ"><Copy size={12} /></button></div>}
+              {order.phone && <div className="cd-info-row"><Phone size={14} /><span>{order.phone}</span><button className="cd-copy-btn" onClick={() => navigator.clipboard.writeText(order.phone).catch(() => {})} title="نسخ"><Copy size={12} /></button></div>}
+              {customer?.email && <div className="cd-info-row"><Mail size={14} /><span>{customer.email}</span></div>}
+              {customer?.address && <div className="cd-info-row"><MapPin size={14} /><span>{customer.address}</span></div>}
+              {order.source_person && <div className="cd-info-row"><Building2 size={14} /><span>{order.source_person}</span></div>}
+              {customer?.notes && <div className="cd-info-row"><FileText size={14} /><span>{customer.notes}</span></div>}
+            </div>
+          </div>
+        )}
+
+        {/* Section 3: Product Details */}
+        <div className="cd-section">
+          <h3 className="cd-section-title"><PackagePlus size={16} /> تفاصيل المنتج</h3>
+          <div className="cd-info-grid">
+            {(order.order_type || order.productName) && <div className="cd-info-row"><span className="cd-info-label">المنتج</span><span>{order.productName || order.order_type}</span></div>}
+            {order.quantity && <div className="cd-info-row"><span className="cd-info-label">العدد</span><span>{order.quantity}</span></div>}
+            {order.price > 0 && <div className="cd-info-row"><span className="cd-info-label">السعر</span><span>{formatMoney(order.price)}</span></div>}
+            <div className="cd-info-row"><span className="cd-info-label">الإجمالي</span><span className="od-total">{formatMoney(order.total)}</span></div>
+            {order.materialsStatus && <div className="cd-info-row"><span className="cd-info-label">الخامات</span><span>{materialLabel(order.materialsStatus)}</span></div>}
+            {order.paymentMethod && <div className="cd-info-row"><span className="cd-info-label">طريقة الدفع</span><span>{paymentLabel(order.paymentMethod)}</span></div>}
+            {order.customPaymentMethod && <div className="cd-info-row"><span className="cd-info-label">تفاصيل الدفع</span><span>{order.customPaymentMethod}</span></div>}
+            {order.logo_place && <div className="cd-info-row"><span className="cd-info-label">مكان اللوجو</span><span>{order.logo_place}</span></div>}
+          </div>
+          {operationItems.length > 0 && (
+            <div className="od-operations">
+              <h4>طرق التشغيل</h4>
+              {operationItems.map((item, i) => (
+                <div key={i} className="od-op-item">
+                  <span className="od-op-method">{item.method || `طريقة ${i + 1}`}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Section 4: Artwork & Files */}
+        {hasImages && (
+          <div className="cd-section">
+            <h3 className="cd-section-title"><Image size={16} /> الأعمال والملفات</h3>
+            <div className="od-files-grid">
+              {logoImages.map((img, i) => (
+                <div key={`l${i}`} className="od-file-card">
+                  <div className="od-file-preview"><img src={img.src} alt={img.name} /></div>
+                  <div className="od-file-info"><span className="od-file-name">{img.name}</span><span className="od-file-type">لوجو - {img.method}</span></div>
+                  <a href={img.src} download={img.name} className="cd-action-btn" style={{ justifyContent: "center" }}><Truck size={12} /> تحميل</a>
+                </div>
+              ))}
+              {workImages.map((img, i) => (
+                <div key={`w${i}`} className="od-file-card">
+                  <div className="od-file-preview"><img src={img.src} alt={img.name} /></div>
+                  <div className="od-file-info"><span className="od-file-name">{img.name}</span><span className="od-file-type">أمر شغل - {img.method}</span></div>
+                  <a href={img.src} download={img.name} className="cd-action-btn" style={{ justifyContent: "center" }}><Truck size={12} /> تحميل</a>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Section 5: Notes */}
+        <div className="cd-section">
+          <h3 className="cd-section-title" style={{ cursor: "pointer" }} onClick={() => setNotesExpanded(!notesExpanded)}><FileText size={16} /> الملاحظات {notesExpanded ? "▾" : "▸"}</h3>
+          {notesExpanded && (
+            <div className="od-notes-grid">
+              {order.quality_notes && <div className="od-note"><span className="od-note-label">الجودة</span><p>{order.quality_notes}</p></div>}
+              {order.production_notes && <div className="od-note"><span className="od-note-label">ملاحظات التشغيل</span><p>{order.production_notes}</p></div>}
+              {order.finishing_notes && <div className="od-note"><span className="od-note-label">ملاحظات التشطيب</span><p>{order.finishing_notes}</p></div>}
+              {order.client_message && <div className="od-note"><span className="od-note-label">رسالة العميل</span><p>{order.client_message}</p></div>}
+              {order.notes && <div className="od-note"><span className="od-note-label">ملاحظات</span><p>{order.notes}</p></div>}
+              {order.internal_notes && <div className="od-note"><span className="od-note-label">ملاحظات داخلية</span><p>{order.internal_notes}</p></div>}
+              {!order.quality_notes && !order.production_notes && !order.finishing_notes && !order.client_message && !order.notes && !order.internal_notes && <p className="cd-empty">لا توجد ملاحظات</p>}
+            </div>
+          )}
+        </div>
+
+        {/* Section 6: Timeline */}
+        <div className="cd-section">
+          <h3 className="cd-section-title"><Clock size={16} /> الجدول الزمني</h3>
+          <div className="od-timeline">
+            {timeline.map((ev, i) => (
+              <div key={i} className={`od-timeline-item${ev.active ? " active" : ""}`}>
+                <div className="od-timeline-dot" />
+                <div className="od-timeline-content">
+                  <span className="od-timeline-label">{ev.label}</span>
+                  {ev.time && <span className="od-timeline-time">{formatDateTimeEnglish(ev.time)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Section 7: Financial Information */}
+        <div className="cd-section">
+          <h3 className="cd-section-title"><CircleDollarSign size={16} /> المعلومات المالية</h3>
+          <div className="cd-info-grid">
+            <div className="cd-info-row"><span className="cd-info-label">سعر الوحدة</span><span>{formatMoney(order.price)}</span></div>
+            <div className="cd-info-row"><span className="cd-info-label">العدد</span><span>{order.quantity}</span></div>
+            <div className="cd-info-row"><span className="cd-info-label">الإجمالي</span><span className="od-total">{formatMoney(order.total)}</span></div>
+            <div className="cd-info-row"><span className="cd-info-label">المدفوع</span><span className="od-paid">{formatMoney(order.paid)}</span></div>
+            <div className="cd-info-row"><span className="cd-info-label">المتبقي</span><span className="od-remaining">{formatMoney(order.remaining)}</span></div>
+            {order.old_balance > 0 && <div className="cd-info-row"><span className="cd-info-label">حساب قديم</span><span>{formatMoney(order.old_balance)}</span></div>}
+            <div className="cd-info-row"><span className="cd-info-label">الصافي</span><span className="od-total">{formatMoney(order.net_balance)}</span></div>
+          </div>
+        </div>
+
+        {/* Section 8: Activity Log */}
+        {auditEntries.length > 0 && (
+          <div className="cd-section">
+            <h3 className="cd-section-title"><ClipboardList size={16} /> سجل النشاطات ({auditEntries.length})</h3>
+            <div className="od-activity-list">
+              {auditEntries.slice(0, 20).map((entry) => (
+                <div key={entry.id} className="od-activity-item">
+                  <div className="od-activity-dot" />
+                  <div className="od-activity-content">
+                    <span className="od-activity-action">{entry.action}</span>
+                    <span className="od-activity-meta">{entry.user_email} &middot; {formatDateTimeEnglish(entry.created_at)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Section 9: Quick Actions */}
+        <div className="cd-section cd-actions">
+          <button className="cd-action-btn cd-action-primary" onClick={() => { onClose(); setView("new"); }}><Plus size={14} /> أوردر جديد</button>
+          <button className="cd-action-btn" onClick={() => { printOrderDocument(order, session); addAudit(session, "ORDER_PRINTED", "orders", order.id); }}><Printer size={14} /> طباعة</button>
+          <button className="cd-action-btn" onClick={() => {
+            const dup = calculate({ ...order, id: crypto.randomUUID(), order_number: "", order_status: "جديد" as OrderStatus, workStage: "new" as WorkStage, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), paid: 0 });
+            setOrders((current) => [dup, ...current]);
+            onClose();
+          }}><FilePlus size={14} /> تكرار</button>
+          {order.order_status !== "تم التسليم" && <button className="cd-action-btn" onClick={() => {
+            const next = calculate({ ...order, order_status: "تم التسليم" as OrderStatus, workStage: "completed" as WorkStage, updated_at: new Date().toISOString() });
+            setOrders((current) => current.map((o) => o.id === order.id ? next : o));
+            onClose();
+          }}><Send size={14} /> تم التسليم</button>}
+          {order.order_status !== "جاهز" && order.order_status !== "تم التسليم" && <button className="cd-action-btn" onClick={() => {
+            const next = calculate({ ...order, order_status: "جاهز" as OrderStatus, workStage: "completed" as WorkStage, updated_at: new Date().toISOString() });
+            setOrders((current) => current.map((o) => o.id === order.id ? next : o));
+            onClose();
+          }}><CheckCircle size={14} /> جاهز</button>}
+          {order.order_status !== "مشكلة جودة" && <button className="cd-action-btn" style={{ color: "var(--red)" }} onClick={() => {
+            const next = calculate({ ...order, order_status: "مشكلة جودة" as OrderStatus, updated_at: new Date().toISOString() });
+            setOrders((current) => current.map((o) => o.id === order.id ? next : o));
+            onClose();
+          }}><XCircle size={14} /> إلغاء / مشكلة</button>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function OrdersListRow({ order, onCustomerClick, onOrderClick }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
   const operationStatus = normalizedOperationStatus(order.operation_status);
   const finishingStatus = normalizedFinishingStatus(order.finishing_status);
   const readyStatus = orderReadyStatus(order);
@@ -2098,7 +2359,7 @@ function OrdersListRow({ order, onCustomerClick }: { order: OrdersListRecord; on
     <tr>
       <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
-      <td>{orderDisplayNumber(order)}</td>
+      <td>{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}</td>
       <td>{handleClick ? <button type="button" className="cd-client-link" onClick={handleClick}>{clientName}</button> : clientName}</td>
       <td>{orderDisplayType(order)}</td>
       <td>{orderDisplayLogo(order)}</td>
@@ -2908,7 +3169,7 @@ function Textarea({ label, value, onChange, className }: { label: string; value:
   return <label className={className}>{label}<textarea rows={3} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
-function OrdersPage({ orders, setOrders, session, queue, onCustomerClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void }) {
+function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -2982,7 +3243,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick }: { or
         </section>
         <section className="table-wrap accounts-table orders-list-table-wrap"><table className="orders-list-table"><thead><tr>{renderOrdersListHeaders()}</tr></thead><tbody>
           {visibleRemote.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
-          {visibleRemote.map((order) => <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} />)}
+          {visibleRemote.map((order) => <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
         </tbody></table></section>
         <div className="pagination"><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}>السابق</button><span>{page} / {pagesRemote}</span><button disabled={page === pagesRemote} onClick={() => setPage((value) => value + 1)}>التالي</button></div>
       </div>
@@ -3068,7 +3329,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick }: { or
           </thead>
           <tbody>
             {visible.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
-            {visible.map((order) => <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} />)}
+            {visible.map((order) => <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
           </tbody>
         </table>
       </section>
@@ -3261,8 +3522,8 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
   );
 }
 
-function SearchPage({ orders, setOrders, session, onCustomerClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void }) {
-  return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={onCustomerClick} />;
+function SearchPage({ orders, setOrders, session, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
+  return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />;
 }
 
 function FinancePage({ session }: { session: Session }) {
@@ -4397,8 +4658,10 @@ function ZunionApp() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
+  const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
   const logoClickRef = useRef({ count: 0, firstClickAt: 0 });
   const { orders, setOrders } = useOrders(session);
+  const orderDrawerOrder = useMemo(() => orderDrawerOrderNumber ? orders.find((o) => o.order_number === orderDrawerOrderNumber) || null : null, [orderDrawerOrderNumber, orders]);
   const { items: customers, setItems: setCustomers } = useCustomers(session);
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
   const { items: products, setItems: setProducts } = useProducts(session);
@@ -4624,13 +4887,13 @@ function ZunionApp() {
             </section>
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
-          {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
+           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onCancel={() => setView("search")} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
-          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
-          {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
-          {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
+           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
+           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
+           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
           {view === "finance" && <FinancePageModern session={session} />}
           {view === "reports" && <ReportsPage session={session} />}
@@ -4642,6 +4905,7 @@ function ZunionApp() {
         </section>
       </main>
       <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={setView} />
+      <OrderDetailsDrawer open={!!orderDrawerOrder} onClose={() => setOrderDrawerOrderNumber(null)} order={orderDrawerOrder} customers={customers} setOrders={setOrders} session={session} setView={setView} onCustomerClick={(code, name) => { setOrderDrawerOrderNumber(null); setCustomerDrawer({ code, name }); }} />
     </div>
   );
 }

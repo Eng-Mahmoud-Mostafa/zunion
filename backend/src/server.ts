@@ -901,6 +901,28 @@ app.get("/api/orders/:id", requireAuth, async (req, res) => {
   res.json({ order: stripFinancial(order, req.user!.role), files: files.rows });
 });
 
+app.get("/api/orders/:id/details", requireAuth, async (req, res) => {
+  const id = param(req.params.id);
+  const order = await loadOrder(id);
+  if (!order) return res.status(404).json({ message: "Order not found" });
+  const files = await query("select id, file_type, original_name, mime_type, size, created_at from order_files where order_id=$1 order by created_at desc", [id]);
+  let customer = null;
+  if (order.customer_id) {
+    const c = await query("select * from customers where id=$1", [order.customer_id]);
+    customer = c.rows[0] ?? null;
+  }
+  const activity = await query(
+    "select id, user_email, user_role, action, old_value_json, new_value_json, created_at from audit_logs where entity_type='orders' and entity_id=$1 order by created_at desc",
+    [id],
+  );
+  res.json({
+    order: stripFinancial(order, req.user!.role),
+    customer,
+    files: files.rows,
+    activity: activity.rows,
+  });
+});
+
 app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const id = param(req.params.id);
   const oldOrder = await loadOrder(id);
