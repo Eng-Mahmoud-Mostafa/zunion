@@ -9,9 +9,14 @@
 export const schemaSql = `create extension if not exists pgcrypto;
 
 do $$ begin
-  create type user_role as enum ('Master', 'Helper', 'Worker', 'Finish');
+  create type user_role as enum ('Master', 'Helper', 'Worker', 'Finish', 'Operator', 'Supervisor', 'Finishing');
 exception when duplicate_object then null; end $$;
 
+-- Insurance for pre-existing partial enums. These are no-ops on a fresh run
+-- (all values are already defined above) but repair databases where the enum
+-- was created before Operator/Supervisor/Finishing were added. They must run
+-- in this committed transaction BEFORE the values are used, because Postgres
+-- rejects using an enum value in the same transaction that added it.
 alter type user_role add value if not exists 'Operator';
 alter type user_role add value if not exists 'Supervisor';
 alter type user_role add value if not exists 'Finishing';
