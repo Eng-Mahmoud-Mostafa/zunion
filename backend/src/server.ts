@@ -1165,6 +1165,48 @@ app.get("/api/search/orders", requireAuth, async (req, res) => {
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
+app.get("/api/search", requireAuth, async (req, res) => {
+  const q = String(req.query.q ?? "").trim();
+  const limit = 10;
+  const empty = { orders: [], ordersTotal: 0, customers: [], customersTotal: 0, products: [], productsTotal: 0, users: [], usersTotal: 0 };
+  if (!q) return res.json(empty);
+  const pattern = `%${q}%`;
+  const role = req.user!.role;
+
+  const visibility = orderVisibility(role);
+  const orderSearch = "(o.order_number ilike $1 or o.customer_name_snapshot ilike $1 or o.customer_code_snapshot ilike $1 or o.phone_snapshot ilike $1 or o.source_party ilike $1 or o.product_name_snapshot ilike $1 or o.type ilike $1 or o.notes ilike $1 or o.message_text ilike $1 or o.quality_notes ilike $1 or o.production_notes ilike $1 or o.finishing_notes ilike $1 or to_char(o.delivery_date,'DD-MM-YYYY') ilike $1 or cast(o.delivery_date as text) ilike $1 or cast(o.status as text) ilike $1 or cast(o.work_stage as text) ilike $1)";
+  const orderFilters = [orderSearch];
+  const orderParams: unknown[] = [pattern];
+  if (visibility) orderFilters.push(visibility.replace(/^ where /, ""));
+  const orderWhere = `where ${orderFilters.join(" and ")}`;
+
+  const customerSearch = "(c.name ilike $1 or c.code ilike $1 or c.phone ilike $1 or c.email ilike $1 or c.address ilike $1 or c.source_party ilike $1 or c.notes ilike $1)";
+  const productSearch = "(p.product_name ilike $1 or p.details ilike $1 or p.quality ilike $1 or p.logo_placement ilike $1 or cast(p.status as text) ilike $1)";
+  const userSearch = "(u.full_name ilike $1 or u.username ilike $1 or u.email ilike $1 or cast(u.role as text) ilike $1)";
+
+  const [orders, customers, products, users, orderCount, customerCount, productCount, userCount] = await Promise.all([
+    query(`select distinct o.* from orders o left join order_items i on i.order_id=o.id ${orderWhere} order by o.created_at desc limit ${limit}`, orderParams),
+    query(`select c.*, count(o.id)::int as total_orders from customers c left join orders o on o.customer_id=c.id where ${customerSearch} group by c.id order by c.updated_at desc limit ${limit}`, [pattern]),
+    query(`select * from products p where ${productSearch} order by p.updated_at desc limit ${limit}`, [pattern]),
+    query(`select u.id, u.username, u.full_name, u.email, u.role::text as role, u.is_active, u.last_login_at, u.created_at from users u where ${userSearch} order by u.updated_at desc limit ${limit}`, [pattern]),
+    query(`select count(distinct o.id)::int as n from orders o left join order_items i on i.order_id=o.id ${orderWhere}`, orderParams),
+    query(`select count(*)::int as n from customers c where ${customerSearch}`, [pattern]),
+    query(`select count(*)::int as n from products p where ${productSearch}`, [pattern]),
+    query(`select count(*)::int as n from users u where ${userSearch}`, [pattern]),
+  ]);
+
+  res.json({
+    orders: orders.rows.map((row) => stripFinancial(row, role)),
+    ordersTotal: orderCount.rows[0]?.n ?? 0,
+    customers: customers.rows,
+    customersTotal: customerCount.rows[0]?.n ?? 0,
+    products: products.rows,
+    productsTotal: productCount.rows[0]?.n ?? 0,
+    users: users.rows,
+    usersTotal: userCount.rows[0]?.n ?? 0,
+  });
+});
+
 const itemBody = z.object({
   product_name: z.string().min(1),
   details: z.string().optional().default(""),

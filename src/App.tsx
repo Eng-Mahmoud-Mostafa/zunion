@@ -18,6 +18,7 @@ import {
   Image,
   KeyRound,
   Landmark,
+  Loader2,
   Mail,
   MapPin,
   Menu,
@@ -30,6 +31,7 @@ import {
   Search,
   Send,
   ShoppingBag,
+  Star,
   Truck,
   User,
   UserPlus,
@@ -206,6 +208,11 @@ const localPasswordsKey = "zunion-local-passwords-v1";
 const resetCodeKey = "zunion-local-reset-v1";
 const managedUsersKey = "zunion-managed-users-v1";
 const managedRolesKey = "zunion-managed-roles-v1";
+const recentSearchesKey = "zunion-local-recent-searches-v1";
+const recentOrdersKey = "zunion-local-recent-orders-v1";
+const recentCustomersKey = "zunion-local-recent-customers-v1";
+const pinnedItemsKey = "zunion-local-pinned-items-v1";
+const searchCacheKey = "zunion-local-search-cache-v1";
 const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
 
 type PermissionOverride = { allow: PermissionKey[]; deny: PermissionKey[] };
@@ -637,9 +644,86 @@ function addAudit(session: Session | null, action: string, entityType: string, e
   localStorage.setItem(auditKey, JSON.stringify([entry, ...loadAudit()].slice(0, 500)));
 }
 
-function escapeHtml(value: unknown) {
-  return normalizeDigitsToEnglish(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[char] || char));
+type RecentOrderEntry = { order_number: string; client_name: string; created_at: string };
+type RecentCustomerEntry = { code: string; name: string; created_at: string };
+type PinnedItem = { kind: "order" | "customer" | "product" | "user"; id: string; title: string; subtitle?: string; created_at: string };
+
+function loadRecentSearches(): string[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(recentSearchesKey) || "[]") as string[];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
 }
+function addRecentSearch(query: string) {
+  const clean = query.trim();
+  if (!clean) return;
+  const next = [clean, ...loadRecentSearches().filter((item) => item.toLowerCase() !== clean.toLowerCase())].slice(0, 8);
+  localStorage.setItem(recentSearchesKey, JSON.stringify(next));
+}
+function loadRecentOrders(): RecentOrderEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(recentOrdersKey) || "[]") as RecentOrderEntry[];
+  } catch {
+    return [];
+  }
+}
+function addRecentOrder(entry: RecentOrderEntry) {
+  const next = [entry, ...loadRecentOrders().filter((item) => item.order_number !== entry.order_number)].slice(0, 6);
+  localStorage.setItem(recentOrdersKey, JSON.stringify(next));
+}
+function loadRecentCustomers(): RecentCustomerEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(recentCustomersKey) || "[]") as RecentCustomerEntry[];
+  } catch {
+    return [];
+  }
+}
+function addRecentCustomer(entry: RecentCustomerEntry) {
+  const next = [entry, ...loadRecentCustomers().filter((item) => item.code !== entry.code)].slice(0, 6);
+  localStorage.setItem(recentCustomersKey, JSON.stringify(next));
+}
+function loadPinnedItems(): PinnedItem[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(pinnedItemsKey) || "[]") as PinnedItem[];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+function savePinnedItems(items: PinnedItem[]) {
+  localStorage.setItem(pinnedItemsKey, JSON.stringify(items.slice(0, 20)));
+}
+function togglePinnedItem(item: Omit<PinnedItem, "created_at">): boolean {
+  const current = loadPinnedItems();
+  const exists = current.some((pinned) => pinned.kind === item.kind && pinned.id === item.id);
+  if (exists) savePinnedItems(current.filter((pinned) => !(pinned.kind === item.kind && pinned.id === item.id)));
+  else savePinnedItems([{ ...item, created_at: new Date().toISOString() }, ...current]);
+  return !exists;
+}
+function searchCacheGet(query: string): { orders: unknown[]; customers: unknown[]; products: unknown[]; users: unknown[] } | null {
+  try {
+    const cache = JSON.parse(localStorage.getItem(searchCacheKey) || "{}") as Record<string, { at: number; data: unknown }>;
+    const hit = cache[query.toLowerCase()];
+    if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data as never;
+    return null;
+  } catch {
+    return null;
+  }
+}
+function searchCacheSet(query: string, data: unknown) {
+  try {
+    const cache = JSON.parse(localStorage.getItem(searchCacheKey) || "{}") as Record<string, { at: number; data: unknown }>;
+    cache[query.toLowerCase()] = { at: Date.now(), data };
+    localStorage.setItem(searchCacheKey, JSON.stringify(Object.fromEntries(Object.entries(cache).slice(-50))));
+  } catch {
+    localStorage.removeItem(searchCacheKey);
+  }
+}
+
+function escapeHtml(value: unknown) {
+  return normalizeDigitsToEnglish(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[char] || char));}
 
 function isEmailValue(value: unknown) {
   return typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -2347,6 +2431,641 @@ function OrderDetailsDrawer({ open, onClose, order, customers, setOrders, sessio
   );
 }
 
+type SearchKind = "order" | "customer" | "product" | "user";
+type SearchableUser = { id: string; username: string; fullName: string; email: string; role: string; status: "active" | "inactive"; lastLoginAt?: string };
+type SearchResultItem = {
+  kind: SearchKind;
+  id: string;
+  title: string;
+  subtitle: string;
+  badge?: string;
+  badgeTone?: string;
+  order?: Order;
+  customer?: Customer;
+  product?: Product;
+  user?: SearchableUser;
+};
+type SearchGroups = { orders: SearchResultItem[]; customers: SearchResultItem[]; products: SearchResultItem[]; users: SearchResultItem[] };
+type SearchTotals = Record<SearchKind, number>;
+type SearchApiResponse = {
+  orders: Record<string, unknown>[];
+  ordersTotal: number;
+  customers: Record<string, unknown>[];
+  customersTotal: number;
+  products: Record<string, unknown>[];
+  productsTotal: number;
+  users: Record<string, unknown>[];
+  usersTotal: number;
+};
+const EMPTY_SEARCH_GROUPS: SearchGroups = { orders: [], customers: [], products: [], users: [] };
+const searchSections: Array<{ kind: SearchKind; label: string; icon: LucideIcon }> = [
+  { kind: "order", label: "الأوردرات", icon: ClipboardList },
+  { kind: "customer", label: "العملاء", icon: Users },
+  { kind: "product", label: "المنتجات", icon: PackagePlus },
+  { kind: "user", label: "المستخدمون", icon: User },
+];
+const groupKeyOf = (kind: SearchKind): keyof SearchGroups => ({ order: "orders", customer: "customers", product: "products", user: "users" }[kind] as keyof SearchGroups);
+const gsKeyOf = (item: { kind: SearchKind; id: string }) => `${item.kind}:${item.id}`;
+
+function searchText(...values: unknown[]): string[] {
+  return values.map((value) => String(value ?? "").toLowerCase().trim()).filter(Boolean);
+}
+function scoreMatch(fields: string[], q: string): number {
+  let best = 0;
+  for (const field of fields) {
+    if (!field) continue;
+    if (field === q) best = Math.max(best, 100);
+    else if (field.startsWith(q)) best = Math.max(best, 60);
+    else if (field.includes(q)) best = Math.max(best, 30);
+  }
+  return best;
+}
+function orderStatusTone(status: string): string {
+  if (status === "تم التسليم" || status === "جاهز") return "gs-badge-green";
+  if (status === "في التشغيل" || status === "في التشطيب" || status === "متأخر") return "gs-badge-amber";
+  if (status === "مشكلة جودة") return "gs-badge-red";
+  return "gs-badge-gray";
+}
+function orderSearchFields(order: Order, customer?: Customer): string[] {
+  return searchText(
+    order.order_number, order.client_name, order.client_code, order.phone,
+    order.source_person, order.created_by, order.order_type, order.productName,
+    order.delivery_date, order.order_status, order.operation_status, order.finishing_status,
+    order.workStage, order.workflow_stage, order.notes, order.internal_notes,
+    order.production_notes, order.finishing_notes, order.quality_notes, order.client_message, order.details,
+    customer?.email, customer?.address,
+    ...(order.items || []).map((item) => item.product_name),
+  );
+}
+function orderSearchItem(order: Order, customer?: Customer): SearchResultItem {
+  return {
+    kind: "order",
+    id: order.id,
+    title: order.order_number ? `#${order.order_number}` : "أوردر بدون رقم",
+    subtitle: [order.client_name, order.phone].filter(Boolean).join(" • "),
+    badge: order.order_status,
+    badgeTone: orderStatusTone(order.order_status),
+    order,
+  };
+}
+function customerSearchItem(customer: Customer): SearchResultItem {
+  return {
+    kind: "customer",
+    id: customer.id,
+    title: customer.client_name || "عميل",
+    subtitle: [customer.client_code ? `C-${customer.client_code}` : "", customer.phone, customer.email].filter(Boolean).join(" • "),
+    badge: "عميل",
+    badgeTone: "gs-badge-navy",
+    customer,
+  };
+}
+function productSearchItem(product: Product): SearchResultItem {
+  return {
+    kind: "product",
+    id: product.id,
+    title: product.name || "منتج",
+    subtitle: product.details || product.quality || "",
+    badge: product.active === false ? "غير نشط" : "نشط",
+    badgeTone: product.active === false ? "gs-badge-red" : "gs-badge-green",
+    product,
+  };
+}
+function userSearchItem(user: SearchableUser): SearchResultItem {
+  return {
+    kind: "user",
+    id: user.id,
+    title: user.fullName || user.username,
+    subtitle: [user.role, user.email].filter(Boolean).join(" • "),
+    badge: user.role,
+    badgeTone: "gs-badge-navy",
+    user,
+  };
+}
+function managedToSearchable(managed: ManagedUser): SearchableUser {
+  return { id: managed.id, username: managed.username, fullName: managed.fullName, email: managed.email, role: managed.role, status: managed.status, lastLoginAt: managed.lastLoginAt };
+}
+function serverUserToSearchable(row: Record<string, unknown>): SearchableUser {
+  return {
+    id: String(row.id ?? ""),
+    username: String(row.username ?? ""),
+    fullName: String(row.full_name ?? ""),
+    email: String(row.email ?? ""),
+    role: String(row.role ?? ""),
+    status: row.is_active === false ? "inactive" : "active",
+    lastLoginAt: String(row.last_login_at ?? ""),
+  };
+}
+function localSearchAll(q: string, orders: Order[], customers: Customer[], products: Product[], users: SearchableUser[]) {
+  const needle = q.trim().toLowerCase();
+  const orderMatches = orders
+    .map((order) => {
+      const customer = customers.find((item) => item.client_code === order.client_code);
+      return { score: scoreMatch(orderSearchFields(order, customer), needle), order, customer };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || String(b.order.created_at).localeCompare(String(a.order.created_at)));
+  const customerMatches = customers
+    .map((customer) => ({ score: scoreMatch(searchText(customer.client_name, customer.client_code, customer.phone, customer.email, customer.address, customer.source_person, customer.notes), needle), customer }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  const productMatches = products
+    .map((product) => ({ score: scoreMatch(searchText(product.name, product.details, product.quality, product.status, product.logoPlacement, ...(product.materials || [])), needle), product }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  const userMatches = users
+    .map((user) => ({ score: scoreMatch(searchText(user.fullName, user.username, user.email, user.role), needle), user }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return {
+    groups: {
+      orders: orderMatches.map((entry) => orderSearchItem(entry.order, entry.customer)),
+      customers: customerMatches.map((entry) => customerSearchItem(entry.customer)),
+      products: productMatches.map((entry) => productSearchItem(entry.product)),
+      users: userMatches.map((entry) => userSearchItem(entry.user)),
+    },
+    totals: { order: orderMatches.length, customer: customerMatches.length, product: productMatches.length, user: userMatches.length },
+  };
+}
+function mapServerResults(result: SearchApiResponse, customers: Customer[]) {
+  const orders = (result.orders || []).map(orderFromApi);
+  return {
+    groups: {
+      orders: orders.map((order) => orderSearchItem(order, customers.find((item) => item.client_code === order.client_code))),
+      customers: (result.customers || []).map(customerFromApi).map(customerSearchItem),
+      products: (result.products || []).map(productFromApi).map(productSearchItem),
+      users: (result.users || []).map(serverUserToSearchable).map(userSearchItem),
+    },
+    totals: {
+      order: Number(result.ordersTotal ?? orders.length),
+      customer: Number(result.customersTotal ?? (result.customers || []).length),
+      product: Number(result.productsTotal ?? (result.products || []).length),
+      user: Number(result.usersTotal ?? (result.users || []).length),
+    },
+  };
+}
+
+function GlobalSearchCenter({ orders, customers, products, session, onOrderClick, onCustomerClick, onProductClick, onUserClick }: {
+  orders: Order[];
+  customers: Customer[];
+  products: Product[];
+  session: Session;
+  onOrderClick: (orderNumber: string) => void;
+  onCustomerClick: (code: string, name: string) => void;
+  onProductClick: (product: Product) => void;
+  onUserClick: (user: SearchableUser) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [groups, setGroups] = useState<SearchGroups>(EMPTY_SEARCH_GROUPS);
+  const [totals, setTotals] = useState<SearchTotals>({ order: 0, customer: 0, product: 0, user: 0 });
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState<Partial<Record<SearchKind, boolean>>>({});
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [pinnedVersion, setPinnedVersion] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const localCacheRef = useRef<{ groups: SearchGroups; totals: SearchTotals } | null>(null);
+  const debounceRef = useRef<number | null>(null);
+
+  const users = useMemo<SearchableUser[]>(() => loadManagedUsers().map(managedToSearchable), []);
+  const pinnedSet = useMemo(() => new Set(loadPinnedItems().map((item) => gsKeyOf(item))), [query, pinnedVersion]);
+  const recentSearches = loadRecentSearches();
+  const recentOrders = loadRecentOrders();
+  const recentCustomers = loadRecentCustomers();
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setLoading(false);
+      setGroups(EMPTY_SEARCH_GROUPS);
+      setTotals({ order: 0, customer: 0, product: 0, user: 0 });
+      setExpanded({});
+      setActiveIndex(-1);
+      setHasSearched(false);
+      return;
+    }
+    setActiveIndex(-1);
+    setHasSearched(true);
+    setLoading(true);
+    const local = localSearchAll(q, orders, customers, products, users);
+    localCacheRef.current = { groups: local.groups, totals: local.totals };
+    setGroups(local.groups);
+    setTotals(local.totals);
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      const cached = searchCacheGet(q);
+      if (cached) {
+        const server = mapServerResults(cached as SearchApiResponse, customers);
+        if (server) {
+          setGroups(server.groups);
+          setTotals(server.totals);
+        }
+        setLoading(false);
+        return;
+      }
+      backendJson<SearchApiResponse>(`/api/search?q=${encodeURIComponent(q)}`)
+        .then((result) => {
+          const server = mapServerResults(result, customers);
+          if (server) {
+            searchCacheSet(q, result);
+            setGroups(server.groups);
+            setTotals(server.totals);
+          }
+        })
+        .catch(() => { /* backend unavailable -> keep local results */ })
+        .finally(() => setLoading(false));
+    }, 300);
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    };
+  }, [query, orders, customers, products, users]);
+
+  const flatItems = useMemo(() => {
+    const list: SearchResultItem[] = [];
+    for (const section of searchSections) {
+      const full = localCacheRef.current?.groups ? localCacheRef.current.groups[groupKeyOf(section.kind)] : [];
+      const shown = expanded[section.kind] ? full : groups[groupKeyOf(section.kind)].slice(0, 10);
+      list.push(...shown);
+    }
+    return list;
+  }, [groups, expanded]);
+  const flatIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    flatItems.forEach((item, index) => map.set(gsKeyOf(item), index));
+    return map;
+  }, [flatItems]);
+
+  useEffect(() => {
+    if (activeIndex < 0 || !resultsRef.current) return;
+    resultsRef.current.querySelector(`[data-gs-index="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  function openItem(item: SearchResultItem) {
+    if (query.trim()) addRecentSearch(query);
+    if (item.kind === "order" && item.order) {
+      addRecentOrder({ order_number: item.order.order_number, client_name: item.order.client_name, created_at: new Date().toISOString() });
+      onOrderClick(item.order.order_number);
+    } else if (item.kind === "customer" && item.customer) {
+      addRecentCustomer({ code: item.customer.client_code, name: item.customer.client_name, created_at: new Date().toISOString() });
+      onCustomerClick(item.customer.client_code, item.customer.client_name);
+    } else if (item.kind === "product" && item.product) {
+      onProductClick(item.product);
+    } else if (item.kind === "user" && item.user) {
+      onUserClick(item.user);
+    }
+  }
+
+  function togglePin(item: SearchResultItem) {
+    togglePinnedItem({ kind: item.kind, id: item.id, title: item.title, subtitle: item.subtitle });
+    setPinnedVersion((v) => v + 1);
+  }
+
+  function resolvePinned(pinned: PinnedItem): SearchResultItem | null {
+    if (pinned.kind === "order") {
+      const order = orders.find((o) => o.order_number === pinned.id || o.id === pinned.id);
+      return order ? orderSearchItem(order, customers.find((c) => c.client_code === order.client_code)) : null;
+    }
+    if (pinned.kind === "customer") {
+      const customer = customers.find((c) => c.client_code === pinned.id);
+      return customer ? customerSearchItem(customer) : null;
+    }
+    if (pinned.kind === "product") {
+      const product = products.find((p) => p.id === pinned.id);
+      return product ? productSearchItem(product) : null;
+    }
+    if (pinned.kind === "user") {
+      const user = users.find((u) => u.username === pinned.id || u.email === pinned.id);
+      return user ? userSearchItem(user) : null;
+    }
+    return null;
+  }
+
+  function onKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((current) => (flatItems.length ? Math.min(flatItems.length - 1, current + 1) : -1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((current) => (flatItems.length ? Math.max(0, current - 1) : -1));
+    } else if (event.key === "Enter") {
+      if (activeIndex >= 0 && flatItems[activeIndex]) openItem(flatItems[activeIndex]);
+    } else if (event.key === "Escape") {
+      setQuery("");
+      setActiveIndex(-1);
+      inputRef.current?.blur();
+    }
+  }
+
+  const totalResults = totals.order + totals.customer + totals.product + totals.user;
+  const pinned = loadPinnedItems();
+  const showEmpty = !query.trim();
+
+  return (
+    <div className="gs-page">
+      <div className="gs-search-wrap">
+        <div className={`gs-search${loading ? " gs-loading" : ""}`}>
+          <Search size={22} className="gs-search-icon" />
+          <input
+            ref={inputRef}
+            className="gs-input"
+            id="gs-search-input"
+            type="text"
+            value={query}
+            placeholder="ابحث عن أي شيء... رقم أوردر، عميل، هاتف، منتج، مستخدم"
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={onKeyDown}
+            aria-label="البحث الشامل"
+            autoFocus
+          />
+          {loading && <Loader2 size={18} className="gs-spinner" />}
+          {query && !loading && <button className="gs-clear" type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} aria-label="مسح البحث"><X size={16} /></button>}
+        </div>
+        {showEmpty && <p className="gs-hint">أدخل أي كلمة للبحث في كل النظام — الأوردرات، العملاء، المنتجات والمستخدمين</p>}
+      </div>
+
+      {showEmpty ? (
+        <div className="gs-empty">
+          <div className="gs-empty-section">
+            <h3><Clock size={15} /> البحثات الأخيرة</h3>
+            {recentSearches.length ? (
+              <div className="gs-chips">
+                {recentSearches.map((item) => <button key={item} type="button" className="gs-chip" onClick={() => { setQuery(item); inputRef.current?.focus(); }}><Search size={12} /> {item}</button>)}
+              </div>
+            ) : <p className="gs-empty-note">لا توجد بحثات سابقة بعد</p>}
+          </div>
+          <div className="gs-empty-grid">
+            <div className="gs-empty-section">
+              <h3><ClipboardList size={15} /> آخر الأوردرات المفتوحة</h3>
+              {recentOrders.length ? (
+                <ul className="gs-recent">
+                  {recentOrders.map((entry) => (
+                    <li key={entry.order_number}>
+                      <button type="button" onClick={() => onOrderClick(entry.order_number)}><span className="gs-recent-num">#{entry.order_number}</span><span className="gs-recent-sub">{entry.client_name}</span></button>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="gs-empty-note">لا يوجد</p>}
+            </div>
+            <div className="gs-empty-section">
+              <h3><Users size={15} /> عملاء تم عرضهم مؤخراً</h3>
+              {recentCustomers.length ? (
+                <ul className="gs-recent">
+                  {recentCustomers.map((entry) => (
+                    <li key={entry.code}>
+                      <button type="button" onClick={() => onCustomerClick(entry.code, entry.name)}><span className="gs-recent-name">{entry.name}</span><span className="gs-recent-sub">C-{entry.code}</span></button>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="gs-empty-note">لا يوجد</p>}
+            </div>
+          </div>
+          <div className="gs-empty-section">
+            <h3><Star size={15} /> عناصر مثبتة</h3>
+            {pinned.length ? (
+              <ul className="gs-recent gs-pinned">
+                {pinned.map((item) => {
+                  const resolved = resolvePinned(item);
+                  return (
+                    <li key={gsKeyOf(item)}>
+                      <button type="button" onClick={() => resolved && openItem(resolved)}>
+                        <span className="gs-recent-name">{item.title}</span>
+                        <span className="gs-recent-sub">{item.subtitle || item.kind}</span>
+                      </button>
+                      <button className="gs-unpin" type="button" aria-label="إزالة التثبيت" onClick={() => togglePin(resolved || ({ kind: item.kind, id: item.id, title: item.title, subtitle: item.subtitle } as SearchResultItem))}><X size={12} /></button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : <p className="gs-empty-note">ثبّت العناصر المهمة من نتائج البحث للوصول السريع إليها</p>}
+          </div>
+        </div>
+      ) : (
+        <div className="gs-results" ref={resultsRef}>
+          {!loading && totalResults === 0 && <div className="gs-no-results">لا توجد نتائج مطابقة لـ "{query}"</div>}
+          {searchSections.map((section) => {
+            const kind = section.kind;
+            const groupKey = groupKeyOf(kind);
+            const fullCount = totals[kind];
+            const isExpanded = !!expanded[kind];
+            const full = localCacheRef.current?.groups ? localCacheRef.current.groups[groupKey] : groups[groupKey];
+            const shown = isExpanded ? full : groups[groupKey].slice(0, 10);
+            if (shown.length === 0) return null;
+            const Icon = section.icon;
+            return (
+              <div className="gs-group" key={kind}>
+                <div className="gs-group-head">
+                  <span className="gs-group-icon"><Icon size={15} /></span>
+                  <span className="gs-group-label">{section.label}</span>
+                  <span className="gs-group-count">{fullCount}</span>
+                  {fullCount > 10 && (
+                    <button type="button" className="gs-view-all" onClick={() => setExpanded((current) => ({ ...current, [kind]: !current[kind] }))}>
+                      {isExpanded ? "عرض أقل" : `عرض الكل (${fullCount})`}
+                    </button>
+                  )}
+                </div>
+                <ul className="gs-list">
+                  {shown.map((item) => {
+                    const key = gsKeyOf(item);
+                    const index = flatIndexMap.get(key) ?? -1;
+                    const isActive = index === activeIndex;
+                    const isPinned = pinnedSet.has(key);
+                    const ItemIcon = section.icon;
+                    return (
+                      <li key={key} className={`gs-result${isActive ? " active" : ""}`} data-gs-index={index >= 0 ? index : undefined}>
+                        <button type="button" className="gs-result-main" onClick={() => openItem(item)} onMouseEnter={() => index >= 0 && setActiveIndex(index)}>
+                          <span className="gs-result-icon"><ItemIcon size={16} /></span>
+                          <span className="gs-result-body">
+                            <span className="gs-result-title">{item.title}</span>
+                            {item.subtitle && <span className="gs-result-subtitle">{item.subtitle}</span>}
+                          </span>
+                          {item.badge && <span className={`gs-result-badge ${item.badgeTone || "gs-badge-gray"}`}>{item.badge}</span>}
+                        </button>
+                        <button type="button" className={`gs-pin${isPinned ? " pinned" : ""}`} onClick={() => togglePin(item)} aria-label={isPinned ? "إلغاء التثبيت" : "تثبيت"}><Star size={15} /></button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductDrawer({ open, onClose, product, orders, setView }: {
+  open: boolean;
+  onClose: () => void;
+  product: Product | null;
+  orders: Order[];
+  setView: (view: View) => void;
+}) {
+  const related = useMemo(() => {
+    if (!product) return [];
+    const name = product.name;
+    return orders.filter((order) => order.productId === product.id || order.productName === name || order.order_type === name || (order.items || []).some((item) => item.product_name === name));
+  }, [product, orders]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    document.body.style.overflow = open ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  if (!open || !product) return null;
+
+  return (
+    <>
+      <div className="cd-overlay" onClick={onClose} aria-hidden="true" />
+      <div className={`cd-drawer od-drawer${open ? " cd-open" : ""}`} role="dialog" aria-modal="true" aria-label={`تفاصيل المنتج ${product.name}`} tabIndex={-1}>
+        <button className="cd-close" onClick={onClose} aria-label="إغلاق"><X size={20} /></button>
+        <div className="od-header">
+          <div className="od-header-top">
+            <div>
+              <h2 className="od-order-num">{product.name}</h2>
+              <div className="od-badges">
+                <span className={product.active === false ? "badge badge-red" : "badge badge-green"}>{product.active === false ? "غير نشط" : "نشط"}</span>
+                {product.quality && <span className="badge badge-blue">{product.quality}</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+        {(product.productImage || product.logoImage) && (
+          <div className="pd-images">
+            {product.productImage && <div className="pd-image"><img src={product.productImage} alt={product.name} /></div>}
+            {product.logoImage && <div className="pd-image"><img src={product.logoImage} alt="لوجو" /></div>}
+          </div>
+        )}
+        <div className="cd-section">
+          <h3 className="cd-section-title"><PackagePlus size={16} /> تفاصيل المنتج</h3>
+          <div className="cd-info-grid">
+            {product.details && <div className="cd-info-row"><span className="cd-info-label">الوصف</span><span>{product.details}</span></div>}
+            {product.logoPlacement && <div className="cd-info-row"><span className="cd-info-label">مكان اللوجو</span><span>{product.logoPlacement}</span></div>}
+            {(product.defaultPrice ?? product.price) != null && <div className="cd-info-row"><span className="cd-info-label">السعر الافتراضي</span><span>{formatMoney(Number(product.defaultPrice ?? product.price ?? 0))}</span></div>}
+            {product.defaultQuantity != null && <div className="cd-info-row"><span className="cd-info-label">الكمية الافتراضية</span><span>{product.defaultQuantity}</span></div>}
+            {product.materials?.length ? <div className="cd-info-row"><span className="cd-info-label">الخامات</span><span>{product.materials.join("، ")}</span></div> : null}
+            <div className="cd-info-row"><span className="cd-info-label">عدد الأوردرات</span><span>{related.length}</span></div>
+          </div>
+        </div>
+        {related.length > 0 && (
+          <div className="cd-section">
+            <h3 className="cd-section-title"><ClipboardList size={16} /> أوردرات تستخدم هذا المنتج ({related.length})</h3>
+            <div className="pd-orders">
+              {related.slice(0, 10).map((order) => (
+                <div key={order.id} className="pd-order">
+                  <span className="pd-order-num">#{order.order_number || "بدون رقم"}</span>
+                  <span className="pd-order-client">{order.client_name}</span>
+                  <span className={listBadgeClass(order.order_status)}>{order.order_status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="cd-section cd-actions">
+          <button className="cd-action-btn cd-action-primary" onClick={() => { onClose(); setView("addProduct"); }}><Plus size={14} /> تعديل المنتج</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function UserDrawer({ open, onClose, user, orders }: {
+  open: boolean;
+  onClose: () => void;
+  user: SearchableUser | null;
+  orders: Order[];
+}) {
+  const activity = useMemo(() => {
+    if (!user) return [];
+    return loadAudit().filter((entry) => entry.user_email === user.email).slice(0, 15);
+  }, [user]);
+  const createdOrders = useMemo(() => (user ? orders.filter((order) => order.created_by === user.email) : []), [user, orders]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    document.body.style.overflow = open ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [open]);
+
+  if (!open || !user) return null;
+
+  const initials = (user.fullName || user.username || "؟").split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+
+  return (
+    <>
+      <div className="cd-overlay" onClick={onClose} aria-hidden="true" />
+      <div className={`cd-drawer od-drawer${open ? " cd-open" : ""}`} role="dialog" aria-modal="true" aria-label={`الملف الشخصي ${user.fullName}`} tabIndex={-1}>
+        <button className="cd-close" onClick={onClose} aria-label="إغلاق"><X size={20} /></button>
+        <div className="od-header ud-header">
+          <div className="ud-avatar">{initials}</div>
+          <div className="od-header-top">
+            <div>
+              <h2 className="od-order-num">{user.fullName || user.username}</h2>
+              <div className="od-badges">
+                <span className="badge badge-blue">{user.role}</span>
+                <span className={user.status === "inactive" ? "badge badge-red" : "badge badge-green"}>{user.status === "inactive" ? "غير نشط" : "نشط"}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="cd-section">
+          <h3 className="cd-section-title"><User size={16} /> المعلومات</h3>
+          <div className="cd-info-grid">
+            {user.username && <div className="cd-info-row"><span className="cd-info-label">اسم المستخدم</span><span>{user.username}</span></div>}
+            {user.email && <div className="cd-info-row"><Mail size={14} /><span>{user.email}</span><button className="cd-copy-btn" onClick={() => navigator.clipboard.writeText(user.email).catch(() => {})} title="نسخ"><Copy size={12} /></button></div>}
+            <div className="cd-info-row"><span className="cd-info-label">الدور</span><span>{user.role}</span></div>
+            {user.lastLoginAt && <div className="cd-info-row"><span className="cd-info-label">آخر تسجيل دخول</span><span>{formatDateTimeEnglish(user.lastLoginAt)}</span></div>}
+            <div className="cd-info-row"><span className="cd-info-label">أوردرات أنشأها</span><span>{createdOrders.length}</span></div>
+          </div>
+        </div>
+        {createdOrders.length > 0 && (
+          <div className="cd-section">
+            <h3 className="cd-section-title"><ClipboardList size={16} /> آخر أوردرات أنشأها ({createdOrders.length})</h3>
+            <div className="pd-orders">
+              {createdOrders.slice(0, 8).map((order) => (
+                <div key={order.id} className="pd-order">
+                  <span className="pd-order-num">#{order.order_number || "بدون رقم"}</span>
+                  <span className="pd-order-client">{order.client_name}</span>
+                  <span className={listBadgeClass(order.order_status)}>{order.order_status}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {activity.length > 0 && (
+          <div className="cd-section">
+            <h3 className="cd-section-title"><ClipboardList size={16} /> سجل النشاطات ({activity.length})</h3>
+            <div className="od-activity-list">
+              {activity.map((entry) => (
+                <div key={entry.id} className="od-activity-item">
+                  <div className="od-activity-dot" />
+                  <div className="od-activity-content">
+                    <span className="od-activity-action">{entry.action}</span>
+                    <span className="od-activity-meta">{entry.entity_type} &middot; {formatDateTimeEnglish(entry.created_at)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function OrdersListRow({ order, onCustomerClick, onOrderClick }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
   const operationStatus = normalizedOperationStatus(order.operation_status);
   const finishingStatus = normalizedFinishingStatus(order.finishing_status);
@@ -3522,10 +4241,6 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
   );
 }
 
-function SearchPage({ orders, setOrders, session, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
-  return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />;
-}
-
 function FinancePage({ session }: { session: Session }) {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [account, setAccount] = useState("");
@@ -4659,6 +5374,8 @@ function ZunionApp() {
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
+  const [productDrawer, setProductDrawer] = useState<Product | null>(null);
+  const [userDrawer, setUserDrawer] = useState<SearchableUser | null>(null);
   const logoClickRef = useRef({ count: 0, firstClickAt: 0 });
   const { orders, setOrders } = useOrders(session);
   const orderDrawerOrder = useMemo(() => orderDrawerOrderNumber ? orders.find((o) => o.order_number === orderDrawerOrderNumber) || null : null, [orderDrawerOrderNumber, orders]);
@@ -4723,7 +5440,7 @@ function ZunionApp() {
         label: "الرئيسية",
         icon: ClipboardList,
         items: [
-          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
+          { id: "search", label: "البحث الشامل", visible: can("search.use") || can("orders.view"), icon: Search },
           { id: "new", label: "أوردر جديد", visible: can("orders.create"), icon: FilePlus },
           { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
           { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
@@ -4734,7 +5451,7 @@ function ZunionApp() {
         label: "بحث",
         icon: Search,
         items: [
-          { id: "search", label: "بحث", visible: can("search.use") || can("orders.view"), icon: Search },
+          { id: "search", label: "البحث الشامل", visible: can("search.use") || can("orders.view"), icon: Search },
           { id: "customers", label: "العملاء", visible: can("customers.view"), icon: Users },
         ],
       },
@@ -4887,11 +5604,21 @@ function ZunionApp() {
             </section>
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
-           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
+          {(view === "orders" || view === "search") && (
+            <GlobalSearchCenter
+              orders={orders}
+              customers={customers}
+              products={products}
+              session={session}
+              onOrderClick={(num) => setOrderDrawerOrderNumber(num)}
+              onCustomerClick={(code, name) => setCustomerDrawer({ code, name })}
+              onProductClick={(product) => setProductDrawer(product)}
+              onUserClick={(user) => setUserDrawer(user)}
+            />
+          )}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onCancel={() => setView("search")} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
-           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
            {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
            {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
@@ -4906,6 +5633,8 @@ function ZunionApp() {
       </main>
       <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={setView} />
       <OrderDetailsDrawer open={!!orderDrawerOrder} onClose={() => setOrderDrawerOrderNumber(null)} order={orderDrawerOrder} customers={customers} setOrders={setOrders} session={session} setView={setView} onCustomerClick={(code, name) => { setOrderDrawerOrderNumber(null); setCustomerDrawer({ code, name }); }} />
+      <ProductDrawer open={!!productDrawer} onClose={() => setProductDrawer(null)} product={productDrawer} orders={orders} setView={setView} />
+      <UserDrawer open={!!userDrawer} onClose={() => setUserDrawer(null)} user={userDrawer} orders={orders} />
     </div>
   );
 }
