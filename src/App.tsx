@@ -2490,11 +2490,13 @@ function orderSearchFields(order: Order, customer?: Customer): string[] {
   return searchText(
     order.order_number, order.client_name, order.client_code, order.phone,
     order.source_person, order.created_by, order.order_type, order.productName,
+    order.customParty, order.paymentMethod, order.materialsStatus,
     order.delivery_date, order.order_status, order.operation_status, order.finishing_status,
     order.workStage, order.workflow_stage, order.notes, order.internal_notes,
     order.production_notes, order.finishing_notes, order.quality_notes, order.client_message, order.details,
+    order.logo_place,
     customer?.email, customer?.address,
-    ...(order.items || []).map((item) => item.product_name),
+    ...(order.items || []).map((item) => [item.product_name, item.details, item.quality, item.logo_place]).flat(),
   );
 }
 function orderSearchItem(order: Order, customer?: Customer): SearchResultItem {
@@ -2569,7 +2571,7 @@ function localSearchAll(q: string, orders: Order[], customers: Customer[], produ
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
   const productMatches = products
-    .map((product) => ({ score: scoreMatch(searchText(product.name, product.details, product.quality, product.status, product.logoPlacement, ...(product.materials || [])), needle), product }))
+    .map((product) => ({ score: scoreMatch(searchText(product.name, product.id, product.details, product.quality, product.status, product.logoPlacement, ...(product.materials || []), ...(product.operationMethods || [])), needle), product }))
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
   const userMatches = users
@@ -2604,6 +2606,24 @@ function mapServerResults(result: SearchApiResponse, customers: Customer[]) {
   };
 }
 
+function highlightText(text: string, q: string): React.ReactNode {
+  const needle = (q || "").trim().toLowerCase();
+  if (!needle || !text) return text;
+  const hay = String(text);
+  const lower = hay.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let index = 0;
+  for (;;) {
+    const pos = lower.indexOf(needle, index);
+    if (pos === -1) break;
+    if (pos > index) parts.push(hay.slice(index, pos));
+    parts.push(<mark className="gs-mark" key={pos}>{hay.slice(pos, pos + needle.length)}</mark>);
+    index = pos + needle.length;
+  }
+  if (index < hay.length) parts.push(hay.slice(index));
+  return parts.length > 0 ? parts : hay;
+}
+
 function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomerClick, onProductClick, onUserClick }: {
   orders: Order[];
   customers: Customer[];
@@ -2625,10 +2645,13 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
   const wrapRef = useRef<HTMLDivElement>(null);
   const localCacheRef = useRef<{ groups: SearchGroups; totals: SearchTotals } | null>(null);
   const debounceRef = useRef<number | null>(null);
+  const querySeqRef = useRef(0);
 
   const users = useMemo<SearchableUser[]>(() => loadManagedUsers().map(managedToSearchable), []);
   const pinnedSet = useMemo(() => new Set(loadPinnedItems().map((item) => gsKeyOf(item))), [query, pinnedVersion]);
   const recentSearches = loadRecentSearches();
+  const recentOrders = loadRecentOrders();
+  const recentCustomers = loadRecentCustomers();
   const pinned = loadPinnedItems();
 
   useEffect(() => {
@@ -2643,12 +2666,14 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
   useEffect(() => {
     const q = query.trim();
     if (!q) {
+      querySeqRef.current += 1;
       setLoading(false);
       setGroups(EMPTY_SEARCH_GROUPS);
       setTotals({ order: 0, customer: 0, product: 0, user: 0 });
       setActiveIndex(-1);
       return;
     }
+    const seq = ++querySeqRef.current;
     setActiveIndex(-1);
     setLoading(true);
     const local = localSearchAll(q, orders, customers, products, users);
@@ -2657,6 +2682,7 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
     setTotals(local.totals);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
+      if (seq !== querySeqRef.current) return;
       const cached = searchCacheGet(q);
       if (cached) {
         const server = mapServerResults(cached as SearchApiResponse, customers);
@@ -2669,6 +2695,7 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
       }
       backendJson<SearchApiResponse>(`/api/search?q=${encodeURIComponent(q)}`)
         .then((result) => {
+          if (seq !== querySeqRef.current) return;
           const server = mapServerResults(result, customers);
           if (server) {
             searchCacheSet(q, result);
@@ -2677,7 +2704,7 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
           }
         })
         .catch(() => { /* backend unavailable -> keep local results */ })
-        .finally(() => setLoading(false));
+        .finally(() => { if (seq === querySeqRef.current) setLoading(false); });
     }, 300);
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
@@ -2757,10 +2784,10 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
       setActiveIndex((current) => (flatItems.length ? Math.max(0, current - 1) : -1));
     } else if (event.key === "Enter") {
       if (activeIndex >= 0 && flatItems[activeIndex]) openItem(flatItems[activeIndex]);
-    } else if (event.key === "Escape") {
+    } else if (event.key === "Escape" || event.key === "Tab") {
       setOpen(false);
       setActiveIndex(-1);
-      inputRef.current?.blur();
+      if (event.key === "Escape") inputRef.current?.blur();
     }
   }
 
@@ -2770,55 +2797,88 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
   return (
     <div className="gs-bar" ref={wrapRef}>
       <div className={`gs-bar-input${open ? " focused" : ""}`}>
-        <Search size={17} className="gs-bar-icon" />
+        <Search size={19} className="gs-bar-icon" />
         <input
           ref={inputRef}
           className="gs-input"
           id="gs-search-input"
           type="text"
           value={query}
-          placeholder="ابحث... أوردر، عميل، هاتف، منتج"
+          placeholder="ابحث في الأوردرات، العملاء، المنتجات، المستخدمين..."
           onFocus={() => setOpen(true)}
           onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
           onKeyDown={onKeyDown}
           aria-label="البحث الشامل"
+          autoComplete="off"
+          spellCheck={false}
         />
-        {loading && <Loader2 size={15} className="gs-spinner" />}
-        {query && !loading && <button className="gs-clear" type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} aria-label="مسح البحث"><X size={14} /></button>}
+        {loading && <Loader2 size={16} className="gs-spinner" />}
+        {query && !loading && <button className="gs-clear" type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} aria-label="مسح البحث"><X size={15} /></button>}
       </div>
 
       {open && (
         <div className="gs-dropdown" ref={resultsRef}>
           {showEmpty ? (
             <div className="gs-empty">
-              {recentSearches.length > 0 && (
+              <div className="gs-empty-grid">
                 <div className="gs-empty-section">
                   <h3><Clock size={13} /> البحثات الأخيرة</h3>
-                  <div className="gs-chips">
-                    {recentSearches.map((item) => <button key={item} type="button" className="gs-chip" onClick={() => { setQuery(item); inputRef.current?.focus(); }}>{item}</button>)}
-                  </div>
+                  {recentSearches.length ? (
+                    <div className="gs-chips">
+                      {recentSearches.map((item) => <button key={item} type="button" className="gs-chip" onClick={() => { setQuery(item); inputRef.current?.focus(); }}><Search size={12} /> {item}</button>)}
+                    </div>
+                  ) : <p className="gs-empty-note">لا توجد بحثات سابقة بعد</p>}
                 </div>
-              )}
-              {pinned.length > 0 && (
                 <div className="gs-empty-section">
                   <h3><Star size={13} /> عناصر مثبتة</h3>
-                  <ul className="gs-recent gs-pinned">
-                    {pinned.slice(0, 6).map((item) => {
-                      const resolved = resolvePinned(item);
-                      return (
-                        <li key={gsKeyOf(item)}>
-                          <button type="button" onClick={() => { if (resolved) openItem(resolved); else setOpen(false); }}>
-                            <span className="gs-recent-name">{item.title}</span>
-                            <span className="gs-recent-sub">{item.subtitle || item.kind}</span>
-                          </button>
-                          <button className="gs-unpin" type="button" aria-label="إزالة التثبيت" onClick={() => togglePin(resolved || ({ kind: item.kind, id: item.id, title: item.title, subtitle: item.subtitle } as SearchResultItem))}><X size={12} /></button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  {pinned.length ? (
+                    <ul className="gs-recent gs-pinned">
+                      {pinned.slice(0, 5).map((item) => {
+                        const resolved = resolvePinned(item);
+                        return (
+                          <li key={gsKeyOf(item)}>
+                            <button type="button" onClick={() => { if (resolved) openItem(resolved); else setOpen(false); }}>
+                              <span className="gs-recent-name">{item.title}</span>
+                              <span className="gs-recent-sub">{item.subtitle || item.kind}</span>
+                            </button>
+                            <button className="gs-unpin" type="button" aria-label="إزالة التثبيت" onClick={() => togglePin(resolved || ({ kind: item.kind, id: item.id, title: item.title, subtitle: item.subtitle } as SearchResultItem))}><X size={12} /></button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : <p className="gs-empty-note">ثبّت العناصر المهمة من نتائج البحث للوصول السريع إليها</p>}
                 </div>
-              )}
-              {recentSearches.length === 0 && pinned.length === 0 && <p className="gs-empty-note">اكتب للبحث في الأوردرات والعملاء والمنتجات والمستخدمين</p>}
+                <div className="gs-empty-section">
+                  <h3><ClipboardList size={13} /> آخر الأوردرات المفتوحة</h3>
+                  {recentOrders.length ? (
+                    <ul className="gs-recent">
+                      {recentOrders.map((entry) => (
+                        <li key={entry.order_number}>
+                          <button type="button" onClick={() => onOrderClick(entry.order_number)}>
+                            <span className="gs-recent-num">#{entry.order_number}</span>
+                            <span className="gs-recent-sub">{entry.client_name}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="gs-empty-note">لا يوجد</p>}
+                </div>
+                <div className="gs-empty-section">
+                  <h3><Users size={13} /> عملاء تم عرضهم مؤخراً</h3>
+                  {recentCustomers.length ? (
+                    <ul className="gs-recent">
+                      {recentCustomers.map((entry) => (
+                        <li key={entry.code}>
+                          <button type="button" onClick={() => onCustomerClick(entry.code, entry.name)}>
+                            <span className="gs-recent-name">{entry.name}</span>
+                            <span className="gs-recent-sub">C-{entry.code}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="gs-empty-note">لا يوجد</p>}
+                </div>
+              </div>
             </div>
           ) : (
             <>
@@ -2847,10 +2907,10 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
                         return (
                           <li key={key} className={`gs-result${isActive ? " active" : ""}`} data-gs-index={index >= 0 ? index : undefined}>
                             <button type="button" className="gs-result-main" onClick={() => openItem(item)} onMouseEnter={() => index >= 0 && setActiveIndex(index)}>
-                              <span className="gs-result-icon"><ItemIcon size={14} /></span>
+                              <span className="gs-result-icon"><ItemIcon size={15} /></span>
                               <span className="gs-result-body">
-                                <span className="gs-result-title">{item.title}</span>
-                                {item.subtitle && <span className="gs-result-subtitle">{item.subtitle}</span>}
+                                <span className="gs-result-title">{highlightText(item.title, query)}</span>
+                                {item.subtitle && <span className="gs-result-subtitle">{highlightText(item.subtitle, query)}</span>}
                               </span>
                               {item.badge && <span className={`gs-result-badge ${item.badgeTone || "gs-badge-gray"}`}>{item.badge}</span>}
                             </button>
@@ -2864,6 +2924,11 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
               })}
             </>
           )}
+          <div className="gs-footer">
+            <span className="gs-footer-hint"><kbd>↑</kbd><kbd>↓</kbd> للتنقل</span>
+            <span className="gs-footer-hint"><kbd>Enter</kbd> للفتح</span>
+            <span className="gs-footer-hint"><kbd>Esc</kbd> للإغلاق</span>
+          </div>
         </div>
       )}
     </div>
@@ -3868,15 +3933,9 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("");
-  const [date, setDate] = useState("");
-  const [source, setSource] = useState("");
-  const [qualityOnly, setQualityOnly] = useState(false);
   const [editing, setEditing] = useState<Order | null>(null);
   const [page, setPage] = useState(1);
   const [dateSort, setDateSort] = useState<"none" | "asc" | "desc">("none");
-  const canPrintOrders = hasPermission(session, queue === "worker" ? "operation.print" : queue === "finish" ? "finishing.print" : "orders.print");
 
   function renderOrdersListHeaders() {
     return ordersListHeaders.map((head) => (
@@ -3908,13 +3967,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   if (queue && remoteOps && remoteOps.orders.length > 0 && orders.length === 0) {
     if (remoteLoading) return <LoadingPanel />;
     if (remoteError || !remoteOps) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
-    const filteredRemote = remoteOps.orders.filter((order) => {
-      const text = `${order.order_number || ""} ${orderClientName(order)} ${order.phone || ""} ${order.service_type || order.order_type || ""} ${orderCreatedBy(order)}`.toLowerCase();
-      return (!query || text.includes(query.toLowerCase()))
-        && (!status || [order.operation_status, order.finishing_status, order.delivery_status].includes(status))
-        && (!date || order.delivery_date === date);
-    });
-    const sortedRemote = dateSort === "none" ? filteredRemote : [...filteredRemote].sort((a, b) => {
+    const sortedRemote = dateSort === "none" ? remoteOps.orders : [...remoteOps.orders].sort((a, b) => {
       const first = new Date(String(a.delivery_date || "")).getTime() || 0;
       const second = new Date(String(b.delivery_date || "")).getTime() || 0;
       return dateSort === "asc" ? first - second : second - first;
@@ -3928,13 +3981,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
           <StatCard title="قيد التشطيب" value={formatNumber(remoteOps.inFinishing)} />
           <StatCard title="جاهز للإرسال" value={formatNumber(remoteOps.readyToSend)} />
           <StatCard title="تسليم اليوم" value={formatNumber(remoteOps.deliveryToday)} />
-        </section>
-        <section className="panel filters">
-          <Field label="تاريخ التسليم" type="date" value={date} onChange={setDate} />
-          <Field label="رقم الأوردر" value={query} onChange={setQuery} />
-          <Select label="الحالة" value={status} options={["", "قيد التشغيل", "قيد التشطيب", "جاهز للإرسال", "مكتمل", "جديدة"]} onChange={setStatus} />
-          <button className="primary-btn" onClick={() => setPage(1)}>بحث</button>
-          <button className="ghost-btn" onClick={() => { setQuery(""); setStatus(""); setDate(""); }}>مسح الفلاتر</button>
         </section>
         <section className="table-wrap accounts-table orders-list-table-wrap"><table className="orders-list-table"><thead><tr>{renderOrdersListHeaders()}</tr></thead><tbody>
           {visibleRemote.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
@@ -3952,26 +3998,16 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   }, [orders, queue, session.role]);
 
   const filtered = useMemo(() => {
-    const rows = baseOrders.filter((order) => {
-    const products = [order.order_type, ...(order.items || []).map((item) => `${item.product_name} ${item.details}`)].join(" ");
-    const text = `${order.order_number} ${order.client_name} ${order.client_code} ${order.phone} ${order.source_person} ${order.created_by} ${products}`.toLowerCase();
-    return (!query || text.includes(query.toLowerCase()))
-      && (!status || order.order_status === status)
-      && (!date || order.delivery_date === date)
-      && (!source || order.source_person === source)
-      && (!qualityOnly || Boolean(order.quality_notes.trim()) || order.order_status === "مشكلة جودة");
-    });
-    if (dateSort === "none") return rows;
-    return [...rows].sort((a, b) => {
+    if (dateSort === "none") return baseOrders;
+    return [...baseOrders].sort((a, b) => {
       const first = new Date(a.delivery_date || "").getTime() || 0;
       const second = new Date(b.delivery_date || "").getTime() || 0;
       return dateSort === "asc" ? first - second : second - first;
     });
-  }, [baseOrders, query, status, date, source, qualityOnly, dateSort]);
+  }, [baseOrders, dateSort]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / 8));
   const visible = filtered.slice((page - 1) * 8, page * 8);
-  const sources = Array.from(new Set(baseOrders.map((order) => order.source_person).filter(Boolean)));
 
   function save(order: Order) {
     const previous = orders.find((item) => item.id === order.id);
@@ -3999,24 +4035,9 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     addAudit(session, "ORDER_DELETED", "orders", id);
   }
 
-  function printAllOrders() {
-    addAudit(session, "ORDERS_PRINTED", "orders", undefined, undefined, { count: filtered.length });
-    printDocument("طباعة كل الأوردرات", printableTable([...ordersListHeaders], filtered.map(ordersListPrintRow)), session, "landscape");
-  }
-
   return (
     <div className="stack">
       {editing && <OrderForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
-      <section className="panel">
-        <div className="panel-head"><h2>متابعة الأوردرات</h2>{canPrintOrders && <button className="ghost-btn compact" type="button" onClick={printAllOrders}>طباعة الكل</button>}</div>
-        <div className="filters">
-          <input placeholder="بحث بالهاتف / رقم الأوردر / اسم العميل" value={query} onChange={(event) => setQuery(event.target.value)} />
-          <select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">كل الحالات</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select>
-          <input className={`date-input ${date ? "has-value" : "empty"}`} type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          <select value={source} onChange={(event) => setSource(event.target.value)}><option value="">كل الأطراف</option>{sources.map((item) => <option key={item}>{item}</option>)}</select>
-          <label className="check"><input type="checkbox" checked={qualityOnly} onChange={(event) => setQualityOnly(event.target.checked)} /> مشاكل جودة</label>
-        </div>
-      </section>
       <section className="table-wrap orders-list-table-wrap">
         <table className="orders-list-table">
           <thead>
@@ -5555,7 +5576,7 @@ function ZunionApp() {
       <main className="content">
         <header className="topbar">
           <button type="button" className="hamburger-btn" aria-label="فتح القائمة" onClick={() => setDrawerOpen(true)}><Menu size={24} /></button>
-          <div>
+          <div className="topbar-title">
             <h1>نظام Zunion لإدارة الأوردرات</h1>
             <p>{session.fullName || session.username ? `${session.fullName || session.username} - ${session.role}` : <><EmailText email={session.email} className="account-email" /> - {session.role}</>}</p>
           </div>
