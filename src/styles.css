@@ -4437,35 +4437,33 @@ input[type="date"] {
 }
 
 /* ── Global Search Center (gs-) ─────────────────────────────────────────── */
-.gs-page {
-  padding: 28px 0 60px;
+.gs-bar {
+  position: relative;
+  width: clamp(240px, 20vw, 360px);
+  flex: 0 1 auto;
+  min-width: 0;
+  z-index: 40;
 }
-.gs-search-wrap {
-  max-width: 560px;
-}
-.gs-search {
-  position: sticky;
-  top: 16px;
-  z-index: 20;
+.gs-bar-input {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  height: 42px;
+  padding: 0 8px 0 14px;
   background: linear-gradient(135deg, #E30613, #b30510);
   border: 1px solid rgba(255,255,255,.18);
   border-radius: 999px;
-  padding: 14px 20px;
-  box-shadow: 0 10px 30px rgba(227,6,19,.28), 0 2px 8px rgba(0,0,0,.12);
-  transition: box-shadow .2s ease, transform .2s ease;
+  box-shadow: 0 6px 18px rgba(227,6,19,.25), 0 1px 4px rgba(0,0,0,.1);
+  transition: box-shadow .2s ease;
 }
-.gs-search:focus-within {
-  box-shadow: 0 14px 40px rgba(227,6,19,.4), 0 2px 8px rgba(0,0,0,.14);
-  transform: translateY(-1px);
+.gs-bar-input.focused {
+  box-shadow: 0 10px 26px rgba(227,6,19,.38), 0 1px 4px rgba(0,0,0,.12);
 }
-.gs-search-icon {
+.gs-bar-icon {
   color: #fff;
   flex-shrink: 0;
+  margin-inline-start: 6px;
 }
-.gs-search .gs-input,
 #gs-search-input {
   flex: 1;
   min-width: 0;
@@ -4473,16 +4471,14 @@ input[type="date"] {
   border: none;
   outline: none;
   color: #fff !important;
-  font-size: 15px !important;
+  font-size: 14px !important;
   min-height: 0 !important;
   height: auto !important;
   font-family: inherit;
 }
-.gs-search .gs-input::-moz-placeholder,
 #gs-search-input::-moz-placeholder {
   color: rgba(255,255,255,.75) !important;
 }
-.gs-search .gs-input::placeholder,
 #gs-search-input::placeholder {
   color: rgba(255,255,255,.75) !important;
 }
@@ -4495,8 +4491,8 @@ input[type="date"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: 50%;
   background: rgba(255,255,255,.2);
@@ -4508,16 +4504,23 @@ input[type="date"] {
 .gs-clear:hover {
   background: rgba(255,255,255,.34);
 }
-.gs-hint {
-  margin: 12px 4px 0;
-  color: var(--muted);
-  font-size: 13px;
+.gs-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  width: min(560px, calc(100vw - 48px));
+  max-height: min(640px, calc(100vh - 130px));
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(6,31,59,.18), 0 4px 14px rgba(0,0,0,.08);
+  padding: 14px;
 }
 .gs-empty {
-  margin-top: 22px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 .gs-empty-section h3 {
   display: flex;
@@ -4635,34 +4638,33 @@ input[type="date"] {
   border-style: dashed;
 }
 .gs-results {
-  margin-top: 20px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 .gs-no-results {
-  padding: 40px 20px;
+  padding: 28px 12px;
   text-align: center;
   color: var(--muted);
   font-size: 14px;
   background: var(--panel);
   border: 1px dashed var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
 }
 .gs-group {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 2px 10px rgba(0,0,0,.04);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  box-shadow: none;
 }
 .gs-group-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 6px 6px 8px;
   border-bottom: 1px solid var(--line);
-  background: rgba(0,0,0,.015);
+  background: transparent;
 }
 .gs-group-icon {
   display: flex;
@@ -4701,13 +4703,13 @@ input[type="date"] {
 .gs-list {
   list-style: none;
   margin: 0;
-  padding: 4px 0;
+  padding: 4px 0 0;
 }
 .gs-result {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 16px;
+  padding: 0 6px;
 }
 .gs-result.active {
   background: rgba(227,6,19,.06);
@@ -4881,13 +4883,17 @@ input[type="date"] {
   font-weight: 700;
   flex-shrink: 0;
 }
-@media (max-width: 640px) {
-  .gs-search {
-    top: 8px;
-    padding: 12px 16px;
+@media (max-width: 700px) {
+  .topbar {
+    flex-wrap: wrap;
   }
-  .gs-page {
-    padding: 16px 0 40px;
+  .gs-bar {
+    flex: 1 0 100%;
+    width: auto;
+  }
+  .gs-dropdown {
+    width: calc(100vw - 28px);
+    max-width: none;
   }
   .pd-image {
     width: 90px;

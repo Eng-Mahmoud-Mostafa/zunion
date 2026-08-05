@@ -2604,34 +2604,41 @@ function mapServerResults(result: SearchApiResponse, customers: Customer[]) {
   };
 }
 
-function GlobalSearchCenter({ orders, customers, products, session, onOrderClick, onCustomerClick, onProductClick, onUserClick }: {
+function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomerClick, onProductClick, onUserClick }: {
   orders: Order[];
   customers: Customer[];
   products: Product[];
-  session: Session;
   onOrderClick: (orderNumber: string) => void;
   onCustomerClick: (code: string, name: string) => void;
   onProductClick: (product: Product) => void;
   onUserClick: (user: SearchableUser) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
   const [groups, setGroups] = useState<SearchGroups>(EMPTY_SEARCH_GROUPS);
   const [totals, setTotals] = useState<SearchTotals>({ order: 0, customer: 0, product: 0, user: 0 });
   const [loading, setLoading] = useState(false);
-  const [expanded, setExpanded] = useState<Partial<Record<SearchKind, boolean>>>({});
   const [activeIndex, setActiveIndex] = useState(-1);
-  const [hasSearched, setHasSearched] = useState(false);
   const [pinnedVersion, setPinnedVersion] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const localCacheRef = useRef<{ groups: SearchGroups; totals: SearchTotals } | null>(null);
   const debounceRef = useRef<number | null>(null);
 
   const users = useMemo<SearchableUser[]>(() => loadManagedUsers().map(managedToSearchable), []);
   const pinnedSet = useMemo(() => new Set(loadPinnedItems().map((item) => gsKeyOf(item))), [query, pinnedVersion]);
   const recentSearches = loadRecentSearches();
-  const recentOrders = loadRecentOrders();
-  const recentCustomers = loadRecentCustomers();
+  const pinned = loadPinnedItems();
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
 
   useEffect(() => {
     const q = query.trim();
@@ -2639,13 +2646,10 @@ function GlobalSearchCenter({ orders, customers, products, session, onOrderClick
       setLoading(false);
       setGroups(EMPTY_SEARCH_GROUPS);
       setTotals({ order: 0, customer: 0, product: 0, user: 0 });
-      setExpanded({});
       setActiveIndex(-1);
-      setHasSearched(false);
       return;
     }
     setActiveIndex(-1);
-    setHasSearched(true);
     setLoading(true);
     const local = localSearchAll(q, orders, customers, products, users);
     localCacheRef.current = { groups: local.groups, totals: local.totals };
@@ -2683,12 +2687,10 @@ function GlobalSearchCenter({ orders, customers, products, session, onOrderClick
   const flatItems = useMemo(() => {
     const list: SearchResultItem[] = [];
     for (const section of searchSections) {
-      const full = localCacheRef.current?.groups ? localCacheRef.current.groups[groupKeyOf(section.kind)] : [];
-      const shown = expanded[section.kind] ? full : groups[groupKeyOf(section.kind)].slice(0, 10);
-      list.push(...shown);
+      list.push(...groups[groupKeyOf(section.kind)].slice(0, 5));
     }
     return list;
-  }, [groups, expanded]);
+  }, [groups]);
   const flatIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     flatItems.forEach((item, index) => map.set(gsKeyOf(item), index));
@@ -2702,6 +2704,8 @@ function GlobalSearchCenter({ orders, customers, products, session, onOrderClick
 
   function openItem(item: SearchResultItem) {
     if (query.trim()) addRecentSearch(query);
+    setOpen(false);
+    setActiveIndex(-1);
     if (item.kind === "order" && item.order) {
       addRecentOrder({ order_number: item.order.order_number, client_name: item.order.client_name, created_at: new Date().toISOString() });
       onOrderClick(item.order.order_number);
@@ -2743,6 +2747,10 @@ function GlobalSearchCenter({ orders, customers, products, session, onOrderClick
   function onKeyDown(event: React.KeyboardEvent) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
+      if (!open) {
+        setOpen(true);
+        return;
+      }
       setActiveIndex((current) => (flatItems.length ? Math.min(flatItems.length - 1, current + 1) : -1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
@@ -2750,144 +2758,112 @@ function GlobalSearchCenter({ orders, customers, products, session, onOrderClick
     } else if (event.key === "Enter") {
       if (activeIndex >= 0 && flatItems[activeIndex]) openItem(flatItems[activeIndex]);
     } else if (event.key === "Escape") {
-      setQuery("");
+      setOpen(false);
       setActiveIndex(-1);
       inputRef.current?.blur();
     }
   }
 
   const totalResults = totals.order + totals.customer + totals.product + totals.user;
-  const pinned = loadPinnedItems();
   const showEmpty = !query.trim();
 
   return (
-    <div className="gs-page">
-      <div className="gs-search-wrap">
-        <div className={`gs-search${loading ? " gs-loading" : ""}`}>
-          <Search size={22} className="gs-search-icon" />
-          <input
-            ref={inputRef}
-            className="gs-input"
-            id="gs-search-input"
-            type="text"
-            value={query}
-            placeholder="ابحث عن أي شيء... رقم أوردر، عميل، هاتف، منتج، مستخدم"
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={onKeyDown}
-            aria-label="البحث الشامل"
-            autoFocus
-          />
-          {loading && <Loader2 size={18} className="gs-spinner" />}
-          {query && !loading && <button className="gs-clear" type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} aria-label="مسح البحث"><X size={16} /></button>}
-        </div>
-        {showEmpty && <p className="gs-hint">أدخل أي كلمة للبحث في كل النظام — الأوردرات، العملاء، المنتجات والمستخدمين</p>}
+    <div className="gs-bar" ref={wrapRef}>
+      <div className={`gs-bar-input${open ? " focused" : ""}`}>
+        <Search size={17} className="gs-bar-icon" />
+        <input
+          ref={inputRef}
+          className="gs-input"
+          id="gs-search-input"
+          type="text"
+          value={query}
+          placeholder="ابحث... أوردر، عميل، هاتف، منتج"
+          onFocus={() => setOpen(true)}
+          onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+          onKeyDown={onKeyDown}
+          aria-label="البحث الشامل"
+        />
+        {loading && <Loader2 size={15} className="gs-spinner" />}
+        {query && !loading && <button className="gs-clear" type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} aria-label="مسح البحث"><X size={14} /></button>}
       </div>
 
-      {showEmpty ? (
-        <div className="gs-empty">
-          <div className="gs-empty-section">
-            <h3><Clock size={15} /> البحثات الأخيرة</h3>
-            {recentSearches.length ? (
-              <div className="gs-chips">
-                {recentSearches.map((item) => <button key={item} type="button" className="gs-chip" onClick={() => { setQuery(item); inputRef.current?.focus(); }}><Search size={12} /> {item}</button>)}
-              </div>
-            ) : <p className="gs-empty-note">لا توجد بحثات سابقة بعد</p>}
-          </div>
-          <div className="gs-empty-grid">
-            <div className="gs-empty-section">
-              <h3><ClipboardList size={15} /> آخر الأوردرات المفتوحة</h3>
-              {recentOrders.length ? (
-                <ul className="gs-recent">
-                  {recentOrders.map((entry) => (
-                    <li key={entry.order_number}>
-                      <button type="button" onClick={() => onOrderClick(entry.order_number)}><span className="gs-recent-num">#{entry.order_number}</span><span className="gs-recent-sub">{entry.client_name}</span></button>
-                    </li>
-                  ))}
-                </ul>
-              ) : <p className="gs-empty-note">لا يوجد</p>}
-            </div>
-            <div className="gs-empty-section">
-              <h3><Users size={15} /> عملاء تم عرضهم مؤخراً</h3>
-              {recentCustomers.length ? (
-                <ul className="gs-recent">
-                  {recentCustomers.map((entry) => (
-                    <li key={entry.code}>
-                      <button type="button" onClick={() => onCustomerClick(entry.code, entry.name)}><span className="gs-recent-name">{entry.name}</span><span className="gs-recent-sub">C-{entry.code}</span></button>
-                    </li>
-                  ))}
-                </ul>
-              ) : <p className="gs-empty-note">لا يوجد</p>}
-            </div>
-          </div>
-          <div className="gs-empty-section">
-            <h3><Star size={15} /> عناصر مثبتة</h3>
-            {pinned.length ? (
-              <ul className="gs-recent gs-pinned">
-                {pinned.map((item) => {
-                  const resolved = resolvePinned(item);
-                  return (
-                    <li key={gsKeyOf(item)}>
-                      <button type="button" onClick={() => resolved && openItem(resolved)}>
-                        <span className="gs-recent-name">{item.title}</span>
-                        <span className="gs-recent-sub">{item.subtitle || item.kind}</span>
-                      </button>
-                      <button className="gs-unpin" type="button" aria-label="إزالة التثبيت" onClick={() => togglePin(resolved || ({ kind: item.kind, id: item.id, title: item.title, subtitle: item.subtitle } as SearchResultItem))}><X size={12} /></button>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : <p className="gs-empty-note">ثبّت العناصر المهمة من نتائج البحث للوصول السريع إليها</p>}
-          </div>
-        </div>
-      ) : (
-        <div className="gs-results" ref={resultsRef}>
-          {!loading && totalResults === 0 && <div className="gs-no-results">لا توجد نتائج مطابقة لـ "{query}"</div>}
-          {searchSections.map((section) => {
-            const kind = section.kind;
-            const groupKey = groupKeyOf(kind);
-            const fullCount = totals[kind];
-            const isExpanded = !!expanded[kind];
-            const full = localCacheRef.current?.groups ? localCacheRef.current.groups[groupKey] : groups[groupKey];
-            const shown = isExpanded ? full : groups[groupKey].slice(0, 10);
-            if (shown.length === 0) return null;
-            const Icon = section.icon;
-            return (
-              <div className="gs-group" key={kind}>
-                <div className="gs-group-head">
-                  <span className="gs-group-icon"><Icon size={15} /></span>
-                  <span className="gs-group-label">{section.label}</span>
-                  <span className="gs-group-count">{fullCount}</span>
-                  {fullCount > 10 && (
-                    <button type="button" className="gs-view-all" onClick={() => setExpanded((current) => ({ ...current, [kind]: !current[kind] }))}>
-                      {isExpanded ? "عرض أقل" : `عرض الكل (${fullCount})`}
-                    </button>
-                  )}
+      {open && (
+        <div className="gs-dropdown" ref={resultsRef}>
+          {showEmpty ? (
+            <div className="gs-empty">
+              {recentSearches.length > 0 && (
+                <div className="gs-empty-section">
+                  <h3><Clock size={13} /> البحثات الأخيرة</h3>
+                  <div className="gs-chips">
+                    {recentSearches.map((item) => <button key={item} type="button" className="gs-chip" onClick={() => { setQuery(item); inputRef.current?.focus(); }}>{item}</button>)}
+                  </div>
                 </div>
-                <ul className="gs-list">
-                  {shown.map((item) => {
-                    const key = gsKeyOf(item);
-                    const index = flatIndexMap.get(key) ?? -1;
-                    const isActive = index === activeIndex;
-                    const isPinned = pinnedSet.has(key);
-                    const ItemIcon = section.icon;
-                    return (
-                      <li key={key} className={`gs-result${isActive ? " active" : ""}`} data-gs-index={index >= 0 ? index : undefined}>
-                        <button type="button" className="gs-result-main" onClick={() => openItem(item)} onMouseEnter={() => index >= 0 && setActiveIndex(index)}>
-                          <span className="gs-result-icon"><ItemIcon size={16} /></span>
-                          <span className="gs-result-body">
-                            <span className="gs-result-title">{item.title}</span>
-                            {item.subtitle && <span className="gs-result-subtitle">{item.subtitle}</span>}
-                          </span>
-                          {item.badge && <span className={`gs-result-badge ${item.badgeTone || "gs-badge-gray"}`}>{item.badge}</span>}
-                        </button>
-                        <button type="button" className={`gs-pin${isPinned ? " pinned" : ""}`} onClick={() => togglePin(item)} aria-label={isPinned ? "إلغاء التثبيت" : "تثبيت"}><Star size={15} /></button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })}
+              )}
+              {pinned.length > 0 && (
+                <div className="gs-empty-section">
+                  <h3><Star size={13} /> عناصر مثبتة</h3>
+                  <ul className="gs-recent gs-pinned">
+                    {pinned.slice(0, 6).map((item) => {
+                      const resolved = resolvePinned(item);
+                      return (
+                        <li key={gsKeyOf(item)}>
+                          <button type="button" onClick={() => { if (resolved) openItem(resolved); else setOpen(false); }}>
+                            <span className="gs-recent-name">{item.title}</span>
+                            <span className="gs-recent-sub">{item.subtitle || item.kind}</span>
+                          </button>
+                          <button className="gs-unpin" type="button" aria-label="إزالة التثبيت" onClick={() => togglePin(resolved || ({ kind: item.kind, id: item.id, title: item.title, subtitle: item.subtitle } as SearchResultItem))}><X size={12} /></button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              {recentSearches.length === 0 && pinned.length === 0 && <p className="gs-empty-note">اكتب للبحث في الأوردرات والعملاء والمنتجات والمستخدمين</p>}
+            </div>
+          ) : (
+            <>
+              {!loading && totalResults === 0 && <div className="gs-no-results">لا توجد نتائج مطابقة لـ "{query}"</div>}
+              {searchSections.map((section) => {
+                const kind = section.kind;
+                const groupKey = groupKeyOf(kind);
+                const fullCount = totals[kind];
+                const shown = groups[groupKey].slice(0, 5);
+                if (shown.length === 0) return null;
+                const Icon = section.icon;
+                return (
+                  <div className="gs-group" key={kind}>
+                    <div className="gs-group-head">
+                      <span className="gs-group-icon"><Icon size={13} /></span>
+                      <span className="gs-group-label">{section.label}</span>
+                      <span className="gs-group-count">{fullCount}</span>
+                    </div>
+                    <ul className="gs-list">
+                      {shown.map((item) => {
+                        const key = gsKeyOf(item);
+                        const index = flatIndexMap.get(key) ?? -1;
+                        const isActive = index === activeIndex;
+                        const isPinned = pinnedSet.has(key);
+                        const ItemIcon = section.icon;
+                        return (
+                          <li key={key} className={`gs-result${isActive ? " active" : ""}`} data-gs-index={index >= 0 ? index : undefined}>
+                            <button type="button" className="gs-result-main" onClick={() => openItem(item)} onMouseEnter={() => index >= 0 && setActiveIndex(index)}>
+                              <span className="gs-result-icon"><ItemIcon size={14} /></span>
+                              <span className="gs-result-body">
+                                <span className="gs-result-title">{item.title}</span>
+                                {item.subtitle && <span className="gs-result-subtitle">{item.subtitle}</span>}
+                              </span>
+                              {item.badge && <span className={`gs-result-badge ${item.badgeTone || "gs-badge-gray"}`}>{item.badge}</span>}
+                            </button>
+                            <button type="button" className={`gs-pin${isPinned ? " pinned" : ""}`} onClick={() => togglePin(item)} aria-label={isPinned ? "إلغاء التثبيت" : "تثبيت"}><Star size={14} /></button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -4241,6 +4217,10 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
   );
 }
 
+function SearchPage({ orders, setOrders, session, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
+  return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />;
+}
+
 function FinancePage({ session }: { session: Session }) {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [account, setAccount] = useState("");
@@ -5440,7 +5420,7 @@ function ZunionApp() {
         label: "الرئيسية",
         icon: ClipboardList,
         items: [
-          { id: "search", label: "البحث الشامل", visible: can("search.use") || can("orders.view"), icon: Search },
+          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
           { id: "new", label: "أوردر جديد", visible: can("orders.create"), icon: FilePlus },
           { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
           { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
@@ -5451,7 +5431,7 @@ function ZunionApp() {
         label: "بحث",
         icon: Search,
         items: [
-          { id: "search", label: "البحث الشامل", visible: can("search.use") || can("orders.view"), icon: Search },
+          { id: "search", label: "بحث", visible: can("search.use") || can("orders.view"), icon: Search },
           { id: "customers", label: "العملاء", visible: can("customers.view"), icon: Users },
         ],
       },
@@ -5582,6 +5562,15 @@ function ZunionApp() {
           <button type="button" className="logo-secret-button top-logo-button" aria-label="شعار Zunion" onClick={handleLogoSecretClick}>
             <BrandLogo className="top-logo" />
           </button>
+          <GlobalSearchBar
+            orders={orders}
+            customers={customers}
+            products={products}
+            onOrderClick={(num) => setOrderDrawerOrderNumber(num)}
+            onCustomerClick={(code, name) => setCustomerDrawer({ code, name })}
+            onProductClick={(product) => setProductDrawer(product)}
+            onUserClick={(user) => setUserDrawer(user)}
+          />
         </header>
         <section className="page">
           {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}
@@ -5604,21 +5593,11 @@ function ZunionApp() {
             </section>
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
-          {(view === "orders" || view === "search") && (
-            <GlobalSearchCenter
-              orders={orders}
-              customers={customers}
-              products={products}
-              session={session}
-              onOrderClick={(num) => setOrderDrawerOrderNumber(num)}
-              onCustomerClick={(code, name) => setCustomerDrawer({ code, name })}
-              onProductClick={(product) => setProductDrawer(product)}
-              onUserClick={(user) => setUserDrawer(user)}
-            />
-          )}
+          {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onCancel={() => setView("search")} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
+          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
            {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
            {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
