@@ -182,6 +182,7 @@ async function loadProfile(username: string) {
       console.warn("Supabase users_profile lookup failed; trying local users table fallback.", error instanceof Error ? error.message : error);
     }
   }
+  let shadowTokenVersion: number | undefined;
   try {
     const { rows } = await query<AppUser>(
       `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version, permission_overrides
@@ -190,11 +191,13 @@ async function loadProfile(username: string) {
        limit 1`,
       [username, `${username}@zunion.local`],
     );
-    if (rows[0]) return { ...rows[0], source: "local" as const };
+    if (rows[0]?.password_hash) return { ...rows[0], source: "local" as const };
+    shadowTokenVersion = rows[0]?.token_version ?? undefined;
   } catch (error) {
     console.warn("Local users profile lookup failed; using seeded fallback.", error instanceof Error ? error.message : error);
   }
-  return seededUsers[username] ? { ...seededUsers[username], source: "seeded" as const } : null;
+  const seeded = seededUsers[username];
+  return seeded ? { ...seeded, token_version: shadowTokenVersion ?? 0, source: "seeded" as const } : null;
 }
 
 async function findProfileByEmail(identifier: string) {
@@ -209,6 +212,7 @@ async function findProfileByEmail(identifier: string) {
       console.warn("Supabase profile email lookup failed; trying local fallback.", error instanceof Error ? error.message : error);
     }
   }
+  let shadowTokenVersion: number | undefined;
   try {
     const { rows } = await query<AppUser>(
       `select id, username, full_name, email, role::text as role, password_hash, password_salt, is_active, must_change_password, token_version, permission_overrides
@@ -217,12 +221,13 @@ async function findProfileByEmail(identifier: string) {
        limit 1`,
       [value],
     );
-    if (rows[0]) return { ...rows[0], source: "local" as const };
+    if (rows[0]?.password_hash) return { ...rows[0], source: "local" as const };
+    shadowTokenVersion = rows[0]?.token_version ?? undefined;
   } catch (error) {
     console.warn("Local profile email lookup failed.", error instanceof Error ? error.message : error);
   }
   const seedMatch = Object.entries(seededUsers).find(([username, user]) => username.toLowerCase() === value || user.email.toLowerCase() === value);
-  return seedMatch ? { ...seedMatch[1], source: "seeded" as const } : null;
+  return seedMatch ? { ...seedMatch[1], token_version: shadowTokenVersion ?? 0, source: "seeded" as const } : null;
 }
 
 async function loadProfileById(id: string) {

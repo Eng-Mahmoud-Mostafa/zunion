@@ -5428,20 +5428,33 @@ function ZunionApp() {
 
   useEffect(() => {
     if (!useServerAuth) return;
+    let cancelled = false;
     fetch("/api/auth/me", { credentials: "include" })
-      .then((response) => response.json().catch(() => ({})))
+      .then((response) => {
+        if (response.status === 401) {
+          if (!cancelled) {
+            localStorage.removeItem(sessionKey);
+            setSession(null);
+          }
+          return null;
+        }
+        return response.json().catch(() => null);
+      })
       .then((payload) => {
+        if (!payload || cancelled) return;
         if (payload?.session?.email && payload?.session?.role) {
           const nextSession = payload.session as Session;
           localStorage.setItem(sessionKey, JSON.stringify(nextSession));
           setSession(nextSession);
-        } else {
-          localStorage.removeItem(sessionKey);
-          setSession(null);
         }
       })
-      .catch(() => setSession(null))
-      .finally(() => setSessionReady(true));
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setSessionReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

@@ -109,8 +109,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     }
     req.user = { id: row.id, email: row.email, role: row.role };
     return next();
-  } catch {
-    return res.status(401).json({ message: "Unauthorized" });
+  } catch (error) {
+    console.error("requireAuth: database error during session validation.", error instanceof Error ? error.message : error);
+    return res.status(503).json({ message: "Database unavailable" });
   }
 }
 
