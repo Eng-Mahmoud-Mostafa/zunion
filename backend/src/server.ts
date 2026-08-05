@@ -16,6 +16,7 @@ import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { effectivePermissions, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
+import { ensureSchema } from "./ensureSchema.js";
 
 const app = express();
 fs.mkdirSync(config.uploadDir, { recursive: true });
@@ -1396,8 +1397,4 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 app.listen(config.port, () => console.log(`Zunion API listening on ${config.port}`));
 
-if (config.nodeEnv === "production") {
-  console.log("Production mode: auto-seeding disabled. Run `npm run seed` explicitly if needed.");
-} else {
-  ensureSeededUsers({ forcePassword: false }).catch(() => undefined);
-}
+ensureSchema().then(() => ensureSeededUsers({ forcePassword: false })).catch(() => undefined);
