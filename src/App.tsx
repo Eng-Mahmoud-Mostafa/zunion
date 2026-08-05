@@ -37,6 +37,7 @@ import {
   UserPlus,
   Users,
   Wallet,
+  WifiOff,
   WalletCards,
   Wrench,
   X,
@@ -2638,8 +2639,10 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
   const [groups, setGroups] = useState<SearchGroups>(EMPTY_SEARCH_GROUPS);
   const [totals, setTotals] = useState<SearchTotals>({ order: 0, customer: 0, product: 0, user: 0 });
   const [loading, setLoading] = useState(false);
+  const [serverError, setServerError] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [pinnedVersion, setPinnedVersion] = useState(0);
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -2656,6 +2659,13 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
 
   useEffect(() => {
     if (!open) return;
+    const onResize = () => setOpen(false);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const handler = (event: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) setOpen(false);
     };
@@ -2663,11 +2673,36 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
     return () => window.removeEventListener("mousedown", handler);
   }, [open]);
 
+  function togglePanel() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (rect) {
+      const width = Math.min(500, window.innerWidth - 28);
+      const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+      setPanelPos({ top: rect.bottom + 12, left, width });
+    } else {
+      setPanelPos({ top: 64, left: 12, width: 500 });
+    }
+    setOpen(true);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setServerError(false);
+    setActiveIndex(-1);
+    inputRef.current?.focus();
+  }, [open]);
+
   useEffect(() => {
     const q = query.trim();
     if (!q) {
       querySeqRef.current += 1;
       setLoading(false);
+      setServerError(false);
       setGroups(EMPTY_SEARCH_GROUPS);
       setTotals({ order: 0, customer: 0, product: 0, user: 0 });
       setActiveIndex(-1);
@@ -2675,6 +2710,7 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
     }
     const seq = ++querySeqRef.current;
     setActiveIndex(-1);
+    setServerError(false);
     setLoading(true);
     const local = localSearchAll(q, orders, customers, products, users);
     localCacheRef.current = { groups: local.groups, totals: local.totals };
@@ -2703,7 +2739,7 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
             setTotals(server.totals);
           }
         })
-        .catch(() => { /* backend unavailable -> keep local results */ })
+        .catch(() => { if (seq === querySeqRef.current) setServerError(true); })
         .finally(() => { if (seq === querySeqRef.current) setLoading(false); });
     }, 300);
     return () => {
@@ -2796,28 +2832,32 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
 
   return (
     <div className="gs-bar" ref={wrapRef}>
-      <div className={`gs-bar-input${open ? " focused" : ""}`}>
-        <Search size={19} className="gs-bar-icon" />
-        <input
-          ref={inputRef}
-          className="gs-input"
-          id="gs-search-input"
-          type="text"
-          value={query}
-          placeholder="ابحث في الأوردرات، العملاء، المنتجات، المستخدمين..."
-          onFocus={() => setOpen(true)}
-          onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
-          onKeyDown={onKeyDown}
-          aria-label="البحث الشامل"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        {loading && <Loader2 size={16} className="gs-spinner" />}
-        {query && !loading && <button className="gs-clear" type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} aria-label="مسح البحث"><X size={15} /></button>}
-      </div>
+      <button type="button" className="gs-trigger" onClick={togglePanel} aria-haspopup="dialog" aria-expanded={open} aria-label="بحث">
+        <Search size={18} />
+        <span>بحث</span>
+      </button>
 
       {open && (
-        <div className="gs-dropdown" ref={resultsRef}>
+        <div className="gs-panel" role="dialog" aria-label="البحث الشامل" style={panelPos ? { top: panelPos.top, left: panelPos.left, width: panelPos.width } : undefined}>
+          <div className="gs-panel-head">
+            <Search size={18} className="gs-panel-icon" />
+            <input
+              ref={inputRef}
+              className="gs-input"
+              id="gs-search-input"
+              type="text"
+              value={query}
+              placeholder="ابحث في الأوردرات، العملاء، المنتجات، المستخدمين..."
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={onKeyDown}
+              aria-label="البحث الشامل"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {loading && <Loader2 size={16} className="gs-spinner" />}
+            {query && !loading && <button className="gs-clear" type="button" onClick={() => { setQuery(""); inputRef.current?.focus(); }} aria-label="مسح البحث"><X size={15} /></button>}
+          </div>
+          <div className="gs-panel-body" ref={resultsRef}>
           {showEmpty ? (
             <div className="gs-empty">
               <div className="gs-empty-grid">
@@ -2882,7 +2922,8 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
             </div>
           ) : (
             <>
-              {!loading && totalResults === 0 && <div className="gs-no-results">لا توجد نتائج مطابقة لـ "{query}"</div>}
+              {!loading && totalResults === 0 && !serverError && <div className="gs-no-results">لا توجد نتائج مطابقة لـ "{query}"</div>}
+              {!loading && totalResults === 0 && serverError && <div className="gs-no-results gs-error-note"><WifiOff size={16} /> تعذر الاتصال بالخادم، عرض نتائج محلية فقط</div>}
               {searchSections.map((section) => {
                 const kind = section.kind;
                 const groupKey = groupKeyOf(kind);
@@ -2924,6 +2965,7 @@ function GlobalSearchBar({ orders, customers, products, onOrderClick, onCustomer
               })}
             </>
           )}
+          </div>
           <div className="gs-footer">
             <span className="gs-footer-hint"><kbd>↑</kbd><kbd>↓</kbd> للتنقل</span>
             <span className="gs-footer-hint"><kbd>Enter</kbd> للفتح</span>

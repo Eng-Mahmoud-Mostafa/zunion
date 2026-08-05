@@ -1845,7 +1845,7 @@ input[type="email"] {
   height: 88px;
   max-height: 88px;
   padding: 16px 24px !important;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .topbar h1 {
@@ -4439,10 +4439,9 @@ input[type="date"] {
 /* ── Global Search Center (gs-) ─────────────────────────────────────────── */
 .gs-bar {
   position: relative;
-  width: clamp(520px, 42vw, 600px);
   flex: 0 0 auto;
   min-width: 0;
-  z-index: 40;
+  z-index: 60;
 }
 .topbar-title {
   flex: 1 1 auto;
@@ -4455,31 +4454,68 @@ input[type="date"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.gs-bar-input {
+.gs-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 128px;
+  height: 40px;
+  padding: 0 18px;
+  background: linear-gradient(135deg, #E30613, #b30510);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 10px;
+  color: #fff !important;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(227,6,19,.3), 0 1px 3px rgba(0,0,0,.1);
+  transition: box-shadow .2s ease, transform .2s ease, filter .2s ease;
+}
+.gs-trigger svg {
+  color: #fff !important;
+}
+.gs-trigger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(227,6,19,.4), 0 1px 3px rgba(0,0,0,.12);
+  filter: brightness(1.05);
+}
+.gs-trigger:active {
+  transform: translateY(0) scale(.97);
+}
+.gs-trigger:focus-visible {
+  outline: 2px solid rgba(227,6,19,.5);
+  outline-offset: 2px;
+}
+.gs-panel {
+  position: fixed;
+  z-index: 1000;
+  width: min(500px, calc(100vw - 28px));
+  background: #fff;
+  border: 1px solid rgba(15,23,42,.08);
+  border-radius: 16px;
+  box-shadow: 0 30px 70px rgba(6,31,59,.22), 0 10px 24px rgba(0,0,0,.1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: gs-pop .16s ease;
+  transform-origin: top left;
+}
+@keyframes gs-pop {
+  from { opacity: 0; transform: translateY(-6px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.gs-panel-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 50px;
-  padding: 0 10px 0 18px;
-  background: linear-gradient(135deg, #E30613, #b30510);
-  border: 1px solid rgba(255,255,255,.2);
-  border-radius: 999px;
-  box-shadow: 0 8px 24px rgba(227,6,19,.28), 0 2px 6px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.18);
-  transition: box-shadow .22s ease, transform .22s ease, border-color .22s ease;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
 }
-.gs-bar:hover .gs-bar-input {
-  box-shadow: 0 10px 30px rgba(227,6,19,.36), 0 2px 6px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.18);
-  transform: translateY(-1px);
-}
-.gs-bar-input.focused {
-  border-color: rgba(255,255,255,.5);
-  box-shadow: 0 0 0 3px rgba(227,6,19,.22), 0 14px 34px rgba(227,6,19,.42), 0 2px 6px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.2);
-  transform: translateY(-1px);
-}
-.gs-bar-icon {
-  color: #fff !important;
+.gs-panel-icon {
+  color: #E30613;
   flex-shrink: 0;
-  margin-inline-start: 6px;
 }
 #gs-search-input {
   flex: 1;
@@ -4487,20 +4523,20 @@ input[type="date"] {
   background: transparent;
   border: none;
   outline: none;
-  color: #fff !important;
-  font-size: 14px !important;
+  color: var(--ink) !important;
+  font-size: 15px !important;
   min-height: 0 !important;
   height: auto !important;
   font-family: inherit;
 }
 #gs-search-input::-moz-placeholder {
-  color: rgba(255,255,255,.75) !important;
+  color: var(--muted) !important;
 }
 #gs-search-input::placeholder {
-  color: rgba(255,255,255,.75) !important;
+  color: var(--muted) !important;
 }
 .gs-spinner {
-  color: rgba(255,255,255,.9) !important;
+  color: #E30613 !important;
   animation: spin 1s linear infinite;
   flex-shrink: 0;
 }
@@ -4508,43 +4544,43 @@ input[type="date"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border: none;
   border-radius: 50%;
-  background: rgba(255,255,255,.2);
-  color: #fff !important;
+  background: rgba(0,0,0,.06);
+  color: var(--muted) !important;
   cursor: pointer;
   flex-shrink: 0;
-  transition: background .15s ease;
+  transition: background .15s ease, color .15s ease;
 }
 .gs-clear:hover {
-  background: rgba(255,255,255,.34);
+  background: rgba(0,0,0,.12);
+  color: var(--ink) !important;
 }
-.gs-dropdown {
-  position: absolute;
-  top: calc(100% + 12px);
-  left: 0;
-  width: min(620px, calc(100vw - 48px));
-  max-height: min(500px, calc(100vh - 150px));
+.gs-panel-body {
+  max-height: min(420px, calc(100vh - 240px));
   overflow-y: auto;
-  background: #fff;
-  border: 1px solid rgba(15,23,42,.08);
-  border-radius: 18px;
-  box-shadow: 0 30px 70px rgba(6,31,59,.2), 0 8px 20px rgba(0,0,0,.08);
-  padding: 12px;
+  padding: 12px 14px;
   scrollbar-width: thin;
   scrollbar-color: rgba(15,23,42,.18) transparent;
 }
-.gs-dropdown::-webkit-scrollbar {
+.gs-panel-body::-webkit-scrollbar {
   width: 8px;
 }
-.gs-dropdown::-webkit-scrollbar-thumb {
+.gs-panel-body::-webkit-scrollbar-thumb {
   background: rgba(15,23,42,.16);
   border-radius: 8px;
 }
-.gs-dropdown::-webkit-scrollbar-track {
+.gs-panel-body::-webkit-scrollbar-track {
   background: transparent;
+}
+.gs-error-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #E30613 !important;
 }
 .gs-empty {
   display: flex;
@@ -4955,13 +4991,13 @@ input[type="date"] {
     flex-wrap: wrap;
   }
   .gs-bar {
-    flex: 1 0 100%;
+    flex: 0 0 auto;
     width: auto;
   }
-  .gs-dropdown {
-    width: calc(100vw - 28px);
-    max-width: none;
-    max-height: calc(100vh - 220px);
+  .gs-panel {
+    width: min(calc(100vw - 28px), 500px);
+    max-width: calc(100vw - 28px);
+    max-height: calc(100vh - 120px);
   }
   .pd-image {
     width: 90px;
