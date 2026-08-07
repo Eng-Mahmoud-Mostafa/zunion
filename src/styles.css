@@ -461,6 +461,17 @@ textarea:focus {
   min-height: 32px;
 }
 
+.image-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  min-height: 32px;
+  border-color: rgba(217, 4, 22, .4) !important;
+  color: var(--red) !important;
+  background: #fff !important;
+}
+
 .image-empty-state {
   display: inline-flex;
   align-items: center;
@@ -3652,6 +3663,66 @@ input[type="date"] {
   color: #fff;
   direction: ltr;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- required markers + invalid states ---------- */
+.nf-required {
+  color: var(--red);
+  font-style: normal;
+  font-size: inherit;
+  margin-inline-start: 2px;
+}
+
+.nf-field-invalid input,
+.nf-field-invalid select,
+.nf-field-invalid textarea {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgba(217, 4, 22, .12) !important;
+}
+
+.nf-field-invalid .delivery-date-field {
+  box-shadow: 0 0 0 4px rgba(217, 4, 22, .16);
+  border-radius: 999px;
+}
+
+.nf-field-invalid {
+  animation: nf-invalid-shake .32s ease;
+}
+
+@keyframes nf-invalid-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.image-clipboard-field.has-error {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgba(217, 4, 22, .12) !important;
+}
+
+.nf-payment-method {
+  background: #fff;
+  border: 1px dashed rgba(217, 4, 22, .35);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.nf-payment-method select {
+  min-height: 42px !important;
+  height: 42px !important;
+  font-size: 14px !important;
+  font-weight: 800;
+}
+
+.nf-payment-method.nf-field-invalid {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgba(217, 4, 22, .12) !important;
+}
+
+.nf-upload-card .image-clipboard-field.large {
+  min-height: 200px;
+  align-content: start;
 }
 
 /* ---------- sticky action bar ---------- */

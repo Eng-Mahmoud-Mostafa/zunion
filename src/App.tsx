@@ -33,6 +33,7 @@ import {
   ShoppingBag,
   Star,
   Truck,
+  Upload,
   User,
   UserPlus,
   Users,
@@ -3281,9 +3282,40 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   const [activeImageField, setActiveImageField] = useState<{ index: number; key: "logoImage" | "workOrderImage" } | null>(null);
   const [imageMessages, setImageMessages] = useState<Record<string, string>>({});
   const customerRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
     customerRef.current?.focus({ preventScroll: true });
   }, []);
+
+  function focusNextField(current: HTMLElement) {
+    const form = formRef.current;
+    if (!form) return;
+    const focusable = Array.from(form.querySelectorAll<HTMLElement>("input:not([readonly]):not([type='hidden']):not([type='checkbox']):not([hidden]), select:not([disabled]), textarea"));
+    const index = focusable.findIndex((element) => element === current || element.contains(current));
+    const next = index >= 0 ? focusable[index + 1] : undefined;
+    next?.focus({ preventScroll: false });
+    next?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function handleFormKeyDown(event: React.KeyboardEvent<HTMLFormElement>) {
+    if (event.key !== "Enter") return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target instanceof HTMLButtonElement) return;
+    if (target instanceof HTMLTextAreaElement) return;
+    event.preventDefault();
+    focusNextField(target);
+  }
+
+  function scrollToFirstInvalid() {
+    window.requestAnimationFrame(() => {
+      const first = formRef.current?.querySelector<HTMLElement>(".nf-field-invalid, .image-clipboard-field.has-error");
+      if (first) {
+        first.scrollIntoView({ behavior: "smooth", block: "center" });
+        first.querySelector<HTMLElement>("input, select, textarea, [tabindex]")?.focus({ preventScroll: true });
+      }
+    });
+  }
   const computed = calculate(form);
   const normalizedProducts = products.map(normalizeProduct);
   const activeProducts = normalizedProducts.filter((product) => product.status === "active");
@@ -3494,8 +3526,11 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       if (!normalizeMaterialsStatus(form.materialsStatus)) nextErrors.materialsStatus = "يجب تحديد حالة الخامات";
       if (!form.delivery_date) nextErrors.delivery_date = "تاريخ التسليم مطلوب";
       if (methods.length === 0) nextErrors.operationMethods = "يجب إضافة طريقة تشغيل واحدة على الأقل";
+      if (!operationItems[0]?.workOrderImage) nextErrors.workOrderImage = "صورة أمر الشغل مطلوبة";
+      if (!operationItems[0]?.logoImage) nextErrors.logoImage = "صورة اللوجو مطلوبة";
       if (Object.keys(nextErrors).length) {
         setErrors(nextErrors);
+        scrollToFirstInvalid();
         return;
       }
       setErrors({});
@@ -3527,7 +3562,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   const saveDraft = buildSubmitHandler("جديد");
 
   return (
-    <form className="order-form order-form-modern" onSubmit={submit} onPaste={handleClipboardPaste}>
+    <form ref={formRef} className="order-form order-form-modern" onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
       <div className="nf-header">
         <div className="nf-header-copy">
           <span className="nf-kicker">{initial ? "تعديل أوردر" : "أوردر جديد"}</span>
@@ -3560,8 +3595,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               {operationItems.map((item, index) => (
                 <div className="operation-group" key={index}>
                   <div className="operation-item-row">
-                    <label className="nf-field">
-                      <span>طريقة التشغيل {operationItems.length > 1 ? index + 1 : ""}</span>
+                    <label className={`nf-field${errors.operationMethods && index === 0 ? " nf-field-invalid" : ""}`}>
+                      <span>طريقة التشغيل {operationItems.length > 1 ? index + 1 : ""}{index === 0 ? <em className="nf-required">*</em> : null}</span>
                       <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "مثال: صدر شمال" : "مثال: ظهر"} />
                     </label>
                     <button type="button" className="primary-btn compact operation-add-btn" title="إضافة طريقة تشغيل" onClick={addOperationItem}><Plus size={16} /></button>
@@ -3580,6 +3615,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                         onActivate={() => setActiveImageField({ index, key: "logoImage" })}
                         onPaste={() => pasteFromClipboard(index, "logoImage")}
                         onRemove={() => removeOperationAttachment(index, "logoImage")}
+                        onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
                       />
                       <ImageInputWithClipboard
                         label="صورة أمر الشغل"
@@ -3592,6 +3628,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                         onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
                         onPaste={() => pasteFromClipboard(index, "workOrderImage")}
                         onRemove={() => removeOperationAttachment(index, "workOrderImage")}
+                        onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
                       />
                     </div>
                   )}
@@ -3601,18 +3638,20 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             <ErrorText message={errors.operationMethods} />
           </section>
 
-          <section className="nf-card">
+          <section className="nf-card nf-upload-card">
             <header className="nf-card-head">
               <span className="nf-card-icon"><Image size={19} /></span>
               <div>
-                <h3>المرفقات</h3>
-                <p>صورة أمر الشغل ولوجو العميل</p>
+                <h3>صورة أمر الشغل</h3>
+                <p>ارفع صورة أمر الشغل الخاصة بالأوردر</p>
               </div>
             </header>
             <div className="nf-uploads">
               <ImageInputWithClipboard
                 large
+                required
                 label="صورة أمر الشغل"
+                error={errors.workOrderImage}
                 value={operationItems[0]?.workOrderImage || ""}
                 fileName={operationItems[0]?.workOrderFileName}
                 fileSize={operationItems[0]?.workOrderImageSize}
@@ -3622,11 +3661,25 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 onActivate={() => setActiveImageField({ index: 0, key: "workOrderImage" })}
                 onPaste={() => pasteFromClipboard(0, "workOrderImage")}
                 onRemove={() => removeOperationAttachment(0, "workOrderImage")}
-                onDropFile={(file) => setOperationAttachment(0, "workOrderImage", file)}
+                onFileSelect={(file) => setOperationAttachment(0, "workOrderImage", file)}
               />
+            </div>
+          </section>
+
+          <section className="nf-card nf-upload-card">
+            <header className="nf-card-head">
+              <span className="nf-card-icon"><Star size={19} /></span>
+              <div>
+                <h3>صورة اللوجو</h3>
+                <p>ارفع لوجو العميل المطلوب للطباعة</p>
+              </div>
+            </header>
+            <div className="nf-uploads">
               <ImageInputWithClipboard
                 large
-                label="صورة لوجو العميل"
+                required
+                label="صورة اللوجو"
+                error={errors.logoImage}
                 value={operationItems[0]?.logoImage || ""}
                 fileName={operationItems[0]?.logoFileName}
                 fileSize={operationItems[0]?.logoImageSize}
@@ -3636,7 +3689,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 onActivate={() => setActiveImageField({ index: 0, key: "logoImage" })}
                 onPaste={() => pasteFromClipboard(0, "logoImage")}
                 onRemove={() => removeOperationAttachment(0, "logoImage")}
-                onDropFile={(file) => setOperationAttachment(0, "logoImage", file)}
+                onFileSelect={(file) => setOperationAttachment(0, "logoImage", file)}
               />
             </div>
           </section>
@@ -3648,7 +3701,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               <span className="nf-card-icon"><ClipboardList size={19} /></span>
               <div>
                 <h3>بيانات الأوردر</h3>
-                <p>معلومات العميل ومواعيد التسليم</p>
+                <p>رقم الأوردر والطرف وموعد التسليم</p>
               </div>
             </header>
             <div className="nf-fieldgrid">
@@ -3656,18 +3709,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <span>رقم الأوردر</span>
                 <input value={form.order_number} readOnly />
               </label>
-              <label className="nf-field">
-                <span>اسم العميل</span>
-                <input ref={customerRef} list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} />
-                <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
-                <ErrorText message={errors.client_name} />
-              </label>
-              <label className="nf-field">
-                <span>كود العميل</span>
-                <input value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} readOnly />
-              </label>
-              <label className="nf-field">
-                <span>طرف</span>
+              <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
+                <span>طرف<em className="nf-required">*</em></span>
                 <select value={partyOptions.includes(form.source_person) ? form.source_person : "other"} onChange={(event) => {
                   if (event.target.value === "other") {
                     setForm((current) => calculate({ ...current, source_person: current.customParty || "", customParty: current.customParty || "", updated_at: new Date().toISOString() }));
@@ -3681,7 +3724,29 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 {!partyOptions.includes(form.source_person) && <input placeholder="اكتب الطرف" value={form.customParty || form.source_person} onChange={(event) => setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: event.target.value, updated_at: new Date().toISOString() }))} />}
                 <ErrorText message={errors.source_person} />
               </label>
-              <RedDatePicker className="nf-field nf-field-delivery" label="تاريخ التسليم" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} error={errors.delivery_date} />
+              <RedDatePicker required className={`nf-field nf-field-delivery${errors.delivery_date ? " nf-field-invalid" : ""}`} label="تاريخ التسليم" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} error={errors.delivery_date} />
+            </div>
+          </section>
+
+          <section className="nf-card">
+            <header className="nf-card-head">
+              <span className="nf-card-icon"><User size={19} /></span>
+              <div>
+                <h3>بيانات العميل</h3>
+                <p>اسم العميل وكود الحساب</p>
+              </div>
+            </header>
+            <div className="nf-fieldgrid">
+              <label className={`nf-field nf-field-wide${errors.client_name ? " nf-field-invalid" : ""}`}>
+                <span>اسم العميل<em className="nf-required">*</em></span>
+                <input ref={customerRef} list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} />
+                <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
+                <ErrorText message={errors.client_name} />
+              </label>
+              <label className="nf-field">
+                <span>كود العميل</span>
+                <input value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} readOnly />
+              </label>
             </div>
           </section>
 
@@ -3695,8 +3760,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             </header>
             <div className="nf-product-body">
               <div className="nf-product-line">
-                <label className="nf-field nf-field-wide">
-                  <span>نوع المنتج</span>
+                <label className={`nf-field nf-field-wide${errors.productId ? " nf-field-invalid" : ""}`}>
+                  <span>نوع المنتج<em className="nf-required">*</em></span>
                   <select value={form.productId || ""} onChange={(event) => selectProduct(event.target.value)}>
                     <option value="">{activeProducts.length ? "اختر نوع المنتج" : "لا توجد منتجات مضافة"}</option>
                     {visibleProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
@@ -3705,8 +3770,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                   </select>
                   <ErrorText message={errors.productId} />
                 </label>
-                <label className="nf-field">
-                  <span>العدد</span>
+                <label className={`nf-field${errors.quantity ? " nf-field-invalid" : ""}`}>
+                  <span>العدد<em className="nf-required">*</em></span>
                   <input type="number" min={1} value={form.quantity} onChange={(event) => set("quantity", Number(event.target.value))} />
                   <ErrorText message={errors.quantity} />
                 </label>
@@ -3716,22 +3781,14 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                   <ErrorText message={errors.price} />
                 </label>
                 <Readonly className="nf-field" label="الإجمالي" value={computed.total} />
-                <label className="nf-field">
-                  <span>الخامات</span>
+                <label className={`nf-field${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
+                  <span>الخامات<em className="nf-required">*</em></span>
                   <select value={normalizeMaterialsStatus(form.materialsStatus)} onChange={(event) => set("materialsStatus", event.target.value)}>
                     <option value="">اختر حالة الخامات</option>
                     {materialStatusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                   </select>
                   <ErrorText message={errors.materialsStatus} />
                 </label>
-                <label className="nf-field">
-                  <span>طريقة الدفع</span>
-                  <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)}>
-                    {paymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
-                  </select>
-                  <ErrorText message={errors.paymentMethod} />
-                </label>
-                {form.paymentMethod === "other" && <label className="nf-field"><span>اكتب طريقة الدفع</span><input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} /><ErrorText message={errors.customPaymentMethod} /></label>}
                 <Readonly className="nf-field" label="المتبقي" value={computed.remaining} />
               </div>
               {canAddProduct && (
@@ -3765,10 +3822,19 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               <span className="nf-card-icon"><Wallet size={19} /></span>
               <div>
                 <h3>ملخص الدفع</h3>
-                <p>إجمالي المبالغ والمدفوع والمتبقي</p>
+                <p>طريقة الدفع وإجمالي المبالغ والمدفوع والمتبقي</p>
               </div>
             </header>
             <div className="nf-payment">
+              <label className={`nf-payment-row nf-payment-method${errors.paymentMethod ? " nf-field-invalid" : ""}`}>
+                <span className="nf-payment-label">طريقة الدفع<em className="nf-required">*</em></span>
+                <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)}>
+                  <option value="">اختر طريقة الدفع</option>
+                  {paymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
+                </select>
+                <ErrorText message={errors.paymentMethod} />
+              </label>
+              {form.paymentMethod === "other" && <label className="nf-field"><span>اكتب طريقة الدفع</span><input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} /><ErrorText message={errors.customPaymentMethod} /></label>}
               <div className="nf-payment-row">
                 <span className="nf-payment-label">الإجمالي</span>
                 <span className="nf-payment-value">{formatMoney(computed.total)}</span>
@@ -3896,11 +3962,11 @@ function StageSelect({ label, value, onChange }: { label: string; value: WorkSta
   );
 }
 
-function RedDatePicker({ label, value, onChange, error, className }: { label: string; value: string; onChange: (value: string) => void; error?: string; className?: string }) {
+function RedDatePicker({ label, value, onChange, error, className, required }: { label: string; value: string; onChange: (value: string) => void; error?: string; className?: string; required?: boolean }) {
   const displayValue = compactDateValue(value);
   return (
     <label className={`red-date-picker${className ? ` ${className}` : ""}`}>
-      <span>{label}</span>
+      <span>{label}{required && <em className="nf-required">*</em>}</span>
       <span className="delivery-date-field">
         <input className="delivery-date-input" type="date" value={value} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} aria-label={label} />
         <span className={`delivery-date-display${displayValue ? " has-value" : ""}`} aria-hidden="true">{displayValue || "mm/dd/yyyy"}</span>
@@ -3919,10 +3985,13 @@ type ImageInputWithClipboardProps = {
   active?: boolean;
   status?: string;
   large?: boolean;
+  required?: boolean;
+  error?: string;
   onActivate: () => void;
   onPaste: () => void;
   onRemove: () => void;
   onDropFile?: (file: File) => void;
+  onFileSelect?: (file: File) => void;
 };
 
 function formatFileSize(size?: number) {
@@ -3932,9 +4001,18 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, onActivate, onPaste, onRemove, onDropFile }: ImageInputWithClipboardProps) {
+function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, error, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
   const [dragOver, setDragOver] = useState(false);
-  const classNames = `image-clipboard-field${active ? " active" : ""}${large ? " large" : ""}${dragOver ? " drag-over" : ""}`;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const classNames = `image-clipboard-field${active ? " active" : ""}${large ? " large" : ""}${dragOver ? " drag-over" : ""}${error ? " has-error" : ""}`;
+  function pickFile() {
+    fileInputRef.current?.click();
+  }
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file) onFileSelect?.(file);
+    event.target.value = "";
+  }
   return (
     <div
       className={classNames}
@@ -3946,11 +4024,13 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       onDragLeave={() => setDragOver(false)}
       onDrop={(event) => { event.preventDefault(); setDragOver(false); const file = event.dataTransfer.files?.[0]; if (file) onDropFile?.(file); }}
     >
-      <span className="image-field-label">{label}</span>
+      <span className="image-field-label">{label}{required && <em className="nf-required">*</em>}</span>
+      <input ref={fileInputRef} type="file" accept={clipboardImageTypes.join(",")} hidden onChange={handleFileChange} />
       <div className="image-field-actions">
-        {large && !value && <span className="image-drop-hint">اسحب وأفلت الصورة هنا</span>}
+        {large && !value && <span className="image-drop-hint">اسحب وأفلت الصورة هنا أو اخترها من الجهاز</span>}
+        <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>
         <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>لصق الصورة من الحافظة</button>
-        {!value && !large && <span className="image-empty-state">لم يتم لصق صورة</span>}
+        {!value && !large && <span className="image-empty-state">لم يتم رفع صورة</span>}
         {value && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
       </div>
       {value && (
@@ -3963,6 +4043,7 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
         {fileSize ? <small>{formatFileSize(fileSize)}</small> : null}
         {status && <small>{status}</small>}
       </div>
+      <ErrorText message={error} />
     </div>
   );
 }
