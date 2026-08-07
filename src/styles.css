@@ -3415,26 +3415,6 @@ input[type="date"] {
   cursor: default;
 }
 
-.nf-fieldgrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 16px;
-}
-
-.nf-field-wide {
-  grid-column: 1 / -1;
-}
-
-@media (max-width: 560px) {
-  .nf-fieldgrid {
-    grid-template-columns: 1fr;
-  }
-
-  .nf-field-wide {
-    grid-column: auto;
-  }
-}
-
 /* ---------- operation method ---------- */
 .operation-methods {
   display: grid;

@@ -3384,7 +3384,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         quantity: current.quantity && current.quantity !== 1 ? current.quantity : product.defaultQuantity || 1,
         price: current.price,
         logo_place: current.logo_place || product.logoPlacement || "",
-        quality_notes: current.quality_notes || product.quality || "",
         operationMethods: nextMethods?.length ? nextMethods : [""],
         operationItems: nextOperationItems,
         updated_at: new Date().toISOString(),
@@ -3779,24 +3778,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         </div>
       </section>
 
-      <section className="nf-card">
-        <header className="nf-card-head">
-          <span className="nf-card-icon"><Paintbrush size={19} /></span>
-          <div>
-            <h3>خدمات التشطيب</h3>
-            <p>ملاحظات الجودة والتشطيب والملاحظات العامة</p>
-          </div>
-        </header>
-        <div className="nf-fieldgrid nf-services-grid">
-          <Textarea className="nf-field" label="الجودة" value={form.quality_notes} onChange={(value) => set("quality_notes", value)} />
-          <Textarea className="nf-field" label="ملاحظات التشغيل" value={form.production_notes} onChange={(value) => set("production_notes", value)} />
-          <Textarea className="nf-field" label="ملاحظات التشطيب" value={form.finishing_notes} onChange={(value) => set("finishing_notes", value)} />
-          <Textarea className="nf-field" label="رسالة العميل" value={form.client_message} onChange={(value) => set("client_message", value)} />
-          <Textarea className="nf-field" label="ملاحظات" value={form.notes} onChange={(value) => set("notes", value)} />
-          <Textarea className="nf-field" label="ملاحظات داخلية" value={form.internal_notes} onChange={(value) => set("internal_notes", value)} />
-        </div>
-      </section>
-
       <div className="nf-actionbar">
         {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
         <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraft} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>
@@ -3986,10 +3967,6 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       <ErrorText message={error} />
     </div>
   );
-}
-
-function Textarea({ label, value, onChange, className }: { label: string; value: string; onChange: (value: string) => void; className?: string }) {
-  return <label className={className}>{label}<textarea rows={3} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
 function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
