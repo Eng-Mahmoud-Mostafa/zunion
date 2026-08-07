@@ -3279,12 +3279,24 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [productSearch, setProductSearch] = useState("");
+  const [productDropdownOpen, setProductDropdownOpen] = useState(false);
+  const [productHighlight, setProductHighlight] = useState(-1);
+  const productBoxRef = useRef<HTMLDivElement>(null);
   const [activeImageField, setActiveImageField] = useState<{ index: number; key: "logoImage" | "workOrderImage" } | null>(null);
   const [imageMessages, setImageMessages] = useState<Record<string, string>>({});
   const customerRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
     customerRef.current?.focus({ preventScroll: true });
+  }, []);
+  useEffect(() => {
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (productBoxRef.current && !productBoxRef.current.contains(event.target as Node)) {
+        setProductDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
   }, []);
 
   function focusNextField(current: HTMLElement) {
@@ -3389,6 +3401,44 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         updated_at: new Date().toISOString(),
       });
     });
+  }
+
+  function handleProductInputChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const value = event.target.value;
+    setProductSearch(value);
+    setProductHighlight(-1);
+    setProductDropdownOpen(true);
+    setForm((current) => calculate({ ...current, productId: "", productName: value, order_type: value, updated_at: new Date().toISOString() }));
+  }
+
+  function handleProductInputFocus() {
+    setProductSearch(form.productName || "");
+    setProductHighlight(-1);
+    setProductDropdownOpen(true);
+  }
+
+  function handleProductKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setProductDropdownOpen(false);
+      return;
+    }
+    if (!productDropdownOpen || visibleProducts.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setProductHighlight((current) => (current + 1) % visibleProducts.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setProductHighlight((current) => (current - 1 + visibleProducts.length) % visibleProducts.length);
+    } else if (event.key === "Enter") {
+      const product = visibleProducts[productHighlight >= 0 ? productHighlight : 0];
+      if (product) {
+        event.preventDefault();
+        event.stopPropagation();
+        setProductSearch(product.name);
+        selectProduct(product.id);
+        setProductDropdownOpen(false);
+      }
+    }
   }
 
   function syncOperationItems(items: OperationItem[]) {
@@ -3632,12 +3682,30 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         <div className="nf-row nf-row-products">
           <label className={`nf-field${errors.productId ? " nf-field-invalid" : ""}`}>
             <span>نوع المنتج</span>
-            <select value={form.productId || ""} onChange={(event) => selectProduct(event.target.value)}>
-              <option value="">{activeProducts.length ? "اختر نوع المنتج" : "لا توجد منتجات مضافة"}</option>
-              {visibleProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-              {selectedProduct && selectedProduct.active !== false && !visibleProducts.some((product) => product.id === selectedProduct.id) && <option value={selectedProduct.id}>{selectedProduct.name}</option>}
-              {selectedProduct && selectedProduct.active === false && <option value={selectedProduct.id}>{selectedProduct.name}</option>}
-            </select>
+            <div className="nf-product-combobox" ref={productBoxRef}>
+              <input
+                value={form.productName}
+                onChange={handleProductInputChange}
+                onFocus={handleProductInputFocus}
+                onKeyDown={handleProductKeyDown}
+                placeholder={activeProducts.length ? "اكتب أو اختر نوع المنتج" : "اكتب نوع المنتج"}
+              />
+              {productDropdownOpen && visibleProducts.length > 0 && (
+                <div className="nf-product-dropdown">
+                  {visibleProducts.map((product, index) => (
+                    <button
+                      type="button"
+                      key={product.id}
+                      className={`nf-product-option${index === productHighlight ? " selected" : ""}`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => { setProductSearch(product.name); selectProduct(product.id); setProductDropdownOpen(false); }}
+                    >
+                      {product.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <ErrorText message={errors.productId} />
           </label>
           <label className={`nf-field${errors.quantity ? " nf-field-invalid" : ""}`}>
