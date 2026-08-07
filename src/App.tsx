@@ -3780,6 +3780,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               <div className="operation-card-images">
                 <ImageInputWithClipboard
                   large
+                  pasteOnly
                   required={index === 0}
                   label="صورة أمر الشغل"
                   error={index === 0 ? errors.workOrderImage : ""}
@@ -3792,10 +3793,12 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                   onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
                   onPaste={() => pasteFromClipboard(index, "workOrderImage")}
                   onRemove={() => removeOperationAttachment(index, "workOrderImage")}
+                  onDropFile={(file) => setOperationAttachment(index, "workOrderImage", file)}
                   onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
                 />
                 <ImageInputWithClipboard
                   large
+                  pasteOnly
                   required={index === 0}
                   label="صورة اللوجو"
                   error={index === 0 ? errors.logoImage : ""}
@@ -3808,6 +3811,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                   onActivate={() => setActiveImageField({ index, key: "logoImage" })}
                   onPaste={() => pasteFromClipboard(index, "logoImage")}
                   onRemove={() => removeOperationAttachment(index, "logoImage")}
+                  onDropFile={(file) => setOperationAttachment(index, "logoImage", file)}
                   onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
                 />
               </div>
@@ -3946,6 +3950,7 @@ type ImageInputWithClipboardProps = {
   status?: string;
   large?: boolean;
   required?: boolean;
+  pasteOnly?: boolean;
   error?: string;
   onActivate: () => void;
   onPaste: () => void;
@@ -3961,7 +3966,7 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, error, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
+function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, error, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const classNames = `image-clipboard-field${active ? " active" : ""}${large ? " large" : ""}${dragOver ? " drag-over" : ""}${error ? " has-error" : ""}`;
@@ -3988,8 +3993,8 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       <input ref={fileInputRef} type="file" accept={clipboardImageTypes.join(",")} hidden onChange={handleFileChange} />
       <div className="image-field-actions">
         {large && !value && <span className="image-drop-hint">اسحب وأفلت الصورة هنا أو اخترها من الجهاز</span>}
-        <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>
-        <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>لصق الصورة من الحافظة</button>
+        {!pasteOnly && <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>}
+        <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : "لصق الصورة من الحافظة"}</button>
         {!value && !large && <span className="image-empty-state">لم يتم رفع صورة</span>}
         {value && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
       </div>
