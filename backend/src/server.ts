@@ -1095,6 +1095,23 @@ app.put("/api/customers/:id", requireAuth, requireRole("Master"), async (req, re
   res.json({ ok: true });
 });
 
+app.delete("/api/customers/:id", requireAuth, requireAppPermission("customers.delete"), async (req, res) => {
+  const id = param(req.params.id);
+  try {
+    const old = await query("select * from customers where id=$1", [id]);
+    if (!old.rows[0]) return res.status(404).json({ message: "Customer not found" });
+    const orders = await query("select id, order_number from orders where customer_id=$1", [id]);
+    if (orders.rows.length > 0) {
+      return res.status(409).json({ message: "لا يمكن حذف هذا العميل لوجود طلبات مرتبطة به" });
+    }
+    await query("delete from customers where id=$1", [id]);
+    await audit(req.user!, "CUSTOMER_DELETED", "customers", id, old.rows[0]);
+    res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: "تعذر حذف العميل", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const id = param(req.params.id);
   const { rows } = await query("select * from orders where customer_id=$1 order by created_at desc", [id]);
