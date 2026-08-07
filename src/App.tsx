@@ -3700,7 +3700,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         </header>
         <div className="operation-methods">
           {operationItems.map((item, index) => (
-            <div className="operation-group" key={index}>
+            <div className="operation-card" key={index}>
               <div className="operation-item-row">
                 <label className={`nf-field${errors.operationMethods && index === 0 ? " nf-field-invalid" : ""}`}>
                   <span>طريقة التشغيل {operationItems.length > 1 ? index + 1 : ""}</span>
@@ -3709,73 +3709,44 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <button type="button" className="primary-btn compact operation-add-btn" title="إضافة طريقة تشغيل" onClick={addOperationItem}><Plus size={16} /></button>
                 {operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
               </div>
-              {index > 0 && (
-                <div className="operation-inline-images">
-                  <ImageInputWithClipboard
-                    label="صورة لوجو"
-                    value={item.logoImage}
-                    fileName={item.logoFileName}
-                    fileSize={item.logoImageSize}
-                    source={item.logoImageSource}
-                    active={activeImageField?.index === index && activeImageField.key === "logoImage"}
-                    status={imageMessages[operationMessageKey(index, "logoImage")]}
-                    onActivate={() => setActiveImageField({ index, key: "logoImage" })}
-                    onPaste={() => pasteFromClipboard(index, "logoImage")}
-                    onRemove={() => removeOperationAttachment(index, "logoImage")}
-                    onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
-                  />
-                  <ImageInputWithClipboard
-                    label="صورة أمر الشغل"
-                    value={item.workOrderImage}
-                    fileName={item.workOrderFileName}
-                    fileSize={item.workOrderImageSize}
-                    source={item.workOrderImageSource}
-                    active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
-                    status={imageMessages[operationMessageKey(index, "workOrderImage")]}
-                    onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
-                    onPaste={() => pasteFromClipboard(index, "workOrderImage")}
-                    onRemove={() => removeOperationAttachment(index, "workOrderImage")}
-                    onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
-                  />
-                </div>
-              )}
+              <div className="operation-card-images">
+                <ImageInputWithClipboard
+                  large
+                  required={index === 0}
+                  label="صورة أمر الشغل"
+                  error={index === 0 ? errors.workOrderImage : ""}
+                  value={item.workOrderImage}
+                  fileName={item.workOrderFileName}
+                  fileSize={item.workOrderImageSize}
+                  source={item.workOrderImageSource}
+                  active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
+                  status={imageMessages[operationMessageKey(index, "workOrderImage")]}
+                  onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
+                  onPaste={() => pasteFromClipboard(index, "workOrderImage")}
+                  onRemove={() => removeOperationAttachment(index, "workOrderImage")}
+                  onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
+                />
+                <ImageInputWithClipboard
+                  large
+                  required={index === 0}
+                  label="صورة اللوجو"
+                  error={index === 0 ? errors.logoImage : ""}
+                  value={item.logoImage}
+                  fileName={item.logoFileName}
+                  fileSize={item.logoImageSize}
+                  source={item.logoImageSource}
+                  active={activeImageField?.index === index && activeImageField.key === "logoImage"}
+                  status={imageMessages[operationMessageKey(index, "logoImage")]}
+                  onActivate={() => setActiveImageField({ index, key: "logoImage" })}
+                  onPaste={() => pasteFromClipboard(index, "logoImage")}
+                  onRemove={() => removeOperationAttachment(index, "logoImage")}
+                  onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
+                />
+              </div>
             </div>
           ))}
         </div>
         <ErrorText message={errors.operationMethods} />
-        <div className="nf-op-uploads">
-          <ImageInputWithClipboard
-            large
-            required
-            label="صورة أمر الشغل"
-            error={errors.workOrderImage}
-            value={operationItems[0]?.workOrderImage || ""}
-            fileName={operationItems[0]?.workOrderFileName}
-            fileSize={operationItems[0]?.workOrderImageSize}
-            source={operationItems[0]?.workOrderImageSource}
-            active={activeImageField?.index === 0 && activeImageField.key === "workOrderImage"}
-            status={imageMessages[operationMessageKey(0, "workOrderImage")]}
-            onActivate={() => setActiveImageField({ index: 0, key: "workOrderImage" })}
-            onPaste={() => pasteFromClipboard(0, "workOrderImage")}
-            onRemove={() => removeOperationAttachment(0, "workOrderImage")}
-            onFileSelect={(file) => setOperationAttachment(0, "workOrderImage", file)}
-          />
-          <ImageInputWithClipboard
-            large
-            label="صورة اللوجو"
-            error={errors.logoImage}
-            value={operationItems[0]?.logoImage || ""}
-            fileName={operationItems[0]?.logoFileName}
-            fileSize={operationItems[0]?.logoImageSize}
-            source={operationItems[0]?.logoImageSource}
-            active={activeImageField?.index === 0 && activeImageField.key === "logoImage"}
-            status={imageMessages[operationMessageKey(0, "logoImage")]}
-            onActivate={() => setActiveImageField({ index: 0, key: "logoImage" })}
-            onPaste={() => pasteFromClipboard(0, "logoImage")}
-            onRemove={() => removeOperationAttachment(0, "logoImage")}
-            onFileSelect={(file) => setOperationAttachment(0, "logoImage", file)}
-          />
-        </div>
       </section>
 
       <div className="nf-actionbar">
