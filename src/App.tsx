@@ -2297,7 +2297,7 @@ function OrderDetailsDrawer({ open, onClose, order, customers, setOrders, sessio
           <div className="cd-info-grid">
             {(order.order_type || order.productName) && <div className="cd-info-row"><span className="cd-info-label">المنتج</span><span>{order.productName || order.order_type}</span></div>}
             {order.quantity && <div className="cd-info-row"><span className="cd-info-label">العدد</span><span>{order.quantity}</span></div>}
-            {order.price > 0 && <div className="cd-info-row"><span className="cd-info-label">السعر</span><span>{formatMoney(order.price)}</span></div>}
+            {order.price > 0 && <div className="cd-info-row"><span className="cd-info-label">السعر</span><span>{formatMoney(0)}</span></div>}
             <div className="cd-info-row"><span className="cd-info-label">الإجمالي</span><span className="od-total">{formatMoney(order.total)}</span></div>
             {order.materialsStatus && <div className="cd-info-row"><span className="cd-info-label">الخامات</span><span>{materialLabel(order.materialsStatus)}</span></div>}
             {order.paymentMethod && <div className="cd-info-row"><span className="cd-info-label">طريقة الدفع</span><span>{paymentLabel(order.paymentMethod)}</span></div>}
@@ -3638,193 +3638,198 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         </div>
       </div>
 
-      <section className="nf-card">
-        <header className="nf-card-head">
-          <span className="nf-card-icon"><ClipboardList size={19} /></span>
-          <div>
-            <h3>بيانات الأوردر</h3>
-            <p>رقم الأوردر والطرف والعميل وموعد التسليم وتفاصيل المنتج والدفع</p>
-          </div>
-        </header>
-        <div className="nf-row nf-row-order">
-          <label className="nf-field">
-            <span>رقم الأوردر</span>
-            <input value={form.order_number} readOnly />
-          </label>
-          <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
-            <span>طرف<em className="nf-required">*</em></span>
-            <select value={partyOptions.includes(form.source_person) ? form.source_person : "other"} onChange={(event) => {
-              if (event.target.value === "other") {
-                setForm((current) => calculate({ ...current, source_person: current.customParty || "", customParty: current.customParty || "", updated_at: new Date().toISOString() }));
-              } else {
-                setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
-              }
-            }}>
-              {partyOptions.filter((option) => option !== "أخرى").map((option) => <option key={option} value={option}>{option}</option>)}
-              <option value="other">أخرى</option>
-            </select>
-            {!partyOptions.includes(form.source_person) && <input placeholder="اكتب الطرف" value={form.customParty || form.source_person} onChange={(event) => setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: event.target.value, updated_at: new Date().toISOString() }))} />}
-            <ErrorText message={errors.source_person} />
-          </label>
-          <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
-            <span>اسم العميل<em className="nf-required">*</em></span>
-            <input ref={customerRef} list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} />
-            <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
-            <ErrorText message={errors.client_name} />
-          </label>
-          <label className="nf-field">
-            <span>كود العميل</span>
-            <input value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} readOnly />
-          </label>
-          <RedDatePicker required className={`nf-field nf-field-delivery${errors.delivery_date ? " nf-field-invalid" : ""}`} label="تاريخ التسليم" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} error={errors.delivery_date} />
-        </div>
+      <div className="nf-grid">
+        <div className="nf-col nf-col-right">
+          <section className="nf-card">
+            <header className="nf-card-head">
+              <span className="nf-card-icon"><ClipboardList size={19} /></span>
+              <div>
+                <h3>بيانات الأوردر</h3>
+                <p>رقم الأوردر والطرف والعميل وموعد التسليم وتفاصيل المنتج والدفع</p>
+              </div>
+            </header>
+            <div className="nf-row nf-row-order">
+              <label className="nf-field">
+                <span>رقم الأوردر</span>
+                <input value={form.order_number} readOnly />
+              </label>
+              <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
+                <span>طرف<em className="nf-required">*</em></span>
+                <select value={partyOptions.includes(form.source_person) ? form.source_person : "other"} onChange={(event) => {
+                  if (event.target.value === "other") {
+                    setForm((current) => calculate({ ...current, source_person: current.customParty || "", customParty: current.customParty || "", updated_at: new Date().toISOString() }));
+                  } else {
+                    setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
+                  }
+                }}>
+                  {partyOptions.filter((option) => option !== "أخرى").map((option) => <option key={option} value={option}>{option}</option>)}
+                  <option value="other">أخرى</option>
+                </select>
+                {!partyOptions.includes(form.source_person) && <input placeholder="اكتب الطرف" value={form.customParty || form.source_person} onChange={(event) => setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: event.target.value, updated_at: new Date().toISOString() }))} />}
+                <ErrorText message={errors.source_person} />
+              </label>
+              <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
+                <span>اسم العميل<em className="nf-required">*</em></span>
+                <input ref={customerRef} list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} />
+                <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
+                <ErrorText message={errors.client_name} />
+              </label>
+              <label className="nf-field">
+                <span>كود العميل</span>
+                <input value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} readOnly />
+              </label>
+              <RedDatePicker required className={`nf-field nf-field-delivery${errors.delivery_date ? " nf-field-invalid" : ""}`} label="تاريخ التسليم" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} error={errors.delivery_date} />
+            </div>
 
-        <div className="nf-row nf-row-products">
-          <label className={`nf-field${errors.productId ? " nf-field-invalid" : ""}`}>
-            <span>نوع المنتج</span>
-            <div className="nf-product-combobox" ref={productBoxRef}>
-              <input
-                value={form.productName}
-                onChange={handleProductInputChange}
-                onFocus={handleProductInputFocus}
-                onKeyDown={handleProductKeyDown}
-                placeholder={activeProducts.length ? "اكتب أو اختر نوع المنتج" : "اكتب نوع المنتج"}
-              />
-              {productDropdownOpen && visibleProducts.length > 0 && (
-                <div className="nf-product-dropdown">
-                  {visibleProducts.map((product, index) => (
-                    <button
-                      type="button"
-                      key={product.id}
-                      className={`nf-product-option${index === productHighlight ? " selected" : ""}`}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => { setProductSearch(product.name); selectProduct(product.id); setProductDropdownOpen(false); }}
-                    >
-                      {product.name}
-                    </button>
-                  ))}
+            <div className="nf-row nf-row-products">
+              <label className={`nf-field${errors.productId ? " nf-field-invalid" : ""}`}>
+                <span>نوع المنتج</span>
+                <div className="nf-product-combobox" ref={productBoxRef}>
+                  <input
+                    value={form.productName}
+                    onChange={handleProductInputChange}
+                    onFocus={handleProductInputFocus}
+                    onKeyDown={handleProductKeyDown}
+                    placeholder={activeProducts.length ? "اكتب أو اختر نوع المنتج" : "اكتب نوع المنتج"}
+                  />
+                  {productDropdownOpen && visibleProducts.length > 0 && (
+                    <div className="nf-product-dropdown">
+                      {visibleProducts.map((product, index) => (
+                        <button
+                          type="button"
+                          key={product.id}
+                          className={`nf-product-option${index === productHighlight ? " selected" : ""}`}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => { setProductSearch(product.name); selectProduct(product.id); setProductDropdownOpen(false); }}
+                        >
+                          {product.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
+                <ErrorText message={errors.productId} />
+              </label>
+              <label className={`nf-field${errors.quantity ? " nf-field-invalid" : ""}`}>
+                <span>العدد<em className="nf-required">*</em></span>
+                <input type="number" min={1} value={form.quantity} onChange={(event) => set("quantity", Number(event.target.value))} />
+                <ErrorText message={errors.quantity} />
+              </label>
+              <label className={`nf-field${errors.price ? " nf-field-invalid" : ""}`}>
+                <span>السعر</span>
+                <input type="number" min={0} step="0.01" value={form.price} onChange={(event) => set("price", Number(event.target.value))} />
+                <ErrorText message={errors.price} />
+              </label>
+              <Readonly className="nf-field" label="الإجمالي" value={computed.total} />
+              <label className={`nf-field${errors.paid ? " nf-field-invalid" : ""}`}>
+                <span>المدفوع</span>
+                <input type="number" min={0} step="0.01" value={form.paid} onChange={(event) => set("paid", Number(event.target.value))} />
+                <ErrorText message={errors.paid} />
+              </label>
+              <Readonly className="nf-field" label="المتبقي" value={computed.remaining} />
+              <label className={`nf-field${errors.paymentMethod ? " nf-field-invalid" : ""}`}>
+                <span>طريقة الدفع</span>
+                <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)}>
+                  <option value="">اختر طريقة الدفع</option>
+                  {paymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
+                </select>
+                <ErrorText message={errors.paymentMethod} />
+              </label>
+              <label className="nf-field">
+                <span>على الحساب</span>
+                <input type="number" min={0} step="0.01" value={form.old_balance} onChange={(event) => set("old_balance", Number(event.target.value))} />
+              </label>
+              <label className={`nf-field${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
+                <span>الخامات<em className="nf-required">*</em></span>
+                <select value={normalizeMaterialsStatus(form.materialsStatus)} onChange={(event) => set("materialsStatus", event.target.value)}>
+                  <option value="">اختر حالة الخامات</option>
+                  {materialStatusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+                <ErrorText message={errors.materialsStatus} />
+              </label>
             </div>
-            <ErrorText message={errors.productId} />
-          </label>
-          <label className={`nf-field${errors.quantity ? " nf-field-invalid" : ""}`}>
-            <span>العدد<em className="nf-required">*</em></span>
-            <input type="number" min={1} value={form.quantity} onChange={(event) => set("quantity", Number(event.target.value))} />
-            <ErrorText message={errors.quantity} />
-          </label>
-          <label className={`nf-field${errors.price ? " nf-field-invalid" : ""}`}>
-            <span>السعر</span>
-            <input type="number" min={0} step="0.01" value={form.price} onChange={(event) => set("price", Number(event.target.value))} />
-            <ErrorText message={errors.price} />
-          </label>
-          <Readonly className="nf-field" label="الإجمالي" value={computed.total} />
-          <label className={`nf-field${errors.paid ? " nf-field-invalid" : ""}`}>
-            <span>المدفوع</span>
-            <input type="number" min={0} step="0.01" value={form.paid} onChange={(event) => set("paid", Number(event.target.value))} />
-            <ErrorText message={errors.paid} />
-          </label>
-          <Readonly className="nf-field" label="المتبقي" value={computed.remaining} />
-          <label className={`nf-field${errors.paymentMethod ? " nf-field-invalid" : ""}`}>
-            <span>طريقة الدفع</span>
-            <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)}>
-              <option value="">اختر طريقة الدفع</option>
-              {paymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
-            </select>
-            <ErrorText message={errors.paymentMethod} />
-          </label>
-          <label className="nf-field">
-            <span>على الحساب</span>
-            <input type="number" min={0} step="0.01" value={form.old_balance} onChange={(event) => set("old_balance", Number(event.target.value))} />
-          </label>
-          <label className={`nf-field${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
-            <span>الخامات<em className="nf-required">*</em></span>
-            <select value={normalizeMaterialsStatus(form.materialsStatus)} onChange={(event) => set("materialsStatus", event.target.value)}>
-              <option value="">اختر حالة الخامات</option>
-              {materialStatusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
-            <ErrorText message={errors.materialsStatus} />
-          </label>
-        </div>
 
-        {form.paymentMethod === "other" && <div className="nf-row nf-row-custom-payment">
-          <label className="nf-field"><span>اكتب طريقة الدفع</span><input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} /><ErrorText message={errors.customPaymentMethod} /></label>
-        </div>}
+            {form.paymentMethod === "other" && <div className="nf-row nf-row-custom-payment">
+              <label className="nf-field"><span>اكتب طريقة الدفع</span><input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} /><ErrorText message={errors.customPaymentMethod} /></label>
+            </div>}
 
-        {canAddProduct && (
-          <footer className="nf-product-footer">
-            <button type="button" className="ghost-btn nf-add-product" onClick={onAddProduct}><Plus size={16} /> إضافة منتج جديد</button>
-          </footer>
-        )}
-      </section>
+            {canAddProduct && (
+              <footer className="nf-product-footer">
+                <button type="button" className="ghost-btn nf-add-product" onClick={onAddProduct}><Plus size={16} /> إضافة منتج جديد</button>
+              </footer>
+            )}
+          </section>
 
-      <section className="nf-card">
-        <header className="nf-card-head">
-          <span className="nf-card-icon"><Cog size={19} /></span>
-          <div>
-            <h3>طريقة التشغيل</h3>
-            <p>حدد خطوات التشغيل المطلوبة للأوردر</p>
+          <section className="nf-card">
+            <header className="nf-card-head">
+              <span className="nf-card-icon"><Cog size={19} /></span>
+              <div>
+                <h3>طريقة التشغيل</h3>
+                <p>حدد خطوات التشغيل المطلوبة للأوردر</p>
+              </div>
+            </header>
+            <div className="operation-methods">
+              {operationItems.map((item, index) => (
+                <div className="operation-card" key={index}>
+                  <div className="operation-item-row">
+                    <label className={`nf-field${errors.operationMethods && index === 0 ? " nf-field-invalid" : ""}`}>
+                      <span>طريقة التشغيل {operationItems.length > 1 ? index + 1 : ""}</span>
+                      <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "مثال: صدر شمال" : "مثال: ظهر"} />
+                    </label>
+                    <button type="button" className="primary-btn compact operation-add-btn" title="إضافة طريقة تشغيل" onClick={addOperationItem}><Plus size={16} /></button>
+                    {operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
+                  </div>
+                  <div className="operation-card-images">
+                    <ImageInputWithClipboard
+                      large
+                      pasteOnly
+                      required={index === 0}
+                      label="صورة أمر الشغل"
+                      error={index === 0 ? errors.workOrderImage : ""}
+                      value={item.workOrderImage}
+                      fileName={item.workOrderFileName}
+                      fileSize={item.workOrderImageSize}
+                      source={item.workOrderImageSource}
+                      active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
+                      status={imageMessages[operationMessageKey(index, "workOrderImage")]}
+                      onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
+                      onPaste={() => pasteFromClipboard(index, "workOrderImage")}
+                      onRemove={() => removeOperationAttachment(index, "workOrderImage")}
+                      onDropFile={(file) => setOperationAttachment(index, "workOrderImage", file)}
+                      onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
+                    />
+                    <ImageInputWithClipboard
+                      large
+                      pasteOnly
+                      required={index === 0}
+                      label="صورة اللوجو"
+                      error={index === 0 ? errors.logoImage : ""}
+                      value={item.logoImage}
+                      fileName={item.logoFileName}
+                      fileSize={item.logoImageSize}
+                      source={item.logoImageSource}
+                      active={activeImageField?.index === index && activeImageField.key === "logoImage"}
+                      status={imageMessages[operationMessageKey(index, "logoImage")]}
+                      onActivate={() => setActiveImageField({ index, key: "logoImage" })}
+                      onPaste={() => pasteFromClipboard(index, "logoImage")}
+                      onRemove={() => removeOperationAttachment(index, "logoImage")}
+                      onDropFile={(file) => setOperationAttachment(index, "logoImage", file)}
+                      onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <ErrorText message={errors.operationMethods} />
+          </section>
+
+          <div className="nf-actionbar">
+            {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
+            <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraft} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>
+            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : "إنشاء الأوردر"} <Send size={16} /></button>
           </div>
-        </header>
-        <div className="operation-methods">
-          {operationItems.map((item, index) => (
-            <div className="operation-card" key={index}>
-              <div className="operation-item-row">
-                <label className={`nf-field${errors.operationMethods && index === 0 ? " nf-field-invalid" : ""}`}>
-                  <span>طريقة التشغيل {operationItems.length > 1 ? index + 1 : ""}</span>
-                  <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "مثال: صدر شمال" : "مثال: ظهر"} />
-                </label>
-                <button type="button" className="primary-btn compact operation-add-btn" title="إضافة طريقة تشغيل" onClick={addOperationItem}><Plus size={16} /></button>
-                {operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
-              </div>
-              <div className="operation-card-images">
-                <ImageInputWithClipboard
-                  large
-                  pasteOnly
-                  required={index === 0}
-                  label="صورة أمر الشغل"
-                  error={index === 0 ? errors.workOrderImage : ""}
-                  value={item.workOrderImage}
-                  fileName={item.workOrderFileName}
-                  fileSize={item.workOrderImageSize}
-                  source={item.workOrderImageSource}
-                  active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
-                  status={imageMessages[operationMessageKey(index, "workOrderImage")]}
-                  onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
-                  onPaste={() => pasteFromClipboard(index, "workOrderImage")}
-                  onRemove={() => removeOperationAttachment(index, "workOrderImage")}
-                  onDropFile={(file) => setOperationAttachment(index, "workOrderImage", file)}
-                  onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
-                />
-                <ImageInputWithClipboard
-                  large
-                  pasteOnly
-                  required={index === 0}
-                  label="صورة اللوجو"
-                  error={index === 0 ? errors.logoImage : ""}
-                  value={item.logoImage}
-                  fileName={item.logoFileName}
-                  fileSize={item.logoImageSize}
-                  source={item.logoImageSource}
-                  active={activeImageField?.index === index && activeImageField.key === "logoImage"}
-                  status={imageMessages[operationMessageKey(index, "logoImage")]}
-                  onActivate={() => setActiveImageField({ index, key: "logoImage" })}
-                  onPaste={() => pasteFromClipboard(index, "logoImage")}
-                  onRemove={() => removeOperationAttachment(index, "logoImage")}
-                  onDropFile={(file) => setOperationAttachment(index, "logoImage", file)}
-                  onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
-                />
-              </div>
-            </div>
-          ))}
         </div>
-        <ErrorText message={errors.operationMethods} />
-      </section>
-
-      <div className="nf-actionbar">
-        {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
-        <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraft} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>
-        <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : "إنشاء الأوردر"} <Send size={16} /></button>
+        <div className="nf-col nf-col-left" aria-hidden="true" />
       </div>
       <div className="form-grid" hidden>
         <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} />
