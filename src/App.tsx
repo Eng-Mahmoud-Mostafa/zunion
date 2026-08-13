@@ -3575,8 +3575,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       if (!normalizeMaterialsStatus(form.materialsStatus)) nextErrors.materialsStatus = "يجب تحديد حالة الخامات";
       if (!form.delivery_date) nextErrors.delivery_date = "تاريخ التسليم مطلوب";
       if (methods.length === 0) nextErrors.operationMethods = "يجب إضافة طريقة تشغيل واحدة على الأقل";
-      if (!operationItems[0]?.workOrderImage) nextErrors.workOrderImage = "صورة أمر الشغل مطلوبة";
-      if (!operationItems[0]?.logoImage) nextErrors.logoImage = "صورة اللوجو مطلوبة";
+      if (!operationItems[0]?.workOrderImage) nextErrors.workOrderImage = "أمر الشغل مطلوب";
       if (Object.keys(nextErrors).length) {
         setErrors(nextErrors);
         scrollToFirstInvalid();
@@ -3770,7 +3769,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                       large
                       pasteOnly
                       required={index === 0}
-                      label="صورة أمر الشغل"
+                      label="أمر الشغل"
                       error={index === 0 ? errors.workOrderImage : ""}
                       value={item.workOrderImage}
                       fileName={item.workOrderFileName}
@@ -3787,8 +3786,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                     <ImageInputWithClipboard
                       large
                       pasteOnly
-                      required={index === 0}
-                      label="صورة اللوجو"
+                      label="أمر اللوجو"
                       error={index === 0 ? errors.logoImage : ""}
                       value={item.logoImage}
                       fileName={item.logoFileName}
@@ -3983,7 +3981,6 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       <span className="image-field-label">{label}{required && <em className="nf-required">*</em>}</span>
       <input ref={fileInputRef} type="file" accept={clipboardImageTypes.join(",")} hidden onChange={handleFileChange} />
       <div className="image-field-actions">
-        {large && !value && <span className="image-drop-hint">اسحب وأفلت الصورة هنا أو اخترها من الجهاز</span>}
         {!pasteOnly && <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>}
         <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : "لصق الصورة من الحافظة"}</button>
         {!value && !large && <span className="image-empty-state">لم يتم رفع صورة</span>}
