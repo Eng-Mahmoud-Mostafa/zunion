@@ -3460,6 +3460,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   }
 
   function addOperationItem() {
+    if (operationItems.length >= 4) return;
     syncOperationItems([...operationItems, { method: "", logoImage: "", workOrderImage: "" }]);
   }
 
@@ -3617,6 +3618,58 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     operationItems[0]?.workOrderImage,
   );
 
+  function renderOperationCard(item: OperationItem, index: number) {
+    return (
+      <div className="operation-card" key={index}>
+        <div className="operation-item-row">
+          <label className={`nf-field${errors.operationMethods && index === 0 ? " nf-field-invalid" : ""}`}>
+            <span>طريقة التشغيل {operationItems.length > 1 ? index + 1 : ""}</span>
+            <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "مثال: صدر شمال" : "مثال: ظهر"} />
+          </label>
+          {operationItems.length < 4 && <button type="button" className="primary-btn compact operation-add-btn" title="إضافة طريقة تشغيل" onClick={addOperationItem}><Plus size={16} /></button>}
+          {operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
+        </div>
+        <div className="operation-card-images">
+          <ImageInputWithClipboard
+            large
+            pasteOnly
+            required={index === 0}
+            label="أمر الشغل"
+            error={index === 0 ? errors.workOrderImage : ""}
+            value={item.workOrderImage}
+            fileName={item.workOrderFileName}
+            fileSize={item.workOrderImageSize}
+            source={item.workOrderImageSource}
+            active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
+            status={imageMessages[operationMessageKey(index, "workOrderImage")]}
+            onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
+            onPaste={() => pasteFromClipboard(index, "workOrderImage")}
+            onRemove={() => removeOperationAttachment(index, "workOrderImage")}
+            onDropFile={(file) => setOperationAttachment(index, "workOrderImage", file)}
+            onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
+          />
+          <ImageInputWithClipboard
+            large
+            pasteOnly
+            label="أمر اللوجو"
+            error={index === 0 ? errors.logoImage : ""}
+            value={item.logoImage}
+            fileName={item.logoFileName}
+            fileSize={item.logoImageSize}
+            source={item.logoImageSource}
+            active={activeImageField?.index === index && activeImageField.key === "logoImage"}
+            status={imageMessages[operationMessageKey(index, "logoImage")]}
+            onActivate={() => setActiveImageField({ index, key: "logoImage" })}
+            onPaste={() => pasteFromClipboard(index, "logoImage")}
+            onRemove={() => removeOperationAttachment(index, "logoImage")}
+            onDropFile={(file) => setOperationAttachment(index, "logoImage", file)}
+            onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <form ref={formRef} className="order-form order-form-modern" onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
       <div className="nf-grid">
@@ -3745,75 +3798,21 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 
           </section>
 
-          <section className="nf-card">
-            <header className="nf-card-head">
-              <span className="nf-card-icon"><Cog size={19} /></span>
-              <div>
-                <h3>طريقة التشغيل</h3>
-                <p>حدد خطوات التشغيل المطلوبة للأوردر</p>
-              </div>
-            </header>
-            <div className="operation-methods">
-              {operationItems.map((item, index) => (
-                <div className="operation-card" key={index}>
-                  <div className="operation-item-row">
-                    <label className={`nf-field${errors.operationMethods && index === 0 ? " nf-field-invalid" : ""}`}>
-                      <span>طريقة التشغيل {operationItems.length > 1 ? index + 1 : ""}</span>
-                      <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "مثال: صدر شمال" : "مثال: ظهر"} />
-                    </label>
-                    <button type="button" className="primary-btn compact operation-add-btn" title="إضافة طريقة تشغيل" onClick={addOperationItem}><Plus size={16} /></button>
-                    {operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
-                  </div>
-                  <div className="operation-card-images">
-                    <ImageInputWithClipboard
-                      large
-                      pasteOnly
-                      required={index === 0}
-                      label="أمر الشغل"
-                      error={index === 0 ? errors.workOrderImage : ""}
-                      value={item.workOrderImage}
-                      fileName={item.workOrderFileName}
-                      fileSize={item.workOrderImageSize}
-                      source={item.workOrderImageSource}
-                      active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
-                      status={imageMessages[operationMessageKey(index, "workOrderImage")]}
-                      onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
-                      onPaste={() => pasteFromClipboard(index, "workOrderImage")}
-                      onRemove={() => removeOperationAttachment(index, "workOrderImage")}
-                      onDropFile={(file) => setOperationAttachment(index, "workOrderImage", file)}
-                      onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
-                    />
-                    <ImageInputWithClipboard
-                      large
-                      pasteOnly
-                      label="أمر اللوجو"
-                      error={index === 0 ? errors.logoImage : ""}
-                      value={item.logoImage}
-                      fileName={item.logoFileName}
-                      fileSize={item.logoImageSize}
-                      source={item.logoImageSource}
-                      active={activeImageField?.index === index && activeImageField.key === "logoImage"}
-                      status={imageMessages[operationMessageKey(index, "logoImage")]}
-                      onActivate={() => setActiveImageField({ index, key: "logoImage" })}
-                      onPaste={() => pasteFromClipboard(index, "logoImage")}
-                      onRemove={() => removeOperationAttachment(index, "logoImage")}
-                      onDropFile={(file) => setOperationAttachment(index, "logoImage", file)}
-                      onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <ErrorText message={errors.operationMethods} />
-          </section>
-
-          <div className="nf-actionbar">
-            {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
-            <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraft} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>
-            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : "إنشاء الأوردر"} <Send size={16} /></button>
-          </div>
+          {operationItems[0] && renderOperationCard(operationItems[0], 0)}
         </div>
-        <div className="nf-col nf-col-left" aria-hidden="true" />
+        <div className="nf-col nf-col-left">
+          {operationItems.slice(1).map((item, index) => renderOperationCard(item, index + 1))}
+        </div>
+      </div>
+
+      <div className="nf-operation-error">
+        <ErrorText message={errors.operationMethods} />
+      </div>
+
+      <div className="nf-actionbar">
+        {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
+        <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraft} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>
+        <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : "إنشاء الأوردر"} <Send size={16} /></button>
       </div>
       <div className="form-grid" hidden>
         <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} />

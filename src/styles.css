@@ -3321,10 +3321,10 @@ input[type="date"] {
 }
 
 /* ---------- grid ---------- */
-/* The order form uses the full content column (no empty placeholder column). */
+/* Right column: أوردر جديد + operation Card 1. Left column: operation Cards 2-4. */
 .nf-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
   min-width: 0;
@@ -3338,7 +3338,8 @@ input[type="date"] {
 }
 
 .nf-col-left {
-  display: none;
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .nf-col-right {
@@ -3346,14 +3347,7 @@ input[type="date"] {
   grid-row: 1;
 }
 
-@media (min-width: 1280px) {
-  .nf-col-left {
-    position: sticky;
-    top: 12px;
-  }
-}
-
-@media (max-width: 1279px) {
+@media (max-width: 1100px) {
   .nf-grid {
     grid-template-columns: 1fr;
   }
@@ -3615,13 +3609,6 @@ input[type="date"] {
 }
 
 /* ---------- operation method ---------- */
-.operation-methods {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  align-items: stretch;
-}
-
 .operation-card {
   display: grid;
   gap: 12px;
@@ -3638,14 +3625,6 @@ input[type="date"] {
 .operation-card:hover {
   border-color: rgba(217, 4, 22, .3);
   box-shadow: 0 14px 32px rgba(217, 4, 22, .06);
-}
-
-.operation-card:nth-child(odd) {
-  grid-column: 1;
-}
-
-.operation-card:nth-child(even) {
-  grid-column: 2;
 }
 
 .operation-item-row {
@@ -3674,17 +3653,6 @@ input[type="date"] {
 .operation-card-images .image-clipboard-field.large {
   min-height: 120px;
   align-content: start;
-}
-
-@media (max-width: 900px) {
-  .operation-methods {
-    grid-template-columns: 1fr;
-  }
-
-  .operation-card:nth-child(odd),
-  .operation-card:nth-child(even) {
-    grid-column: 1;
-  }
 }
 
 @media (max-width: 560px) {
@@ -3945,48 +3913,20 @@ input[type="date"] {
 }
 
 .nf-row-order {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .nf-row-products {
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
-/* explicit right-to-left placement (RTL-independent) */
-.nf-row-order > :nth-child(1) { grid-column: 1; }
-.nf-row-order > :nth-child(2) { grid-column: 2; }
-.nf-row-order > :nth-child(3) { grid-column: 3; }
-.nf-row-order > :nth-child(4) { grid-column: 4; }
-.nf-row-order > :nth-child(5) { grid-column: 5; }
-.nf-row-products > :nth-child(1) { grid-column: 1; }
-.nf-row-products > :nth-child(2) { grid-column: 2; }
-.nf-row-products > :nth-child(3) { grid-column: 3; }
-.nf-row-products > :nth-child(4) { grid-column: 4; }
-.nf-row-products > :nth-child(5) { grid-column: 5; }
-.nf-row-products > :nth-child(6) { grid-column: 6; }
-.nf-row-products > :nth-child(7) { grid-column: 7; }
-.nf-row-products > :nth-child(8) { grid-column: 8; }
-
 .nf-row-custom-payment {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 @media (max-width: 900px) {
-  .nf-row-order {
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  }
-
-  .nf-row-products {
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  }
-
   .nf-row-custom-payment {
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  }
-
-  .nf-row-order > :nth-child(n),
-  .nf-row-products > :nth-child(n) {
-    grid-column: auto;
+    grid-template-columns: 1fr;
   }
 }
 
@@ -4078,6 +4018,10 @@ input[type="date"] {
 }
 
 /* ---------- sticky action bar ---------- */
+.nf-operation-error {
+  margin-top: 2px;
+}
+
 .nf-actionbar {
   position: sticky;
   bottom: 16px;
