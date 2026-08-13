@@ -3321,11 +3321,10 @@ input[type="date"] {
 }
 
 /* ---------- grid ---------- */
-/* dir=rtl: column 1 = rightmost, column 2 = leftmost.
-   fr units (not %) so the 24px gap is subtracted before track sizing — no overflow. */
+/* The order form uses the full content column (no empty placeholder column). */
 .nf-grid {
   display: grid;
-  grid-template-columns: 65fr 35fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
   align-items: start;
   min-width: 0;
@@ -3338,10 +3337,8 @@ input[type="date"] {
   min-width: 0;
 }
 
-/* dir=rtl: column 1 = rightmost, column 2 = leftmost */
 .nf-col-left {
-  grid-column: 2;
-  grid-row: 1;
+  display: none;
 }
 
 .nf-col-right {
@@ -3425,6 +3422,100 @@ input[type="date"] {
   margin: 2px 0 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* ---------- compact order card ("أوردر جديد") ---------- */
+.nf-card-order {
+  padding: 16px 18px 18px;
+}
+
+.nf-card-order .nf-card-head {
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.nf-card-order .nf-card-icon {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+}
+
+.nf-card-order .nf-card-head h3 {
+  font-size: 15.5px;
+}
+
+.nf-card-order .nf-card-head p {
+  font-size: 11.5px;
+}
+
+.nf-card-order .nf-field {
+  gap: 5px !important;
+  font-size: 12px !important;
+}
+
+.nf-card-order .nf-field > span {
+  font-size: 12px;
+}
+
+.nf-card-order .nf-field input:not(.delivery-date-input),
+.nf-card-order .nf-field select,
+.nf-card-order .nf-field textarea {
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  border-radius: 8px !important;
+}
+
+.nf-card-order .nf-product-combobox input {
+  width: 100%;
+}
+
+.nf-card-order .nf-product-dropdown {
+  padding: 5px;
+  gap: 2px;
+}
+
+.nf-card-order .nf-product-option {
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.nf-card-order .delivery-date-field {
+  --control-height: 30px;
+  --control-font-size: 12px;
+  width: 112px;
+}
+
+.nf-card-order .nf-materials {
+  margin-top: 12px;
+  gap: 10px 14px;
+}
+
+.nf-card-order .nf-materials-label {
+  font-size: 12px;
+}
+
+.nf-card-order .nf-radio-group {
+  gap: 16px;
+}
+
+.nf-card-order .nf-radio {
+  gap: 6px;
+  font-size: 12.5px;
+}
+
+.nf-card-order .nf-radio-mark {
+  flex-basis: 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.nf-card-order .nf-radio-mark::after {
+  width: 7px;
+  height: 7px;
 }
 
 /* ---------- fields ---------- */
@@ -3845,12 +3936,12 @@ input[type="date"] {
 /* ---------- single vertical flow ---------- */
 .nf-row {
   display: grid;
-  gap: 18px 16px;
+  gap: 10px 10px;
   min-width: 0;
 }
 
 .nf-row + .nf-row {
-  margin-top: 18px;
+  margin-top: 10px;
 }
 
 .nf-row-order {
@@ -3880,17 +3971,17 @@ input[type="date"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-@media (max-width: 1439px) {
+@media (max-width: 900px) {
   .nf-row-order {
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
 
   .nf-row-products {
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   }
 
   .nf-row-custom-payment {
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
 
   .nf-row-order > :nth-child(n),
@@ -3903,7 +3994,7 @@ input[type="date"] {
   .nf-row-order,
   .nf-row-products,
   .nf-row-custom-payment {
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   }
 }
 

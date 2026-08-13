@@ -3622,11 +3622,11 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     <form ref={formRef} className="order-form order-form-modern" onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
       <div className="nf-grid">
         <div className="nf-col nf-col-right">
-          <section className="nf-card">
+          <section className="nf-card nf-card-order">
             <header className="nf-card-head">
               <span className="nf-card-icon"><ClipboardList size={19} /></span>
               <div>
-                <h3>بيانات الأوردر</h3>
+                <h3>أوردر جديد</h3>
                 <p>رقم الأوردر والطرف والعميل وموعد التسليم وتفاصيل المنتج والدفع</p>
               </div>
             </header>
@@ -3744,11 +3744,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               <label className="nf-field"><span>اكتب طريقة الدفع</span><input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} /><ErrorText message={errors.customPaymentMethod} /></label>
             </div>}
 
-            {canAddProduct && (
-              <footer className="nf-product-footer">
-                <button type="button" className="ghost-btn nf-add-product" onClick={onAddProduct}><Plus size={16} /> إضافة منتج جديد</button>
-              </footer>
-            )}
           </section>
 
           <section className="nf-card">
