@@ -3858,8 +3858,23 @@ input[type="date"] {
 }
 
 .nf-row-products {
-  grid-template-columns: repeat(9, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
+
+/* explicit right-to-left placement (RTL-independent) */
+.nf-row-order > :nth-child(1) { grid-column: 1; }
+.nf-row-order > :nth-child(2) { grid-column: 2; }
+.nf-row-order > :nth-child(3) { grid-column: 3; }
+.nf-row-order > :nth-child(4) { grid-column: 4; }
+.nf-row-order > :nth-child(5) { grid-column: 5; }
+.nf-row-products > :nth-child(1) { grid-column: 1; }
+.nf-row-products > :nth-child(2) { grid-column: 2; }
+.nf-row-products > :nth-child(3) { grid-column: 3; }
+.nf-row-products > :nth-child(4) { grid-column: 4; }
+.nf-row-products > :nth-child(5) { grid-column: 5; }
+.nf-row-products > :nth-child(6) { grid-column: 6; }
+.nf-row-products > :nth-child(7) { grid-column: 7; }
+.nf-row-products > :nth-child(8) { grid-column: 8; }
 
 .nf-row-custom-payment {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3877,6 +3892,11 @@ input[type="date"] {
   .nf-row-custom-payment {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
+
+  .nf-row-order > :nth-child(n),
+  .nf-row-products > :nth-child(n) {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 560px) {
@@ -3885,6 +3905,85 @@ input[type="date"] {
   .nf-row-custom-payment {
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
+}
+
+/* ---------- materials radio group ---------- */
+.nf-materials {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-top: 18px;
+  min-width: 0;
+}
+
+.nf-materials-label {
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.nf-radio-group {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-width: 0;
+}
+
+.nf-radio {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--navy);
+  font-size: 13.5px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.nf-radio input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.nf-radio-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(6, 31, 59, .25);
+  border-radius: 50%;
+  background: #fff;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+
+.nf-radio-mark::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  transform: scale(0);
+  transition: transform .16s ease;
+}
+
+.nf-radio input:checked + .nf-radio-mark {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(217, 4, 22, .12);
+}
+
+.nf-radio input:checked + .nf-radio-mark::after {
+  transform: scale(1);
+}
+
+.nf-radio input:focus-visible + .nf-radio-mark {
+  box-shadow: 0 0 0 3px rgba(217, 4, 22, .2);
 }
 
 /* ---------- sticky action bar ---------- */

@@ -3620,24 +3620,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 
   return (
     <form ref={formRef} className="order-form order-form-modern" onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
-      <div className="nf-header">
-        <div className="nf-header-copy">
-          <span className="nf-kicker">{initial ? "تعديل أوردر" : "أوردر جديد"}</span>
-          <h2>{initial ? "تعديل بيانات الأوردر" : "إنشاء أوردر جديد"}</h2>
-          <p>{initial ? "عدّل بيانات الأوردر ثم احفظ التغييرات." : "أدخل بيانات العميل والمنتج ثم أنشئ الأوردر."}</p>
-        </div>
-        <div className="nf-header-meta">
-          <div className="nf-header-order">
-            <span className="nf-order-label">رقم الأوردر</span>
-            <strong className="nf-order-number">{form.order_number}</strong>
-          </div>
-          <div className={`nf-header-date${form.delivery_date ? "" : " empty"}`}>
-            <span className="nf-order-label">تاريخ التسليم</span>
-            <strong className="nf-order-date-value">{form.delivery_date ? <span dir="ltr">{form.delivery_date}</span> : "حدد التاريخ"}</strong>
-          </div>
-        </div>
-      </div>
-
       <div className="nf-grid">
         <div className="nf-col nf-col-right">
           <section className="nf-card">
@@ -3722,7 +3704,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               </label>
               <Readonly className="nf-field" label="الإجمالي" value={computed.total} />
               <label className={`nf-field${errors.paid ? " nf-field-invalid" : ""}`}>
-                <span>المدفوع</span>
+                <span>دفع</span>
                 <input type="number" min={0} step="0.01" value={form.paid} onChange={(event) => set("paid", Number(event.target.value))} />
                 <ErrorText message={errors.paid} />
               </label>
@@ -3736,17 +3718,26 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <ErrorText message={errors.paymentMethod} />
               </label>
               <label className="nf-field">
-                <span>على الحساب</span>
+                <span>على</span>
                 <input type="number" min={0} step="0.01" value={form.old_balance} onChange={(event) => set("old_balance", Number(event.target.value))} />
               </label>
-              <label className={`nf-field${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
-                <span>الخامات<em className="nf-required">*</em></span>
-                <select value={normalizeMaterialsStatus(form.materialsStatus)} onChange={(event) => set("materialsStatus", event.target.value)}>
-                  <option value="">اختر حالة الخامات</option>
-                  {materialStatusOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </select>
-                <ErrorText message={errors.materialsStatus} />
-              </label>
+            </div>
+
+            <div className={`nf-materials${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
+              <span className="nf-materials-label">الخامات<em className="nf-required">*</em></span>
+              <div className="nf-radio-group">
+                <label className="nf-radio">
+                  <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} />
+                  <span className="nf-radio-mark" aria-hidden="true" />
+                  <span>موجود</span>
+                </label>
+                <label className="nf-radio">
+                  <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} />
+                  <span className="nf-radio-mark" aria-hidden="true" />
+                  <span>غير موجود</span>
+                </label>
+              </div>
+              <ErrorText message={errors.materialsStatus} />
             </div>
 
             {form.paymentMethod === "other" && <div className="nf-row nf-row-custom-payment">
