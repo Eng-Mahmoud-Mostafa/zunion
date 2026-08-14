@@ -3453,6 +3453,15 @@ input[type="date"] {
   font-size: 12px;
 }
 
+.nf-card-order .nf-row-products {
+  column-gap: 6px;
+  row-gap: 8px;
+}
+
+.nf-card-order .nf-row-products .nf-field > span {
+  font-size: 10px;
+}
+
 .nf-card-order .nf-field input:not(.delivery-date-input),
 .nf-card-order .nf-field select,
 .nf-card-order .nf-field textarea {
@@ -3478,9 +3487,16 @@ input[type="date"] {
 }
 
 .nf-card-order .delivery-date-field {
-  --control-height: 30px;
+  --control-height: 36px;
   --control-font-size: 12px;
-  width: 112px;
+  width: 100%;
+  min-width: 0;
+}
+
+.nf-card-order .delivery-date-input {
+  height: 100% !important;
+  min-height: 100% !important;
+  padding: 5px 12px !important;
 }
 
 .nf-card-order .nf-materials {
@@ -3913,15 +3929,15 @@ input[type="date"] {
 }
 
 .nf-row-order {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .nf-row-products {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 
 .nf-row-custom-payment {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @media (max-width: 900px) {
@@ -3932,9 +3948,12 @@ input[type="date"] {
 
 @media (max-width: 560px) {
   .nf-row-order,
-  .nf-row-products,
-  .nf-row-custom-payment {
+  .nf-row-products {
     grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  }
+
+  .nf-row-custom-payment {
+    grid-template-columns: 1fr;
   }
 }
 
