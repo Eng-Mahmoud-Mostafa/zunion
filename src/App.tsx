@@ -64,7 +64,7 @@ import { allPermissionKeys, masterProtectedPermissions, roleDefaultPermissions, 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "addCustomer" | "addProduct" | "search" | "worker" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "addCustomer" | "addProduct" | "search" | "worker" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -485,6 +485,7 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   dashboard: "dashboard.view",
   orders: "orders.view",
   new: "orders.create",
+  editOrder: "orders.view",
   addCustomer: "customers.create",
   addProduct: "products.create",
   search: "orders.view",
@@ -3274,7 +3275,7 @@ function AlertItem({ alert }: { alert: Alert }) {
   );
 }
 
-function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void }) {
+function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave, readOnly = false }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void; readOnly?: boolean }) {
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), order_number: orderNumber || String(Date.now()).slice(-6) });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -3522,6 +3523,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   }
 
   function handleClipboardPaste(event: React.ClipboardEvent<HTMLFormElement>) {
+    if (readOnly) { event.preventDefault(); return; }
     if (!(event.target instanceof Element) || !event.target.closest(".image-clipboard-field")) return;
     if (!activeImageField) {
       alert("اختر مكان الصورة أولاً");
@@ -3624,29 +3626,30 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         <div className="operation-item-row">
           <label className={`nf-field${errors.operationMethods && index === 0 ? " nf-field-invalid" : ""}`}>
             <span>طريقة التشغيل {operationItems.length > 1 ? index + 1 : ""}</span>
-            <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "مثال: صدر شمال" : "مثال: ظهر"} />
+            <input value={item.method} onChange={(event) => updateOperationItem(index, { method: event.target.value })} placeholder={index === 0 ? "مثال: صدر شمال" : "مثال: ظهر"} disabled={readOnly} />
           </label>
-          {operationItems.length < 4 && <button type="button" className="primary-btn compact operation-add-btn" title="إضافة طريقة تشغيل" onClick={addOperationItem}><Plus size={16} /></button>}
-          {operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
+          {!readOnly && operationItems.length < 4 && <button type="button" className="primary-btn compact operation-add-btn" title="إضافة طريقة تشغيل" onClick={addOperationItem}><Plus size={16} /></button>}
+          {!readOnly && operationItems.length > 1 && <button type="button" className="ghost-btn compact operation-delete-btn" onClick={() => removeOperationItem(index)}>حذف</button>}
         </div>
         <div className="operation-card-images">
           <ImageInputWithClipboard
             large
             pasteOnly
-            required={index === 0}
+            required={index === 0 && !readOnly}
             label="أمر الشغل"
             error={index === 0 ? errors.workOrderImage : ""}
             value={item.workOrderImage}
             fileName={item.workOrderFileName}
             fileSize={item.workOrderImageSize}
             source={item.workOrderImageSource}
-            active={activeImageField?.index === index && activeImageField.key === "workOrderImage"}
+            active={!readOnly && activeImageField?.index === index && activeImageField.key === "workOrderImage"}
             status={imageMessages[operationMessageKey(index, "workOrderImage")]}
             onActivate={() => setActiveImageField({ index, key: "workOrderImage" })}
             onPaste={() => pasteFromClipboard(index, "workOrderImage")}
             onRemove={() => removeOperationAttachment(index, "workOrderImage")}
             onDropFile={(file) => setOperationAttachment(index, "workOrderImage", file)}
             onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
+            disabled={readOnly}
           />
           <ImageInputWithClipboard
             large
@@ -3657,28 +3660,31 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             fileName={item.logoFileName}
             fileSize={item.logoImageSize}
             source={item.logoImageSource}
-            active={activeImageField?.index === index && activeImageField.key === "logoImage"}
+            active={!readOnly && activeImageField?.index === index && activeImageField.key === "logoImage"}
             status={imageMessages[operationMessageKey(index, "logoImage")]}
             onActivate={() => setActiveImageField({ index, key: "logoImage" })}
             onPaste={() => pasteFromClipboard(index, "logoImage")}
             onRemove={() => removeOperationAttachment(index, "logoImage")}
             onDropFile={(file) => setOperationAttachment(index, "logoImage", file)}
             onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
+            disabled={readOnly}
           />
         </div>
       </div>
     );
   }
 
+  const isEdit = !!initial;
+
   return (
-    <form ref={formRef} className="order-form order-form-modern" onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
+    <form ref={formRef} className={`order-form order-form-modern${readOnly ? " nf-readonly" : ""}`} onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
       <div className="nf-grid">
         <div className="nf-col nf-col-right">
           <section className="nf-card nf-card-order">
             <header className="nf-card-head">
               <span className="nf-card-icon"><ClipboardList size={19} /></span>
               <div>
-                <h3>أوردر جديد</h3>
+                <h3>{isEdit ? `تفاصيل الطلب #${form.order_number}` : "أوردر جديد"}</h3>
                 <p>رقم الأوردر والطرف والعميل وموعد التسليم وتفاصيل المنتج والدفع</p>
               </div>
             </header>
@@ -3695,16 +3701,16 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                   } else {
                     setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
                   }
-                }}>
+                }} disabled={readOnly}>
                   {partyOptions.filter((option) => option !== "أخرى").map((option) => <option key={option} value={option}>{option}</option>)}
                   <option value="other">أخرى</option>
                 </select>
-                {!partyOptions.includes(form.source_person) && <input placeholder="اكتب الطرف" value={form.customParty || form.source_person} onChange={(event) => setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: event.target.value, updated_at: new Date().toISOString() }))} />}
+                {!partyOptions.includes(form.source_person) && <input placeholder="اكتب الطرف" value={form.customParty || form.source_person} onChange={(event) => setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: event.target.value, updated_at: new Date().toISOString() }))} disabled={readOnly} />}
                 <ErrorText message={errors.source_person} />
               </label>
               <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
                 <span>اسم العميل<em className="nf-required">*</em></span>
-                <input ref={customerRef} list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} />
+                <input ref={customerRef} list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} disabled={readOnly} />
                 <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
                 <ErrorText message={errors.client_name} />
               </label>
@@ -3712,7 +3718,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <span>كود العميل</span>
                 <input value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} readOnly />
               </label>
-              <RedDatePicker required className={`nf-field nf-field-delivery${errors.delivery_date ? " nf-field-invalid" : ""}`} label="تاريخ التسليم" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} error={errors.delivery_date} />
+              <RedDatePicker required className={`nf-field nf-field-delivery${errors.delivery_date ? " nf-field-invalid" : ""}`} label="تاريخ التسليم" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} error={errors.delivery_date} disabled={readOnly} />
             </div>
 
             <div className="nf-row nf-row-products">
@@ -3725,6 +3731,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                     onFocus={handleProductInputFocus}
                     onKeyDown={handleProductKeyDown}
                     placeholder={activeProducts.length ? "اكتب أو اختر نوع المنتج" : "اكتب نوع المنتج"}
+                    disabled={readOnly}
                   />
                   {productDropdownOpen && visibleProducts.length > 0 && (
                     <div className="nf-product-dropdown">
@@ -3746,24 +3753,24 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               </label>
               <label className={`nf-field${errors.quantity ? " nf-field-invalid" : ""}`}>
                 <span>العدد<em className="nf-required">*</em></span>
-                <input type="number" min={1} value={form.quantity} onChange={(event) => set("quantity", Number(event.target.value))} />
+                <input type="number" min={1} value={form.quantity} onChange={(event) => set("quantity", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.quantity} />
               </label>
               <label className={`nf-field${errors.price ? " nf-field-invalid" : ""}`}>
                 <span>السعر</span>
-                <input type="number" min={0} step="0.01" value={form.price} onChange={(event) => set("price", Number(event.target.value))} />
+                <input type="number" min={0} step="0.01" value={form.price} onChange={(event) => set("price", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.price} />
               </label>
               <Readonly className="nf-field" label="الإجمالي" value={computed.total} />
               <label className={`nf-field${errors.paid ? " nf-field-invalid" : ""}`}>
                 <span>دفع</span>
-                <input type="number" min={0} step="0.01" value={form.paid} onChange={(event) => set("paid", Number(event.target.value))} />
+                <input type="number" min={0} step="0.01" value={form.paid} onChange={(event) => set("paid", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.paid} />
               </label>
               <Readonly className="nf-field" label="المتبقي" value={computed.remaining} />
               <label className={`nf-field${errors.paymentMethod ? " nf-field-invalid" : ""}`}>
                 <span>طريقة الدفع</span>
-                <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)}>
+                <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)} disabled={readOnly}>
                   <option value="">اختر طريقة الدفع</option>
                   {paymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
                 </select>
@@ -3771,7 +3778,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               </label>
               <label className="nf-field">
                 <span>على</span>
-                <input type="number" min={0} step="0.01" value={form.old_balance} onChange={(event) => set("old_balance", Number(event.target.value))} />
+                <input type="number" min={0} step="0.01" value={form.old_balance} onChange={(event) => set("old_balance", Number(event.target.value))} disabled={readOnly} />
               </label>
             </div>
 
@@ -3779,12 +3786,12 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               <span className="nf-materials-label">الخامات<em className="nf-required">*</em></span>
               <div className="nf-radio-group">
                 <label className="nf-radio">
-                  <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} />
+                  <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} disabled={readOnly} />
                   <span className="nf-radio-mark" aria-hidden="true" />
                   <span>موجود</span>
                 </label>
                 <label className="nf-radio">
-                  <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} />
+                  <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} disabled={readOnly} />
                   <span className="nf-radio-mark" aria-hidden="true" />
                   <span>غير موجود</span>
                 </label>
@@ -3793,7 +3800,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             </div>
 
             {form.paymentMethod === "other" && <div className="nf-row nf-row-custom-payment">
-              <label className="nf-field"><span>اكتب طريقة الدفع</span><input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} /><ErrorText message={errors.customPaymentMethod} /></label>
+              <label className="nf-field"><span>اكتب طريقة الدفع</span><input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} disabled={readOnly} /><ErrorText message={errors.customPaymentMethod} /></label>
             </div>}
 
           </section>
@@ -3810,31 +3817,37 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       </div>
 
       <div className="nf-actionbar">
-        {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
-        <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraft} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>
-        <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : "إنشاء الأوردر"} <Send size={16} /></button>
+        {readOnly ? (
+          <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> رجوع</button>
+        ) : (
+          <>
+            {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
+            {!isEdit && <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraft} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>}
+            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : isEdit ? "تحديث الأوردر" : "إنشاء الأوردر"} <Send size={16} /></button>
+          </>
+        )}
       </div>
       <div className="form-grid" hidden>
-        <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} />
-        <PartyField value={form.source_person} onChange={(value) => set("source_person", value)} />
-        <Field label="اسم العميل" value={form.client_name} onChange={setClientName} />
+        <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} disabled={readOnly} />
+        <PartyField value={form.source_person} onChange={(value) => set("source_person", value)} disabled={readOnly} />
+        <Field label="اسم العميل" value={form.client_name} onChange={setClientName} disabled={readOnly} />
         <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
-        <Field label="رقم التليفون" value={form.phone} onChange={(value) => set("phone", value)} />
-        <Field label="تاريخ التسليم" type="date" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} />
-        <Field label="السعر" type="number" value={form.price} onChange={(value) => set("price", Number(value))} />
-        <Field label="العدد" type="number" value={form.quantity} onChange={(value) => set("quantity", Number(value))} />
+        <Field label="رقم التليفون" value={form.phone} onChange={(value) => set("phone", value)} disabled={readOnly} />
+        <Field label="تاريخ التسليم" type="date" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} disabled={readOnly} />
+        <Field label="السعر" type="number" value={form.price} onChange={(value) => set("price", Number(value))} disabled={readOnly} />
+        <Field label="العدد" type="number" value={form.quantity} onChange={(value) => set("quantity", Number(value))} disabled={readOnly} />
         <Readonly label="الإجمالي" value={computed.total} />
-        <Field label="المدفوع" type="number" value={form.paid} onChange={(value) => set("paid", Number(value))} />
+        <Field label="المدفوع" type="number" value={form.paid} onChange={(value) => set("paid", Number(value))} disabled={readOnly} />
         <Readonly label="باقي الحساب" value={computed.remaining} />
-        <Field label="حساب قديم" type="number" value={form.old_balance} onChange={(value) => set("old_balance", Number(value))} />
+        <Field label="حساب قديم" type="number" value={form.old_balance} onChange={(value) => set("old_balance", Number(value))} disabled={readOnly} />
         <Readonly label="صافي حساب العميل" value={computed.net_balance} />
-        <Field label="النوع" value={form.order_type} onChange={(value) => set("order_type", value)} />
-        <Select label="لوجو موجود/غير موجود" value={form.logo_status} options={["موجود", "غير موجود"]} onChange={(value) => set("logo_status", value)} />
-        <StageSelect label="مرحلة الشغل" value={form.workStage} onChange={(value) => set("workStage", value)} />
-        <Select label="الحالة" value={form.order_status} options={statuses} onChange={(value) => set("order_status", value as OrderStatus)} />
-        <Field label="التشغيل" value={form.operation_status} onChange={(value) => set("operation_status", value)} />
-        <Field label="التشطيب" value={form.finishing_status} onChange={(value) => set("finishing_status", value)} />
-        <Field label="قطعة مقطوعة" type="number" value={form.damaged_pieces} onChange={(value) => set("damaged_pieces", Number(value))} />
+        <Field label="النوع" value={form.order_type} onChange={(value) => set("order_type", value)} disabled={readOnly} />
+        <Select label="لوجو موجود/غير موجود" value={form.logo_status} options={["موجود", "غير موجود"]} onChange={(value) => set("logo_status", value)} disabled={readOnly} />
+        <StageSelect label="مرحلة الشغل" value={form.workStage} onChange={(value) => set("workStage", value)} disabled={readOnly} />
+        <Select label="الحالة" value={form.order_status} options={statuses} onChange={(value) => set("order_status", value as OrderStatus)} disabled={readOnly} />
+        <Field label="التشغيل" value={form.operation_status} onChange={(value) => set("operation_status", value)} disabled={readOnly} />
+        <Field label="التشطيب" value={form.finishing_status} onChange={(value) => set("finishing_status", value)} disabled={readOnly} />
+        <Field label="قطعة مقطوعة" type="number" value={form.damaged_pieces} onChange={(value) => set("damaged_pieces", Number(value))} disabled={readOnly} />
       </div>
       <section className="line-items" hidden>
         <div className="panel-head">
@@ -3845,14 +3858,14 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         {form.items.map((item, index) => (
           <div className="line-item" key={item.id}>
             <h4>منتج {index + 1}</h4>
-            <Field label="المنتج" value={item.product_name} onChange={(value) => updateItem(item.id, { product_name: value })} />
-            <Field label="التفاصيل" value={item.details} onChange={(value) => updateItem(item.id, { details: value })} />
-            <Field label="مكان اللوجو" value={item.logo_place} onChange={(value) => updateItem(item.id, { logo_place: value })} />
-            <Field label="العدد" type="number" value={item.quantity} onChange={(value) => updateItem(item.id, { quantity: Number(value) })} />
-            <Field label="السعر" type="number" value={item.price} onChange={(value) => updateItem(item.id, { price: Number(value) })} />
+            <Field label="المنتج" value={item.product_name} onChange={(value) => updateItem(item.id, { product_name: value })} disabled={readOnly} />
+            <Field label="التفاصيل" value={item.details} onChange={(value) => updateItem(item.id, { details: value })} disabled={readOnly} />
+            <Field label="مكان اللوجو" value={item.logo_place} onChange={(value) => updateItem(item.id, { logo_place: value })} disabled={readOnly} />
+            <Field label="العدد" type="number" value={item.quantity} onChange={(value) => updateItem(item.id, { quantity: Number(value) })} disabled={readOnly} />
+            <Field label="السعر" type="number" value={item.price} onChange={(value) => updateItem(item.id, { price: Number(value) })} disabled={readOnly} />
             <Readonly label="الإجمالي" value={item.total} />
-            <Field label="الجودة" value={item.quality} onChange={(value) => updateItem(item.id, { quality: value })} />
-            <Field label="الحالة" value={item.status} onChange={(value) => updateItem(item.id, { status: value })} />
+            <Field label="الجودة" value={item.quality} onChange={(value) => updateItem(item.id, { quality: value })} disabled={readOnly} />
+            <Field label="الحالة" value={item.status} onChange={(value) => updateItem(item.id, { status: value })} disabled={readOnly} />
             <button type="button" className="danger-text line-remove" onClick={() => set("items", form.items.filter((current) => current.id !== item.id))}>حذف المنتج</button>
           </div>
         ))}
@@ -3861,25 +3874,25 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   );
 }
 
-function Field({ label, value, onChange, type = "text", className }: { label: string; value: string | number; onChange: (value: string) => void; type?: string; className?: string }) {
+function Field({ label, value, onChange, type = "text", className, disabled }: { label: string; value: string | number; onChange: (value: string) => void; type?: string; className?: string; disabled?: boolean }) {
   const normalizedValue = normalizeDigitsToEnglish(value);
   const inputClassName = type === "date" ? `date-input ${normalizedValue ? "has-value" : "empty"}` : undefined;
-  return <label className={className}>{label}<input className={inputClassName} type={type} value={normalizedValue} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} /></label>;
+  return <label className={className}>{label}<input className={inputClassName} type={type} value={normalizedValue} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} disabled={disabled} /></label>;
 }
 
 function ErrorText({ message }: { message?: string }) {
   return message ? <small className="field-error">{message}</small> : null;
 }
 
-function PartyField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function PartyField({ value, onChange, disabled }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
   const selected = partyOptions.includes(value) ? value : "أخرى";
   return (
     <label>
       طرف
-      <select value={selected} onChange={(event) => onChange(event.target.value === "أخرى" ? "" : event.target.value)}>
+      <select value={selected} onChange={(event) => onChange(event.target.value === "أخرى" ? "" : event.target.value)} disabled={disabled}>
         {partyOptions.map((option) => <option key={option}>{option}</option>)}
       </select>
-      {selected === "أخرى" && <input placeholder="اكتب الطرف" value={value === "أخرى" ? "" : value} onChange={(event) => onChange(event.target.value)} />}
+      {selected === "أخرى" && <input placeholder="اكتب الطرف" value={value === "أخرى" ? "" : value} onChange={(event) => onChange(event.target.value)} disabled={disabled} />}
     </label>
   );
 }
@@ -3892,8 +3905,8 @@ function ReadonlyText({ label, value, className }: { label: string; value: strin
   return <label className={className}>{label}<input value={normalizeDigitsToEnglish(value)} readOnly /></label>;
 }
 
-function Select({ label, value, options, onChange, className }: { label: string; value: string; options: string[]; onChange: (value: string) => void; className?: string }) {
-  return <label className={className}>{label}<select value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option}>{option}</option>)}</select></label>;
+function Select({ label, value, options, onChange, className, disabled }: { label: string; value: string; options: string[]; onChange: (value: string) => void; className?: string; disabled?: boolean }) {
+  return <label className={className}>{label}<select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>{options.map((option) => <option key={option}>{option}</option>)}</select></label>;
 }
 
 function compactDateValue(value: string) {
@@ -3903,24 +3916,24 @@ function compactDateValue(value: string) {
   return `${year}-${Number(month)}-${Number(day)}`;
 }
 
-function StageSelect({ label, value, onChange }: { label: string; value: WorkStage; onChange: (value: WorkStage) => void }) {
+function StageSelect({ label, value, onChange, disabled }: { label: string; value: WorkStage; onChange: (value: WorkStage) => void; disabled?: boolean }) {
   return (
     <label>
       {label}
-      <select value={value} onChange={(event) => onChange(event.target.value as WorkStage)}>
+      <select value={value} onChange={(event) => onChange(event.target.value as WorkStage)} disabled={disabled}>
         {workStageOptions.map((stage) => <option key={stage} value={stage}>{stageLabel(stage)}</option>)}
       </select>
     </label>
   );
 }
 
-function RedDatePicker({ label, value, onChange, error, className, required }: { label: string; value: string; onChange: (value: string) => void; error?: string; className?: string; required?: boolean }) {
+function RedDatePicker({ label, value, onChange, error, className, required, disabled }: { label: string; value: string; onChange: (value: string) => void; error?: string; className?: string; required?: boolean; disabled?: boolean }) {
   const displayValue = compactDateValue(value);
   return (
     <label className={`red-date-picker${className ? ` ${className}` : ""}`}>
       <span>{label}{required && <em className="nf-required">*</em>}</span>
       <span className="delivery-date-field">
-        <input className="delivery-date-input" type="date" value={value} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} aria-label={label} />
+        <input className="delivery-date-input" type="date" value={value} onChange={(event) => onChange(normalizeDigitsToEnglish(event.target.value))} aria-label={label} disabled={disabled} />
         <span className={`delivery-date-display${displayValue ? " has-value" : ""}`} aria-hidden="true">{displayValue || "mm/dd/yyyy"}</span>
       </span>
       <ErrorText message={error} />
@@ -3940,6 +3953,7 @@ type ImageInputWithClipboardProps = {
   required?: boolean;
   pasteOnly?: boolean;
   error?: string;
+  disabled?: boolean;
   onActivate: () => void;
   onPaste: () => void;
   onRemove: () => void;
@@ -3954,10 +3968,10 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, error, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
+function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, error, disabled, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const classNames = `image-clipboard-field${active ? " active" : ""}${large ? " large" : ""}${dragOver ? " drag-over" : ""}${error ? " has-error" : ""}`;
+  const classNames = `image-clipboard-field${active ? " active" : ""}${large ? " large" : ""}${dragOver ? " drag-over" : ""}${error ? " has-error" : ""}${disabled ? " nf-readonly-control" : ""}`;
   function pickFile() {
     fileInputRef.current?.click();
   }
@@ -3969,21 +3983,21 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
   return (
     <div
       className={classNames}
-      tabIndex={0}
-      onFocus={onActivate}
-      onClick={onActivate}
-      onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
-      onDragEnter={(event) => { event.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(event) => { event.preventDefault(); setDragOver(false); const file = event.dataTransfer.files?.[0]; if (file) onDropFile?.(file); }}
+      tabIndex={disabled ? -1 : 0}
+      onFocus={disabled ? undefined : onActivate}
+      onClick={disabled ? undefined : onActivate}
+      onDragOver={disabled ? undefined : (event) => { event.preventDefault(); setDragOver(true); }}
+      onDragEnter={disabled ? undefined : (event) => { event.preventDefault(); setDragOver(true); }}
+      onDragLeave={disabled ? undefined : () => setDragOver(false)}
+      onDrop={disabled ? undefined : (event) => { event.preventDefault(); setDragOver(false); const file = event.dataTransfer.files?.[0]; if (file) onDropFile?.(file); }}
     >
       <span className="image-field-label">{label}{required && <em className="nf-required">*</em>}</span>
-      <input ref={fileInputRef} type="file" accept={clipboardImageTypes.join(",")} hidden onChange={handleFileChange} />
+      <input ref={fileInputRef} type="file" accept={clipboardImageTypes.join(",")} hidden onChange={handleFileChange} disabled={disabled} />
       <div className="image-field-actions">
-        {!pasteOnly && <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>}
-        <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : "لصق الصورة من الحافظة"}</button>
+        {!pasteOnly && !disabled && <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>}
+        {!disabled && <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : "لصق الصورة من الحافظة"}</button>}
         {!value && !large && <span className="image-empty-state">لم يتم رفع صورة</span>}
-        {value && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
+        {value && !disabled && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
       </div>
       {value && (
         <div className="image-preview-box">
@@ -5430,7 +5444,7 @@ function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSectio
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "addCustomer", "addProduct", "search", "worker", "finish", "customers", "finance", "reports", "audit", "import", "alerts", "settings"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "addCustomer", "addProduct", "search", "worker", "finish", "customers", "finance", "reports", "audit", "import", "alerts", "settings"];
 
 function viewFromHash(): View {
   const raw = window.location.hash.replace(/^#\/?/, "");
@@ -5446,11 +5460,13 @@ function ZunionApp() {
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
+  const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
   const [productDrawer, setProductDrawer] = useState<Product | null>(null);
   const [userDrawer, setUserDrawer] = useState<SearchableUser | null>(null);
   const logoClickRef = useRef({ count: 0, firstClickAt: 0 });
   const { orders, setOrders } = useOrders(session);
   const orderDrawerOrder = useMemo(() => orderDrawerOrderNumber ? orders.find((o) => o.order_number === orderDrawerOrderNumber) || null : null, [orderDrawerOrderNumber, orders]);
+  const editingOrder = useMemo(() => editingOrderNumber ? orders.find((o) => o.order_number === editingOrderNumber) || null : null, [editingOrderNumber, orders]);
   const { items: customers, setItems: setCustomers } = useCustomers(session);
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
   const { items: products, setItems: setProducts } = useProducts(session);
@@ -5501,6 +5517,7 @@ function ZunionApp() {
     setViewState(nextView);
     window.history.replaceState(null, "", `#${nextView}`);
     if (nextView === "new") setCreatedOrder(null);
+    if (nextView !== "editOrder") setEditingOrderNumber(null);
   }
 
   function saveNew(order: Order) {
@@ -5508,6 +5525,15 @@ function ZunionApp() {
     addAudit(session, "ORDER_CREATED", "orders", order.id, undefined, order);
     setCreatedOrder(order);
     setView("worker");
+  }
+
+  function saveEdited(order: Order) {
+    if ((session?.role ?? "Master") !== "Master") return;
+    const previous = orders.find(o => o.id === order.id);
+    setOrders(current => current.map(o => o.id === order.id ? order : o));
+    addAudit(session, "ORDER_EDITED", "orders", order.id, previous, order);
+    setEditingOrderNumber(null);
+    setView("search");
   }
 
   const currentRole = session?.role ?? "Master";
@@ -5648,7 +5674,7 @@ function ZunionApp() {
     <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
       <Sidebar
         sections={sidebarSections}
-        activeView={view}
+        activeView={view === "editOrder" ? "search" : view}
         openSection={openSection}
         drawerOpen={drawerOpen}
         onToggleSection={toggleSidebarSection}
@@ -5671,7 +5697,7 @@ function ZunionApp() {
             orders={orders}
             customers={customers}
             products={products}
-            onOrderClick={(num) => setOrderDrawerOrderNumber(num)}
+            onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }}
             onCustomerClick={(code, name) => setCustomerDrawer({ code, name })}
             onProductClick={(product) => setProductDrawer(product)}
             onUserClick={(user) => setUserDrawer(user)}
@@ -5698,13 +5724,14 @@ function ZunionApp() {
             </section>
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
-          {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
+          {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
           {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onCancel={() => setView("search")} />}
+          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
-          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
-           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
-           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => setOrderDrawerOrderNumber(num)} />}
+          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
           {view === "finance" && <FinancePageModern session={session} />}
           {view === "reports" && <ReportsPage session={session} />}

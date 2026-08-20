@@ -5395,3 +5395,20 @@ input[type="date"] {
     transform: rotate(360deg);
   }
 }
+/* Read-only order form styles */
+.nf-readonly .operation-add-btn,
+.nf-readonly .operation-delete-btn { display: none !important; }
+.nf-readonly .image-clipboard-field.nf-readonly-control {
+  pointer-events: none;
+  opacity: 0.85;
+  background: #f8f9fb;
+  border-style: dashed;
+}
+.nf-readonly .image-clipboard-field.nf-readonly-control .image-field-actions { display: none; }
+.nf-readonly input:disabled,
+.nf-readonly select:disabled,
+.nf-readonly textarea:disabled {
+  opacity: 0.8;
+  background: #f8f9fb;
+  cursor: default;
+}
