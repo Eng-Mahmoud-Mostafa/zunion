@@ -4036,6 +4036,46 @@ input[type="date"] {
   box-shadow: 0 0 0 3px rgba(217, 4, 22, .2);
 }
 
+/* ---------- details card ---------- */
+.nf-card-details {
+  display: grid;
+  gap: 14px;
+}
+
+.nf-card-details .nf-field {
+  width: 100%;
+}
+
+.nf-card-details textarea {
+  width: 100%;
+  min-height: 96px !important;
+  height: auto !important;
+  resize: vertical;
+  direction: rtl;
+  text-align: right;
+  line-height: 1.7;
+}
+
+.nf-customer-option-code {
+  display: inline-block;
+  margin-inline-start: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.nf-btn-print {
+  color: var(--navy) !important;
+  border-color: var(--line) !important;
+  background: #f7f9fc !important;
+}
+
+.nf-btn-print:hover {
+  border-color: var(--navy) !important;
+  background: #eef3f9 !important;
+  color: var(--red) !important;
+}
+
 /* ---------- sticky action bar ---------- */
 .nf-operation-error {
   margin-top: 2px;
@@ -4111,6 +4151,21 @@ input[type="date"] {
 }
 
 .nf-btn-create:disabled {
+  opacity: .6;
+  box-shadow: none !important;
+  cursor: not-allowed;
+}
+
+.nf-btn-to-op {
+  background: linear-gradient(135deg, var(--red), var(--red-dark)) !important;
+}
+
+.nf-btn-to-op:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(217, 4, 22, .3) !important;
+}
+
+.nf-btn-to-op:disabled {
   opacity: .6;
   box-shadow: none !important;
   cursor: not-allowed;

@@ -42,8 +42,8 @@ export const productSchema = z.object({
 }));
 
 export const orderSchema = z.object({
-  source_party: z.string().min(1),
-  customer_name_snapshot: z.string().min(1),
+  source_party: z.string().default(""),
+  customer_name_snapshot: z.string().default(""),
   customer_code_snapshot: z.string().optional().default(""),
   phone_snapshot: z.string().optional().default(""),
   delivery_date: z.string().optional().nullable(),
@@ -52,9 +52,9 @@ export const orderSchema = z.object({
   productName: z.string().optional().default(""),
   paymentMethod: z.enum(paymentMethods).default("cash"),
   customPaymentMethod: z.string().optional().default(""),
-  materialsStatus: z.preprocess(normalizeMaterialsStatus, z.enum(materialsStatuses, { message: "يجب تحديد حالة الخامات" })),
-  operationMethods: z.array(z.string().trim().min(1)).min(1).default(["not_started"]),
-  quantity: z.coerce.number().int().min(1).default(1),
+  materialsStatus: z.preprocess(normalizeMaterialsStatus, z.enum(materialsStatuses).default("available").optional()),
+  operationMethods: z.array(z.string().trim()).default(["not_started"]),
+  quantity: z.coerce.number().default(0),
   price: z.coerce.number().min(0).default(0),
   paid: z.coerce.number().min(0).default(0),
   old_account: z.coerce.number().default(0),
@@ -66,7 +66,29 @@ export const orderSchema = z.object({
   damaged_pieces: z.coerce.number().int().min(0).default(0),
   production_notes: z.string().optional().default(""),
   finishing_notes: z.string().optional().default(""),
+  details: z.string().optional().default(""),
+  draft: z.boolean().optional().default(false),
 }).superRefine((order, ctx) => {
+  const isDraft = order.draft === true;
+  if (isDraft) {
+    order.quantity = Math.max(0, Math.abs(order.quantity));
+    return;
+  }
+  if (!order.source_party.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["source_party"], message: "الطرف مطلوب" });
+  }
+  if (!order.customer_name_snapshot.trim()) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["customer_name_snapshot"], message: "اسم العميل مطلوب" });
+  }
+  if (order.quantity < 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["quantity"], message: "العدد يجب أن يكون 1 على الأقل" });
+  }
+  if (!order.materialsStatus) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["materialsStatus"], message: "يجب تحديد حالة الخامات" });
+  }
+  if (!order.operationMethods.length || order.operationMethods.some((m) => !m.trim())) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["operationMethods"], message: "يجب إضافة طريقة تشغيل واحدة على الأقل" });
+  }
   const total = order.quantity * order.price;
   if (order.paid > total) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["paid"], message: "المدفوع لا يمكن أن يكون أكبر من الإجمالي" });

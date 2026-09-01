@@ -98,8 +98,12 @@ create table if not exists password_reset_codes (
   code_hash text not null,
   expires_at timestamptz not null,
   used_at timestamptz,
+  used boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table password_reset_codes add column if not exists used_at timestamptz;
+alter table password_reset_codes add column if not exists used boolean not null default false;
 
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
@@ -190,12 +194,16 @@ create table if not exists orders (
   damaged_pieces integer not null default 0,
   production_notes text,
   finishing_notes text,
+  details text,
+  draft boolean not null default false,
   created_by uuid references users(id) on delete set null,
   updated_by uuid references users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
+alter table orders add column if not exists details text;
+alter table orders add column if not exists draft boolean not null default false;
 alter table orders add column if not exists work_stage text not null default 'new';
 alter table orders add column if not exists product_id uuid;
 alter table orders add column if not exists product_name_snapshot text;
@@ -529,14 +537,148 @@ alter table users_profile add column if not exists is_active boolean not null de
 alter table users_profile add column if not exists must_change_password boolean not null default false;
 alter table users_profile alter column must_change_password set default false;
 
+-- Seed the users_profile directory (username-based auth is the primary login flow).
+-- Passwords are HMAC-SHA256(cookieSecret, "<salt>:<password>") with cookieSecret defaulting
+-- to 'dev-change-me' (see backend/src/config.ts). After setup, set COOKIE_SECRET and run
+-- \`backend -> npm run seed:users\` to rotate every account to SEED_PASSWORD. Re-runs never
+-- overwrite existing password hashes (only profile fields/role/code).
+insert into users_profile (username, full_name, email, role, password_salt, password_hash, must_change_password) values
+  ('mahmoud', 'Mahmoud', 'mahmoud@zunion.local', 'Master', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('reda', 'Reda', 'reda@zunion.local', 'Master', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('hassan', 'Hassan', 'hassan@zunion.local', 'Master', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('omar', 'Omar', 'omar@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('youssef', 'Youssef', 'youssef@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('khalifa', 'Khalifa', 'khalifa@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr 1', 'Opr 1', 'opr1@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr 2', 'Opr 2', 'opr2@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr 3', 'Opr 3', 'opr3@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor 1', 'Supervisor 1', 'supervisor1@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor 2', 'Supervisor 2', 'supervisor2@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor 3', 'Supervisor 3', 'supervisor3@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing 1', 'Finishing 1', 'finishing1@zunion.local', 'Finishing', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing 2', 'Finishing 2', 'finishing2@zunion.local', 'Finishing', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false)
+on conflict (username) do update set
+  full_name = excluded.full_name,
+  role = excluded.role,
+  email = excluded.email,
+  is_active = true,
+  must_change_password = false;
+
 drop trigger if exists set_users_profile_updated_at on users_profile;
 create trigger set_users_profile_updated_at before update on users_profile for each row execute function set_updated_at();
 
--- Only the backend's service-role access may read/modify the user directory.
+-- transactions: financial records. Written by the backend via the Supabase
+-- service-role REST API (POST /api/finance/transactions) and read by the browser
+-- dashboard (src/services/statsService.ts) with the anon key.
+create table if not exists transactions (
+  id uuid primary key default gen_random_uuid(),
+  transaction_type text not null,
+  date date not null default current_date,
+  description text,
+  amount numeric not null default 0,
+  expense_type text,
+  account_destination text,
+  customer_id uuid references customers(id) on delete set null,
+  order_id uuid references orders(id) on delete set null,
+  added_by uuid references users_profile(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table transactions add column if not exists transaction_type text;
+alter table transactions add column if not exists date date;
+alter table transactions alter column date set default current_date;
+alter table transactions add column if not exists description text;
+alter table transactions add column if not exists amount numeric not null default 0;
+alter table transactions add column if not exists expense_type text;
+alter table transactions add column if not exists account_destination text;
+alter table transactions add column if not exists customer_id uuid;
+alter table transactions add column if not exists order_id uuid;
+alter table transactions add column if not exists added_by uuid;
+alter table transactions add column if not exists created_at timestamptz not null default now();
+
+create table if not exists operation_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references users_profile(id) on delete set null,
+  username text,
+  role text,
+  action text not null,
+  page text,
+  old_value jsonb,
+  new_value jsonb,
+  created_at timestamptz not null default now()
+);
+
+alter table operation_logs add column if not exists user_id uuid;
+alter table operation_logs add column if not exists username text;
+alter table operation_logs add column if not exists role text;
+alter table operation_logs add column if not exists page text;
+alter table operation_logs add column if not exists old_value jsonb;
+alter table operation_logs add column if not exists new_value jsonb;
+alter table operation_logs add column if not exists created_at timestamptz not null default now();
+
+create table if not exists company_settings (
+  id uuid primary key default gen_random_uuid(),
+  company_name text not null default 'Zunion',
+  logo_url text default 'src/assets/logo.png',
+  primary_color text default '#D90416',
+  created_at timestamptz not null default now()
+);
+
+alter table company_settings add column if not exists company_name text not null default 'Zunion';
+alter table company_settings add column if not exists logo_url text default 'src/assets/logo.png';
+alter table company_settings add column if not exists primary_color text default '#D90416';
+alter table company_settings add column if not exists created_at timestamptz not null default now();
+
+-- ============================================================================
+-- Row Level Security
+-- ----------------------------------------------------------------------------
+-- The application authenticates with its own opaque-cookie sessions
+-- (backend/src/security.ts). The backend connects as the table owner (or as the
+-- Supabase service_role via REST), both of which bypass RLS, so RLS does not
+-- affect server queries.
+--
+-- The browser reads orders + transactions directly with the publishable/anon key
+-- for the dashboard (src/services/statsService.ts), so those two get an anon
+-- SELECT policy. Every other table stays closed to the anon/authenticated roles.
+-- ============================================================================
+alter table users enable row level security;
+alter table roles enable row level security;
+alter table otp_codes enable row level security;
+alter table password_reset_codes enable row level security;
+alter table sessions enable row level security;
+alter table customers enable row level security;
+alter table products enable row level security;
+alter table orders enable row level security;
+alter table order_items enable row level security;
+alter table order_files enable row level security;
+alter table monthly_periods enable row level security;
+alter table expenses enable row level security;
+alter table incomes enable row level security;
+alter table audit_logs enable row level security;
 alter table users_profile enable row level security;
+alter table transactions enable row level security;
+alter table operation_logs enable row level security;
+alter table company_settings enable row level security;
+
+-- The anon/authenticated database roles only exist on Supabase (and its local
+-- emulator). Keep everything role-dependent guarded so the file also applies to
+-- a plain PostgreSQL (e.g. docker-compose.yml) without those roles.
 do $$ begin
-  if exists (select 1 from pg_roles where rolname in ('anon', 'authenticated')) then
-    revoke all on users_profile from anon, authenticated;
+  if exists (select 1 from pg_roles where rolname = 'anon')
+     and exists (select 1 from pg_roles where rolname = 'authenticated')
+  then
+    -- User directory, credentials and audit trail: service-role only.
+    revoke all on users, users_profile, roles, password_reset_codes, otp_codes, sessions, audit_logs, order_files from anon, authenticated;
+    -- App data: closed to anon/authenticated except the two dashboard reads below.
+    revoke all on customers, products, orders, order_items, monthly_periods, expenses, incomes, transactions, operation_logs, company_settings from anon, authenticated;
+    grant usage on schema public to anon;
+    grant select on orders to anon;
+    grant select on transactions to anon;
+
+    execute 'drop policy if exists "anon read orders" on orders';
+    execute 'create policy "anon read orders" on orders for select to anon using (true)';
+    execute 'drop policy if exists "anon read transactions" on transactions';
+    execute 'create policy "anon read transactions" on transactions for select to anon using (true)';
   end if;
 end $$;
 `;

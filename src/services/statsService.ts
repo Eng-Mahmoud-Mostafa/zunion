@@ -8,11 +8,14 @@ export type DbOrder = {
   order_number: string | number | null;
   customer_name: string | null;
   client_name?: string | null;
+  customer_name_snapshot?: string | null;
   phone: string | null;
   party: string | null;
   source_person?: string | null;
+  source_party?: string | null;
   service_type: string | null;
   order_type?: string | null;
+  product_name_snapshot?: string | null;
   pieces_count: number | null;
   quantity?: number | null;
   received_date: string | null;
@@ -24,6 +27,7 @@ export type DbOrder = {
   finishing_status: string | null;
   delivery_status: string | null;
   order_status?: string | null;
+  status?: string | null;
   work_stage?: string | null;
   workStage?: string | null;
   created_at: string | null;
@@ -194,6 +198,7 @@ function orderStage(row: DbOrder) {
 
 async function queryOrders(limit?: number) {
   const localRows = loadLocalOrders();
+  if (!supabase) return limit ? localRows.slice(0, limit) : localRows;
   if (localRows.length) return limit ? localRows.slice(0, limit) : localRows;
   let query = supabase.from("orders").select("*").order("created_at", { ascending: false });
   if (limit) query = query.limit(limit);
@@ -204,6 +209,7 @@ async function queryOrders(limit?: number) {
 
 async function queryTransactions(limit?: number) {
   const localRows = loadLocalTransactions();
+  if (!supabase) return limit ? localRows.slice(0, limit) : localRows;
   if (localRows.length) return limit ? localRows.slice(0, limit) : localRows;
   let query = supabase.from("transactions").select("*").order("created_at", { ascending: false });
   if (limit) query = query.limit(limit);

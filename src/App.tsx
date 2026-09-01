@@ -189,6 +189,7 @@ type Order = {
   finishing_status: string;
   production_notes: string;
   finishing_notes: string;
+  draft: boolean;
   order_status: OrderStatus;
   workStage: WorkStage;
   workflow_stage: WorkflowStage;
@@ -565,6 +566,11 @@ function materialStatusLabel(value: unknown) {
   return "—";
 }
 
+function orderStatusLabel(order: { draft?: boolean; order_status: OrderStatus }) {
+  if (order.draft) return "مسودة";
+  return order.order_status;
+}
+
 function stageToStatus(stage: WorkStage): OrderStatus {
   if (stage === "operation") return "في التشغيل";
   if (stage === "finishing") return "في التشطيب";
@@ -892,6 +898,102 @@ function printOrderDocument(order: Order, session?: Session | null) {
   printDocument(`طباعة الأوردر ${order.order_number}`, orderPrintHtml(order), session);
 }
 
+function printOrderClean(order: Order) {
+  const operationItems = order.operationItems?.length
+    ? order.operationItems
+    : (order.operationMethods?.length ? order.operationMethods : []).map((method) => ({ method, logoImage: "", workOrderImage: "" }));
+  const methodsHtml = operationItems.length
+    ? `<ol class="op-list">${operationItems.map((item) => `<li>${escapeHtml(item.method || "—")}</li>`).join("")}</ol>`
+    : "<p>—</p>";
+  const workOrderImages = operationItems
+    .map((item, index) => item.workOrderImage
+      ? `<div class="op-img"><div class="op-img-label">أمر الشغل ${operationItems.length > 1 ? index + 1 : ""}</div><img src="${escapeHtml(item.workOrderImage)}" /></div>`
+      : "")
+    .filter(Boolean)
+    .join("");
+  const logoImages = operationItems
+    .map((item, index) => item.logoImage
+      ? `<div class="op-img"><div class="op-img-label">أمر اللوجو ${operationItems.length > 1 ? index + 1 : ""}</div><img src="${escapeHtml(item.logoImage)}" /></div>`
+      : "")
+    .filter(Boolean)
+    .join("");
+
+  const popup = window.open("", "_blank", "width=1000,height=760");
+  const printedAt = formatDateTimeEnglish(new Date());
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>${escapeHtml(`طباعة الأوردر ${order.order_number}`)}</title>
+    <style>
+      @page{size:A4;margin:12mm}
+      *{box-sizing:border-box}
+      body{font-family:Tahoma,Arial,sans-serif;color:#111827;margin:0;direction:rtl;padding:24px}
+      .doc-title{font-size:22px;font-weight:900;color:#111827;text-align:center;margin:0 0 4px}
+      .doc-sub{font-size:12px;color:#4b5563;text-align:center;margin:0 0 18px}
+      .order-head{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;background:#f3f6fa;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin-bottom:18px}
+      .order-head .oh-item{font-size:14px;font-weight:800;color:#111827}
+      .order-head .oh-item small{display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:2px}
+      table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px}
+      th,td{border:1px solid #d1d5db;padding:9px 12px;text-align:right;vertical-align:top}
+      th{background:#f8fafc;color:#111827;font-weight:800}
+      td{color:#111827}
+      .section{font-size:15px;font-weight:900;color:#111827;margin:18px 0 8px;padding-bottom:6px;border-bottom:2px solid #e5e7eb}
+      .details-box{border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;min-height:56px;white-space:pre-wrap;font-size:13px;line-height:1.8}
+      .op-list{margin:0;padding-inline-start:22px}
+      .op-imgs{display:flex;flex-wrap:wrap;gap:16px}
+      .op-img{flex:1 1 200px;text-align:center}
+      .op-img-label{font-size:12px;font-weight:800;color:#6b7280;margin-bottom:4px}
+      .op-img img{max-width:100%;max-height:220px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px}
+      .toolbar{margin-bottom:14px}.toolbar button{background:#ed1c24;color:#fff;border:0;border-radius:7px;padding:10px 18px;font-weight:800;cursor:pointer}
+      @media print{.toolbar{display:none!important}body{padding:0}}
+    </style></head><body>
+    <div class="toolbar"><button onclick="window.print()">طباعة</button></div>
+    <div class="doc-title">أمر شغل</div>
+    <div class="doc-sub">تاريخ الطباعة: ${escapeHtml(printedAt)}</div>
+    <div class="order-head">
+      <div class="oh-item"><small>رقم الأوردر</small><div dir="ltr">${escapeHtml(order.order_number)}</div></div>
+      <div class="oh-item"><small>تاريخ الأوردر</small><div>${escapeHtml(orderPrintDate(order))}</div></div>
+      <div class="oh-item"><small>تاريخ التسليم</small><div>${escapeHtml(order.delivery_date ? formatDateArabic(order.delivery_date) : "—")}</div></div>
+      <div class="oh-item"><small>اسم العميل</small><div>${escapeHtml(order.client_name || "—")}</div></div>
+      <div class="oh-item"><small>كود العميل</small><div>${escapeHtml(order.client_code || "—")}</div></div>
+      <div class="oh-item"><small>طرف</small><div>${escapeHtml(order.source_person || "—")}</div></div>
+    </div>
+    <table>
+      <thead><tr><th>نوع المنتج</th><th>العدد</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>${escapeHtml(order.order_type || order.productName || "—")}</td>
+          <td>${escapeHtml(formatNumber(order.quantity ?? order.items?.length ?? 0))}</td>
+        </tr>
+      </tbody>
+    </table>
+    ${order.items && order.items.length > 1 ? `<div class="section">المنتجات</div><ol class="op-list">${order.items.map((item) => `<li>${escapeHtml(item.product_name || "—")} - العدد ${escapeHtml(formatNumber(item.quantity))}</li>`).join("")}</ol>` : ""}
+    <div class="section">الخامات</div>
+    <div class="details-box">${escapeHtml(materialStatusLabel(order.materialsStatus) || "—")}</div>
+    <div class="section">طريقة التشغيل</div>
+    ${methodsHtml}
+    ${workOrderImages ? `<div class="section">أمر الشغل</div><div class="op-imgs">${workOrderImages}</div>` : ""}
+    ${logoImages ? `<div class="section">أمر اللوجو</div><div class="op-imgs">${logoImages}</div>` : ""}
+    ${order.details ? `<div class="section">التفاصيل</div><div class="details-box">${escapeHtml(order.details)}</div>` : ""}
+    ${order.notes ? `<div class="section">ملاحظات</div><div class="details-box">${escapeHtml(order.notes)}</div>` : ""}
+    ${order.client_message ? `<div class="section">رسالة العميل</div><div class="details-box">${escapeHtml(order.client_message)}</div>` : ""}
+    ${order.quality_notes ? `<div class="section">ملاحظات الجودة</div><div class="details-box">${escapeHtml(order.quality_notes)}</div>` : ""}
+    </body></html>`;
+  if (!popup) {
+    window.print();
+    return;
+  }
+  popup.document.write(html);
+  popup.document.close();
+  popup.focus();
+  setTimeout(() => popup.print(), 250);
+}
+
+function orderPrintDate(order: Order) {
+  const date = order.created_at || order.delivery_date;
+  if (!date) return "—";
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return normalizeDigitsToEnglish(date);
+  return formatDateArabic(date);
+}
+
 const arabicColumns: Partial<Record<keyof Order, string>> = {
   id: "ID",
   created_by: "بواسطة",
@@ -942,7 +1044,7 @@ const emptyOrder: Order = {
   phone: "",
   delivery_date: "",
   price: 0,
-  quantity: 1,
+  quantity: 0,
   total: 0,
   paid: 0,
   remaining: 0,
@@ -960,6 +1062,7 @@ const emptyOrder: Order = {
   logoFileName: "",
   workOrderFileName: "",
   details: "",
+  draft: false,
   logo_place: "",
   items: [],
   logo_status: "غير موجود",
@@ -1179,6 +1282,8 @@ function orderFromApi(row: Record<string, unknown>): Order {
     finishing_status: normalizedFinishingStatus(row.finishing_status ?? row.status),
     production_notes: String(row.production_notes ?? ""),
     finishing_notes: String(row.finishing_notes ?? ""),
+    details: String(row.details ?? ""),
+    draft: row.draft === true || row.draft === 1 || row.draft === "true" || row.draft === "1",
     order_status: orderStatusFromApi(row.status ?? row.delivery_status, workStage),
     workStage,
     client_message: String(row.message_text ?? row.client_message ?? ""),
@@ -1205,7 +1310,7 @@ function orderToApi(order: Order) {
     customPaymentMethod: calculated.customPaymentMethod || "",
     materialsStatus: normalizeMaterialsStatus(calculated.materialsStatus) || "available",
     operationMethods: operationMethods.length ? operationMethods : ["not_started"],
-    quantity: calculated.quantity,
+    quantity: Math.max(1, Number(calculated.quantity || 1)),
     price: calculated.price,
     paid: calculated.paid,
     old_account: calculated.old_balance,
@@ -1217,6 +1322,8 @@ function orderToApi(order: Order) {
     damaged_pieces: calculated.damaged_pieces,
     production_notes: calculated.production_notes,
     finishing_notes: calculated.finishing_notes,
+    details: calculated.details,
+    draft: calculated.draft === true,
   };
 }
 
@@ -1919,11 +2026,11 @@ function EmptyRow({ colSpan }: { colSpan: number }) {
 }
 
 function orderClientName(order: DbOrder) {
-  return order.customer_name || order.client_name || "-";
+  return order.customer_name || order.client_name || order.customer_name_snapshot || "-";
 }
 
 function orderParty(order: DbOrder) {
-  return order.party || order.source_person || "-";
+  return order.party || order.source_party || order.source_person || "-";
 }
 
 function orderPieces(order: DbOrder) {
@@ -1960,7 +2067,7 @@ function orderDisplayNumber(order: OrdersListRecord) {
 }
 
 function orderDisplayClient(order: OrdersListRecord) {
-  return valueText(order.client_name || order.customer_name);
+  return valueText(order.client_name || order.customer_name || order.customer_name_snapshot);
 }
 
 function orderDisplayType(order: OrdersListRecord) {
@@ -1989,9 +2096,41 @@ function normalizedFinishingStatus(value: unknown) {
   return "لم يبدأ";
 }
 
+// Derive the work-flow status from the modern orders columns (status enum +
+// work_stage) when the legacy per-stage columns are absent.
+function orderOperationStatusText(order: OrdersListRecord) {
+  if (order.operation_status) return normalizedOperationStatus(order.operation_status);
+  const status = String(order.status || "").trim();
+  if (status === "WORKER_DONE") return "تم";
+  if (["SENT_TO_WORKER", "WORKER_STARTED"].includes(status)) return "جاري التشغيل";
+  return "لم يبدأ";
+}
+
+function orderFinishingStatusText(order: OrdersListRecord) {
+  if (order.finishing_status) return normalizedFinishingStatus(order.finishing_status);
+  const status = String(order.status || "").trim();
+  if (status === "FINISH_DONE") return "تم";
+  if (["SENT_TO_FINISH", "FINISH_STARTED"].includes(status)) return "جاري التشطيب";
+  return "لم يبدأ";
+}
+
+// Arabic label for the dashboard "آخر الأوردرات" status column.
+function orderDashboardStatus(order: DbOrder) {
+  const legacy = String(order.delivery_status || "").trim();
+  if (legacy) return legacy;
+  const status = String(order.status || "").trim();
+  const stage = String(order.work_stage || order.workStage || "").trim();
+  if (status === "CANCELLED" || stage === "cancelled") return "ملغي";
+  if (["READY", "CUSTOMER_MESSAGED", "DELIVERED"].includes(status) || stage === "completed") return "جاهز";
+  if (["SENT_TO_FINISH", "FINISH_STARTED", "FINISH_DONE"].includes(status) || stage === "finishing") return "في التشطيب";
+  if (["SENT_TO_WORKER", "WORKER_STARTED", "WORKER_DONE"].includes(status) || stage === "operation") return "في التشغيل";
+  if (stage === "new") return "جديد";
+  return "-";
+}
+
 function orderReadyStatus(order: OrdersListRecord) {
-  const text = String(order.delivery_status || order.order_status || order.workStage || order.work_stage || "").trim();
-  return ["جاهز", "جاهز للإرسال", "تم التسليم", "completed", "READY", "DELIVERED"].includes(text) ? "جاهز" : "غير جاهز";
+  const text = String(order.delivery_status || order.order_status || order.workStage || order.work_stage || order.status || "").trim();
+  return ["جاهز", "جاهز للإرسال", "تم التسليم", "completed", "READY", "DELIVERED", "CUSTOMER_MESSAGED"].includes(text) ? "جاهز" : "غير جاهز";
 }
 
 function listBadgeClass(value: string) {
@@ -2147,7 +2286,7 @@ function CustomerDrawer({ open, onClose, customerCode, customerName, customers, 
                     <td>{formatDateArabic(o.delivery_date)}</td>
                     <td>{o.order_type || o.productName || "--"}</td>
                     <td>{o.quantity}</td>
-                    <td><span className={listBadgeClass(o.order_status)}>{o.order_status}</span></td>
+                    <td><span className={listBadgeClass(orderStatusLabel(o))}>{orderStatusLabel(o)}</span></td>
                     <td><span className={listBadgeClass(normalizedOperationStatus(o.operation_status))}>{normalizedOperationStatus(o.operation_status)}</span></td>
                     <td><span className={listBadgeClass(normalizedFinishingStatus(o.finishing_status))}>{normalizedFinishingStatus(o.finishing_status)}</span></td>
                   </tr>
@@ -2260,7 +2399,7 @@ function OrderDetailsDrawer({ open, onClose, order, customers, setOrders, sessio
             <div>
               <h2 className="od-order-num">{order.order_number}</h2>
               <div className="od-badges">
-                <span className={listBadgeClass(order.order_status)}>{order.order_status}</span>
+                <span className={listBadgeClass(orderStatusLabel(order))}>{orderStatusLabel(order)}</span>
                 <span className={listBadgeClass(op)}>{op}</span>
                 <span className={listBadgeClass(fn)}>{fn}</span>
               </div>
@@ -3047,7 +3186,7 @@ function ProductDrawer({ open, onClose, product, orders, setView }: {
                 <div key={order.id} className="pd-order">
                   <span className="pd-order-num">#{order.order_number || "بدون رقم"}</span>
                   <span className="pd-order-client">{order.client_name}</span>
-                  <span className={listBadgeClass(order.order_status)}>{order.order_status}</span>
+                  <span className={listBadgeClass(orderStatusLabel(order))}>{orderStatusLabel(order)}</span>
                 </div>
               ))}
             </div>
@@ -3124,7 +3263,7 @@ function UserDrawer({ open, onClose, user, orders }: {
                 <div key={order.id} className="pd-order">
                   <span className="pd-order-num">#{order.order_number || "بدون رقم"}</span>
                   <span className="pd-order-client">{order.client_name}</span>
-                  <span className={listBadgeClass(order.order_status)}>{order.order_status}</span>
+                  <span className={listBadgeClass(orderStatusLabel(order))}>{orderStatusLabel(order)}</span>
                 </div>
               ))}
             </div>
@@ -3152,11 +3291,11 @@ function UserDrawer({ open, onClose, user, orders }: {
 }
 
 function OrdersListRow({ order, onCustomerClick, onOrderClick }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
-  const operationStatus = normalizedOperationStatus(order.operation_status);
-  const finishingStatus = normalizedFinishingStatus(order.finishing_status);
+  const operationStatus = orderOperationStatusText(order);
+  const finishingStatus = orderFinishingStatusText(order);
   const readyStatus = orderReadyStatus(order);
   const createdBy = orderCreatedBy(order);
-  const clientName = valueText(order.client_name || order.customer_name);
+  const clientName = valueText(order.client_name || order.customer_name || order.customer_name_snapshot);
   const clientCode = String(order.client_code || "");
   const handleClick = onCustomerClick && clientName !== "--" ? () => onCustomerClick(clientCode, clientName) : undefined;
   return (
@@ -3216,7 +3355,7 @@ function Dashboard({ setView, canSeeFinancials }: { setView: (view: View) => voi
           <div className="panel-head"><h2>آخر الأوردرات</h2><button className="ghost-btn compact" onClick={() => setView("search")}>عرض الكل</button></div>
           <div className="table-wrap dashboard-table"><table><thead><tr>{["تاريخ التسليم", "أمر شغل رقم", "العميل", "الطرف", "إجمالي", "مدفوع", "متبقي", "الحالة"].map((head) => <th key={head}>{head}</th>)}</tr></thead><tbody>
             {data.latestOrders.length === 0 && <EmptyRow colSpan={8} />}
-            {data.latestOrders.map((order) => <tr key={order.id}><td>{formatDateArabic(order.delivery_date)}</td><td>{order.order_number || "-"}</td><td>{orderClientName(order)}</td><td>{orderParty(order)}</td><td>{formatMoney(order.total)}</td><td>{formatMoney(order.paid)}</td><td>{formatMoney(order.remaining)}</td><td><span className="badge badge-blue">{order.delivery_status || order.operation_status || "-"}</span></td></tr>)}
+            {data.latestOrders.map((order) => <tr key={order.id}><td>{formatDateArabic(order.delivery_date)}</td><td>{order.order_number || "-"}</td><td>{orderClientName(order)}</td><td>{orderParty(order)}</td><td>{formatMoney(order.total)}</td><td>{formatMoney(order.paid)}</td><td>{formatMoney(order.remaining)}</td><td><span className="badge badge-blue">{orderDashboardStatus(order)}</span></td></tr>)}
           </tbody></table></div>
         </div>
         <div className="panel">
@@ -3275,14 +3414,18 @@ function AlertItem({ alert }: { alert: Alert }) {
   );
 }
 
-function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave, readOnly = false }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void; readOnly?: boolean }) {
+function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void; onSaveDraft?: (order: Order) => void; onSendToProduction?: (order: Order) => void; readOnly?: boolean; onPrint?: (order: Order) => void }) {
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), order_number: orderNumber || String(Date.now()).slice(-6) });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
   const [productHighlight, setProductHighlight] = useState(-1);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const [customerHighlight, setCustomerHighlight] = useState(-1);
   const productBoxRef = useRef<HTMLDivElement>(null);
+  const customerBoxRef = useRef<HTMLDivElement>(null);
   const [activeImageField, setActiveImageField] = useState<{ index: number; key: "logoImage" | "workOrderImage" } | null>(null);
   const [imageMessages, setImageMessages] = useState<Record<string, string>>({});
   const customerRef = useRef<HTMLInputElement>(null);
@@ -3294,6 +3437,9 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     function closeOnOutsideClick(event: MouseEvent) {
       if (productBoxRef.current && !productBoxRef.current.contains(event.target as Node)) {
         setProductDropdownOpen(false);
+      }
+      if (customerBoxRef.current && !customerBoxRef.current.contains(event.target as Node)) {
+        setCustomerDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", closeOnOutsideClick);
@@ -3334,6 +3480,10 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   const activeProducts = normalizedProducts.filter((product) => product.status === "active");
   const selectedProduct = normalizedProducts.find((product) => product.id === form.productId);
   const visibleProducts = activeProducts.filter((product) => `${product.name} ${product.details}`.toLowerCase().includes(productSearch.trim().toLowerCase()));
+  const visibleCustomers = customers.filter((customer) => {
+    const term = customerSearch.trim().toLowerCase();
+    return !term || `${customer.client_name} ${customer.client_code} ${customer.phone}`.toLowerCase().includes(term);
+  });
   const operationItems: OperationItem[] = form.operationItems?.length
     ? form.operationItems
     : (form.operationMethods?.length ? form.operationMethods : [""]).map((method, index) => ({
@@ -3353,18 +3503,19 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       const existing = customers.find((customer) => customer.client_name.trim().toLowerCase() === value.trim().toLowerCase() || customer.phone === current.phone);
       const source = current.source_person || partyOptions[0];
       const clientCode = existing?.client_code || current.client_code || nextCustomerCode(customers, source);
-      return calculate({ ...current, client_name: value, client_code: clientCode, updated_at: new Date().toISOString() });
+      return calculate({ ...current, customer_id: existing?.id || current.customer_id, client_name: value, client_code: clientCode, updated_at: new Date().toISOString() });
     });
   }
 
-  function selectCustomer(value: string) {
-    const existing = customers.find((customer) => customer.id === value);
+  function selectCustomer(id: string) {
+    const existing = customers.find((customer) => customer.id === id);
     if (!existing) {
-      setClientName(value);
+      setClientName(id);
       return;
     }
     setForm((current) => calculate({
       ...current,
+      customer_id: existing.id,
       client_name: existing.client_name,
       client_code: existing.client_code,
       phone: existing.phone,
@@ -3372,6 +3523,44 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       old_balance: existing.old_balance || current.old_balance,
       updated_at: new Date().toISOString(),
     }));
+  }
+
+  function handleCustomerInputFocus() {
+    setCustomerSearch(form.client_name || "");
+    setCustomerHighlight(-1);
+    setCustomerDropdownOpen(true);
+  }
+
+  function handleCustomerInputChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const value = event.target.value;
+    setCustomerSearch(value);
+    setCustomerHighlight(-1);
+    setCustomerDropdownOpen(true);
+    setForm((current) => calculate({ ...current, client_name: value, client_code: "", customer_id: "", phone: "", updated_at: new Date().toISOString() }));
+  }
+
+  function handleCustomerKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setCustomerDropdownOpen(false);
+      return;
+    }
+    if (!customerDropdownOpen || visibleCustomers.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setCustomerHighlight((current) => (current + 1) % visibleCustomers.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setCustomerHighlight((current) => (current - 1 + visibleCustomers.length) % visibleCustomers.length);
+    } else if (event.key === "Enter") {
+      const customer = visibleCustomers[customerHighlight >= 0 ? customerHighlight : 0];
+      if (customer) {
+        event.preventDefault();
+        event.stopPropagation();
+        setCustomerSearch(customer.client_name);
+        selectCustomer(customer.id);
+        setCustomerDropdownOpen(false);
+      }
+    }
   }
 
   function selectProduct(productId: string) {
@@ -3556,61 +3745,95 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     set("items", form.items.map((item) => item.id === id ? { ...item, ...patch } : item));
   }
 
-  function buildSubmitHandler(status: "في التشغيل" | "جديد") {
+  function buildValidatedOrder(forceOperation: boolean): Order | null {
+    const nextErrors: Record<string, string> = {};
+    const normalizedOperationItems = operationItems.map((item) => ({ ...item, method: item.method.trim() }));
+    const methods = normalizedOperationItems.map((item) => item.method).filter(Boolean);
+    const total = Number(form.quantity || 0) * Number(form.price || 0);
+    const paid = Number(form.paid || 0);
+    if (!form.order_number.trim()) nextErrors.order_number = "رقم الأوردر مطلوب";
+    if (!form.client_name.trim()) nextErrors.client_name = "اسم العميل مطلوب";
+    if (!form.source_person.trim()) nextErrors.source_person = "الطرف مطلوب";
+    if (!form.productId && !form.productName && !form.order_type) nextErrors.productId = "يجب اختيار نوع المنتج";
+    if (Number(form.quantity || 0) < 1) nextErrors.quantity = "العدد يجب أن يكون 1 على الأقل";
+    if (Number(form.price || 0) < 0) nextErrors.price = "السعر لا يمكن أن يكون بالسالب";
+    if (paid < 0) nextErrors.paid = "المدفوع لا يمكن أن يكون بالسالب";
+    if (paid > total) nextErrors.paid = "المدفوع لا يمكن أن يكون أكبر من الإجمالي";
+    if (!form.paymentMethod) nextErrors.paymentMethod = "طريقة الدفع مطلوبة";
+    if (form.paymentMethod === "other" && !form.customPaymentMethod?.trim()) nextErrors.customPaymentMethod = "اكتب طريقة الدفع";
+    if (!normalizeMaterialsStatus(form.materialsStatus)) nextErrors.materialsStatus = "يجب تحديد حالة الخامات";
+    if (!form.delivery_date) nextErrors.delivery_date = "تاريخ التسليم مطلوب";
+    if (methods.length === 0) nextErrors.operationMethods = "يجب إضافة طريقة تشغيل واحدة على الأقل";
+    if (!operationItems[0]?.workOrderImage) nextErrors.workOrderImage = "أمر الشغل مطلوب";
+    if (Object.keys(nextErrors).length) {
+      setErrors(nextErrors);
+      scrollToFirstInvalid();
+      return null;
+    }
+    setErrors({});
+    const now = new Date().toISOString();
+    const selectedName = selectedProduct?.name || form.productName || form.order_type;
+    return calculate({
+      ...computed,
+      productId: form.productId,
+      productName: selectedName,
+      order_type: selectedName,
+      materialsStatus: normalizeMaterialsStatus(form.materialsStatus),
+      client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
+      operationMethods: methods,
+      operationItems: normalizedOperationItems.filter((item) => item.method || item.logoImage || item.workOrderImage),
+      draft: false,
+      workStage: forceOperation ? "operation" : (initial ? form.workStage : "operation"),
+      workflow_stage: forceOperation ? "التشغيل" : (initial ? stageLabel(form.workStage) as WorkflowStage : "التشغيل"),
+      order_status: forceOperation ? "في التشغيل" : (initial ? form.order_status : "جديد"),
+      operation_status: initial ? form.operation_status : "not_started",
+      finishing_status: initial ? form.finishing_status : "not_started",
+      created_at: computed.created_at || now,
+      updated_at: now,
+    });
+  }
+
+  function saveValidated(forceOperation: boolean, done: (order: Order) => void) {
     return (event: React.FormEvent) => {
       event.preventDefault();
       if (saving) return;
-      const nextErrors: Record<string, string> = {};
-      const normalizedOperationItems = operationItems.map((item) => ({ ...item, method: item.method.trim() }));
-      const methods = normalizedOperationItems.map((item) => item.method).filter(Boolean);
-      const total = Number(form.quantity || 0) * Number(form.price || 0);
-      const paid = Number(form.paid || 0);
-      if (!form.order_number.trim()) nextErrors.order_number = "رقم الأوردر مطلوب";
-      if (!form.client_name.trim()) nextErrors.client_name = "اسم العميل مطلوب";
-      if (!form.source_person.trim()) nextErrors.source_person = "الطرف مطلوب";
-      if (!form.productId && !form.productName && !form.order_type) nextErrors.productId = "يجب اختيار نوع المنتج";
-      if (Number(form.quantity || 0) < 1) nextErrors.quantity = "العدد يجب أن يكون 1 على الأقل";
-      if (Number(form.price || 0) < 0) nextErrors.price = "السعر لا يمكن أن يكون بالسالب";
-      if (paid < 0) nextErrors.paid = "المدفوع لا يمكن أن يكون بالسالب";
-      if (paid > total) nextErrors.paid = "المدفوع لا يمكن أن يكون أكبر من الإجمالي";
-      if (!form.paymentMethod) nextErrors.paymentMethod = "طريقة الدفع مطلوبة";
-      if (form.paymentMethod === "other" && !form.customPaymentMethod?.trim()) nextErrors.customPaymentMethod = "اكتب طريقة الدفع";
-      if (!normalizeMaterialsStatus(form.materialsStatus)) nextErrors.materialsStatus = "يجب تحديد حالة الخامات";
-      if (!form.delivery_date) nextErrors.delivery_date = "تاريخ التسليم مطلوب";
-      if (methods.length === 0) nextErrors.operationMethods = "يجب إضافة طريقة تشغيل واحدة على الأقل";
-      if (!operationItems[0]?.workOrderImage) nextErrors.workOrderImage = "أمر الشغل مطلوب";
-      if (Object.keys(nextErrors).length) {
-        setErrors(nextErrors);
-        scrollToFirstInvalid();
-        return;
-      }
-      setErrors({});
+      const order = buildValidatedOrder(forceOperation);
+      if (!order) return;
       setSaving(true);
-      const now = new Date().toISOString();
-      const selectedName = selectedProduct?.name || form.productName || form.order_type;
-      onSave(calculate({
-        ...computed,
-        productId: form.productId,
-        productName: selectedName,
-        order_type: selectedName,
-        materialsStatus: normalizeMaterialsStatus(form.materialsStatus),
-        client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
-        operationMethods: methods,
-        operationItems: normalizedOperationItems.filter((item) => item.method || item.logoImage || item.workOrderImage),
-        workStage: initial ? form.workStage : "operation",
-        workflow_stage: initial ? stageLabel(form.workStage) as WorkflowStage : "التشغيل",
-        order_status: initial ? form.order_status : status,
-        operation_status: initial ? form.operation_status : "not_started",
-        finishing_status: initial ? form.finishing_status : "not_started",
-        created_at: computed.created_at || now,
-        updated_at: now,
-      }));
+      done(order);
       window.setTimeout(() => setSaving(false), 300);
     };
   }
 
-  const submit = buildSubmitHandler("في التشغيل");
-  const saveDraft = buildSubmitHandler("جديد");
+  const submit = saveValidated(false, onSave);
+  const sendToOperation = saveValidated(true, onSendToProduction ?? onSave);
+
+  function saveDraftTemp() {
+    if (saving) return;
+    const now = new Date().toISOString();
+    const selectedName = selectedProduct?.name || form.productName || form.order_type;
+    const order = calculate({
+      ...computed,
+      productId: form.productId,
+      productName: selectedName,
+      order_type: selectedName,
+      materialsStatus: normalizeMaterialsStatus(form.materialsStatus),
+      client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
+      operationMethods: operationItems.map((item) => item.method.trim()).filter(Boolean),
+      operationItems,
+      draft: true,
+      order_status: "جديد",
+      workStage: "new",
+      workflow_stage: "أوردر جديد",
+      operation_status: "not_started",
+      finishing_status: "not_started",
+      created_at: computed.created_at || now,
+      updated_at: now,
+    });
+    setSaving(true);
+    onSaveDraft?.(order);
+    window.setTimeout(() => setSaving(false), 300);
+  }
   const canSubmit = Boolean(
     form.source_person.trim() &&
     form.client_name.trim() &&
@@ -3710,8 +3933,33 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               </label>
               <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
                 <span>اسم العميل<em className="nf-required">*</em></span>
-                <input ref={customerRef} list="zunion-customers" value={form.client_name} onChange={(event) => selectCustomer(event.target.value)} disabled={readOnly} />
-                <datalist id="zunion-customers">{customers.map((customer) => <option key={customer.id} value={customer.client_name} />)}</datalist>
+                <div className="nf-product-combobox" ref={customerBoxRef}>
+                  <input
+                    ref={customerRef}
+                    value={form.client_name}
+                    onChange={handleCustomerInputChange}
+                    onFocus={handleCustomerInputFocus}
+                    onKeyDown={handleCustomerKeyDown}
+                    placeholder={customers.length ? "اكتب أو اختر اسم العميل" : "اكتب اسم العميل"}
+                    disabled={readOnly}
+                  />
+                  {customerDropdownOpen && visibleCustomers.length > 0 && (
+                    <div className="nf-product-dropdown">
+                      {visibleCustomers.map((customer, index) => (
+                        <button
+                          type="button"
+                          key={customer.id}
+                          className={`nf-product-option${index === customerHighlight ? " selected" : ""}`}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => { setCustomerSearch(customer.client_name); selectCustomer(customer.id); setCustomerDropdownOpen(false); }}
+                        >
+                          {customer.client_name}
+                          {customer.client_code ? <small className="nf-customer-option-code">({customer.client_code})</small> : null}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <ErrorText message={errors.client_name} />
               </label>
               <label className="nf-field">
@@ -3753,18 +4001,18 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               </label>
               <label className={`nf-field${errors.quantity ? " nf-field-invalid" : ""}`}>
                 <span>العدد<em className="nf-required">*</em></span>
-                <input type="number" min={1} value={form.quantity} onChange={(event) => set("quantity", Number(event.target.value))} disabled={readOnly} />
+                <input type="number" min={1} value={form.quantity || ""} onChange={(event) => set("quantity", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.quantity} />
               </label>
               <label className={`nf-field${errors.price ? " nf-field-invalid" : ""}`}>
                 <span>السعر</span>
-                <input type="number" min={0} step="0.01" value={form.price} onChange={(event) => set("price", Number(event.target.value))} disabled={readOnly} />
+                <input type="number" min={0} step="0.01" value={form.price || ""} onChange={(event) => set("price", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.price} />
               </label>
               <Readonly className="nf-field" label="الإجمالي" value={computed.total} />
               <label className={`nf-field${errors.paid ? " nf-field-invalid" : ""}`}>
                 <span>دفع</span>
-                <input type="number" min={0} step="0.01" value={form.paid} onChange={(event) => set("paid", Number(event.target.value))} disabled={readOnly} />
+                <input type="number" min={0} step="0.01" value={form.paid || ""} onChange={(event) => set("paid", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.paid} />
               </label>
               <Readonly className="nf-field" label="المتبقي" value={computed.remaining} />
@@ -3778,7 +4026,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               </label>
               <label className="nf-field">
                 <span>على</span>
-                <input type="number" min={0} step="0.01" value={form.old_balance} onChange={(event) => set("old_balance", Number(event.target.value))} disabled={readOnly} />
+                <input type="number" min={0} step="0.01" value={form.old_balance || ""} onChange={(event) => set("old_balance", Number(event.target.value))} disabled={readOnly} />
               </label>
             </div>
 
@@ -3816,14 +4064,33 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         <ErrorText message={errors.operationMethods} />
       </div>
 
+      <section className="nf-card nf-card-details">
+        <label className="nf-field">
+          <span>التفاصيل</span>
+          <textarea
+            value={form.details || ""}
+            onChange={(event) => set("details", event.target.value)}
+            placeholder="اكتب تفاصيل الأوردر هنا..."
+            rows={4}
+            dir="rtl"
+            disabled={readOnly}
+          />
+        </label>
+      </section>
+
       <div className="nf-actionbar">
         {readOnly ? (
-          <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> رجوع</button>
+          <>
+            <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> رجوع</button>
+            {onPrint && <button type="button" className="ghost-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة الأوردر</button>}
+          </>
         ) : (
           <>
-            {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
-            {!isEdit && <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraft} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>}
             <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : isEdit ? "تحديث الأوردر" : "إنشاء الأوردر"} <Send size={16} /></button>
+            {onSaveDraft && <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraftTemp} disabled={saving}><FilePlus size={16} /> حفظ مؤقت</button>}
+            {onSendToProduction && <button type="button" className="ghost-btn nf-btn nf-btn-to-op" onClick={sendToOperation} disabled={saving}><Truck size={16} /> اذهب للتشغيل</button>}
+            {onPrint && <button type="button" className="ghost-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة الأوردر</button>}
+            {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
           </>
         )}
       </div>
@@ -3911,9 +4178,12 @@ function Select({ label, value, options, onChange, className, disabled }: { labe
 
 function compactDateValue(value: string) {
   if (!value) return "";
-  const [year, month, day] = normalizeDigitsToEnglish(value).split("-");
-  if (!year || !month || !day) return normalizeDigitsToEnglish(value);
-  return `${year}-${Number(month)}-${Number(day)}`;
+  const parts = normalizeDigitsToEnglish(value).split("-");
+  const [year, month, day] = parts;
+  const monthNum = Number(month);
+  const dayNum = Number(day);
+  if (!year || !month || !day || Number.isNaN(monthNum) || Number.isNaN(dayNum)) return normalizeDigitsToEnglish(value).replace(/NaN/g, "");
+  return `${year}-${monthNum}-${dayNum}`;
 }
 
 function StageSelect({ label, value, onChange, disabled }: { label: string; value: WorkStage; onChange: (value: WorkStage) => void; disabled?: boolean }) {
@@ -4269,7 +4539,7 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
                   <td>{customer.net}</td>
                   <td className="actions"><button className="ghost-btn compact" onClick={() => setExpanded(expanded === customer.code ? "" : customer.code)}>عرض</button>{canPrintCustomers && <button className="ghost-btn compact" type="button" onClick={() => printCustomer(customer)}>طباعة</button>}</td>
                 </tr>
-                {expanded === customer.code && <tr><td colSpan={12}><div className="history-list">{customer.orders.map((order) => <span key={order.id}>#{order.order_number} - {order.order_type} - {order.order_status}</span>)}</div></td></tr>}
+                {expanded === customer.code && <tr><td colSpan={12}><div className="history-list">{customer.orders.map((order) => <span key={order.id}>#{order.order_number} - {order.order_type} - {orderStatusLabel(order)}</span>)}</div></td></tr>}
               </Fragment>
             ))}
           </tbody>
@@ -5536,6 +5806,28 @@ function ZunionApp() {
     setView("search");
   }
 
+  function saveDraftOrder(order: Order) {
+    setOrders((current) => {
+      const previous = current.find((o) => o.id === order.id);
+      const next = previous ? current.map((o) => o.id === order.id ? order : o) : [order, ...current];
+      addAudit(session, "ORDER_DRAFTED", "orders", order.id, previous, order);
+      return next;
+    });
+    setEditingOrderNumber(null);
+    setView("search");
+  }
+
+  function sendOrderToOperation(order: Order) {
+    setOrders((current) => {
+      const previous = current.find((o) => o.id === order.id);
+      const next = previous ? current.map((o) => o.id === order.id ? order : o) : [order, ...current];
+      addAudit(session, "ORDER_SENT_TO_OPERATION", "orders", order.id, previous, order);
+      return next;
+    });
+    setEditingOrderNumber(null);
+    setView("worker");
+  }
+
   const currentRole = session?.role ?? "Master";
   const visibleOrders = roleOrders(currentRole, orders);
   const isMaster = currentRole === "Master";
@@ -5551,10 +5843,10 @@ function ZunionApp() {
         label: "الرئيسية",
         icon: ClipboardList,
         items: [
-          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
           { id: "new", label: "أوردر جديد", visible: can("orders.create"), icon: FilePlus },
           { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
           { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
+          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
         ],
       },
       {
@@ -5725,8 +6017,8 @@ function ZunionApp() {
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onCancel={() => setView("search")} />}
-          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} />}
+          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onPrint={(order) => printOrderClean(order)} />}
+          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onPrint={(order) => printOrderClean(order)} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}

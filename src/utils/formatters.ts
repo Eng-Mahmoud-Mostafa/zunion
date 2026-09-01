@@ -19,7 +19,7 @@ export function formatMoney(value: unknown) {
 export function formatDateArabic(date: string | null | undefined) {
   if (!date) return "-";
   const parsed = new Date(date);
-  if (Number.isNaN(parsed.getTime())) return normalizeDigitsToEnglish(date);
+  if (Number.isNaN(parsed.getTime())) return normalizeDigitsToEnglish(date).replace(/NaN/g, "");
   return normalizeDigitsToEnglish(new Intl.DateTimeFormat("en-GB", {
     year: "2-digit",
     month: "2-digit",
@@ -30,7 +30,7 @@ export function formatDateArabic(date: string | null | undefined) {
 export function formatDateTimeEnglish(date: string | number | Date | null | undefined) {
   if (!date) return "-";
   const parsed = new Date(date);
-  if (Number.isNaN(parsed.getTime())) return normalizeDigitsToEnglish(date);
+  if (Number.isNaN(parsed.getTime())) return normalizeDigitsToEnglish(date).replace(/NaN/g, "");
   return normalizeDigitsToEnglish(new Intl.DateTimeFormat("en-GB", {
     year: "numeric",
     month: "2-digit",
