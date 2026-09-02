@@ -5846,10 +5846,10 @@ function ZunionApp() {
         label: "الرئيسية",
         icon: ClipboardList,
         items: [
-          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
           { id: "new", label: "أوردر جديد", visible: can("orders.create"), icon: FilePlus },
           { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
           { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
+          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
         ],
       },
       {
