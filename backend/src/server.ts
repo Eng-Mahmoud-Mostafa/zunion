@@ -111,6 +111,123 @@ function stripFinancial<T extends Record<string, unknown>>(row: T, role: UserRol
   return clone as T;
 }
 
+function safeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function parseJsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function qrDate(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "—";
+  const date = new Date(raw);
+  if (!Number.isNaN(date.getTime())) return date.toLocaleDateString("ar-EG");
+  return safeHtml(raw);
+}
+
+function qrMaterials(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (raw === "available" || raw === "موجود") return "موجود";
+  if (raw === "unavailable" || raw === "غير موجود") return "غير موجود";
+  return safeHtml(raw) || "—";
+}
+
+function orderQrPage(row: Record<string, unknown>) {
+  const operations = parseJsonArray(row.operation_methods).map((m) => String(m)).filter(Boolean);
+  const attachments = parseJsonArray(row.operation_attachments) as { method?: unknown; workOrder?: unknown; logo?: unknown }[];
+  const methodRows = operations.map((method) => {
+    const att = attachments.find((item) => item && item.method === method);
+    return {
+      method,
+      workOrder: att?.workOrder === true,
+      logo: att?.logo === true,
+    };
+  });
+  const legacyWork = Boolean(String(row.work_order_image_url ?? "").trim());
+  const legacyLogo = Boolean(String(row.logo_image_url ?? "").trim());
+  const hasWork = methodRows.some((item) => item.workOrder) || legacyWork;
+  const hasLogo = methodRows.some((item) => item.logo) || legacyLogo;
+  const detailsText = String(row.details ?? "").trim();
+  const notesText = String(row.notes ?? "").trim();
+  const messageText = String(row.message_text ?? "").trim();
+  const qualityText = String(row.quality_notes ?? "").trim();
+
+  const infoRows = [
+    { label: "رقم الأوردر", value: safeHtml(row.order_number) },
+    { label: "تاريخ الأوردر", value: qrDate(row.created_at) },
+    { label: "تاريخ التسليم", value: qrDate(row.delivery_date) },
+    { label: "اسم العميل", value: safeHtml(row.customer_name_snapshot) },
+    { label: "كود العميل", value: safeHtml(row.customer_code_snapshot) },
+    { label: "طرف", value: safeHtml(row.source_party) },
+    { label: "نوع المنتج", value: safeHtml(row.product_name_snapshot ?? row.type) },
+    { label: "العدد", value: safeHtml(row.quantity) },
+    { label: "الخامات", value: qrMaterials(row.materials_status) },
+  ];
+
+  const sections = `
+    <section class="sec">
+      <ol class="info-list">${infoRows.map((item) => `<li><span class="k">${item.label}</span><span class="v">${item.value || "—"}</span></li>`).join("")}</ol>
+    </section>
+    <section class="sec">
+      <h3>طريقة التشغيل</h3>
+      ${methodRows.length ? `<ol class="ops">${methodRows.map((item) => `<li>${safeHtml(item.method)}</li>`).join("")}</ol>` : "<p class=\"muted\">—</p>"}
+    </section>
+    <section class="sec">
+      <h3>أمر الشغل</h3>
+      <p class="muted">${hasWork ? "مرفق" : "غير مرفق"}</p>
+    </section>
+    <section class="sec">
+      <h3>أمر اللوح</h3>
+      <p class="muted">${hasLogo ? "مرفق" : "غير مرفق"}</p>
+    </section>
+    ${detailsText ? `<section class="sec"><h3>التفاصيل</h3><div class="box">${safeHtml(detailsText)}</div></section>` : ""}
+    ${notesText ? `<section class="sec"><h3>ملاحظات</h3><div class="box">${safeHtml(notesText)}</div></section>` : ""}
+    ${messageText ? `<section class="sec"><h3>رسالة العميل</h3><div class="box">${safeHtml(messageText)}</div></section>` : ""}
+    ${qualityText ? `<section class="sec"><h3>ملاحظات الجودة</h3><div class="box">${safeHtml(qualityText)}</div></section>` : ""}`;
+
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>${safeHtml(`بيانات الأوردر ${row.order_number ?? ""}`)}</title>
+    <style>
+      *{box-sizing:border-box}
+      body{font-family:Tahoma,Arial,sans-serif;color:#111827;background:#f3f6fa;margin:0;padding:16px;direction:rtl}
+      .card{max-width:640px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+      h1.title{font-size:22px;font-weight:900;margin:0 0 2px;text-align:center;color:#111827}
+      p.tip{font-size:12px;color:#6b7280;text-align:center;margin:0 0 16px}
+      .sec{margin-bottom:16px}
+      .sec h3{font-size:14px;font-weight:900;color:#111827;margin:0 0 8px;padding-bottom:5px;border-bottom:2px solid #e5e7eb}
+      .info-list{list-style:none;margin:0;padding:0}
+      .info-list li{display:flex;justify-content:space-between;gap:12px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;background:#fafbfc;font-size:14px}
+      .info-list .k{color:#6b7280;font-weight:700;white-space:nowrap}
+      .info-list .v{font-weight:800;text-align:left;overflow-wrap:anywhere}
+      .ops{margin:0;padding-inline-start:20px;font-size:14px;line-height:2}
+      .box{border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.9;white-space:pre-wrap;background:#fafbfc}
+      .muted{font-size:14px;color:#374151;margin:0}
+      .footer{margin-top:18px;text-align:center;font-size:11px;color:#9ca3af}
+    </style></head><body>
+    <div class="card">
+      <h1 class="title">أوردر رقم ${safeHtml(row.order_number) || "—"}</h1>
+      <p class="tip">بيانات الأوردر للاطلاع فقط</p>
+      ${sections}
+      <div class="footer">Zunion</div>
+    </div>
+    </body></html>`;
+}
+
 type AppUser = {
   id?: string;
   username: string;
@@ -880,14 +997,15 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
     const result = await client.query<{ id: string }>(
       `insert into orders (
         order_number, customer_id, source_party, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
-        delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, operation_methods,
+        delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, operation_methods, operation_attachments,
         quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
         damaged_pieces, production_notes, finishing_notes, details, draft, created_by, updated_by
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$29) returning id`,
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$30) returning id`,
       [
         nextOrderNumber(), customerId, order.source_party, order.customer_name_snapshot, order.customer_code_snapshot,
         order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
         order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? "", JSON.stringify(order.operationMethods),
+        JSON.stringify(order.operation_attachments ?? []),
         order.quantity, order.price, order.paid,
         order.old_account, order.status ?? "NEW", order.workStage ?? "new", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
         order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id,
@@ -905,6 +1023,15 @@ app.get("/api/orders/:id", requireAuth, async (req, res) => {
   if (!order) return res.status(404).json({ message: "Order not found" });
   const files = await query("select id, file_type, original_name, mime_type, size, created_at from order_files where order_id=$1 order by created_at desc", [id]);
   res.json({ order: stripFinancial(order, req.user!.role), files: files.rows });
+});
+
+app.get("/api/orders/:id/qr", async (req, res) => {
+  const id = param(req.params.id);
+  const order = await loadOrder(id);
+  if (!order) return res.status(404).send("Order not found");
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.send(orderQrPage(order));
 });
 
 app.get("/api/orders/:id/details", requireAuth, async (req, res) => {
@@ -942,10 +1069,10 @@ app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operato
   await query(
     `update orders set source_party=$1, customer_name_snapshot=$2, customer_code_snapshot=$3, phone_snapshot=$4,
      delivery_date=$5, type=$6, product_id=$7, product_name_snapshot=$8, payment_method=$9, custom_payment_method=$10,
-     materials_status=$11, operation_methods=$12, quantity=$13, price=$14, paid=$15, old_account=$16, status=$17, work_stage=$18, notes=$19,
-     message_text=$20, quality_notes=$21, damaged_pieces=$22, production_notes=$23, finishing_notes=$24, details=$25, draft=$26, updated_by=$27
-     where id=$28`,
-    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? oldOrder.materials_status ?? "", JSON.stringify(order.operationMethods), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, id],
+     materials_status=$11, operation_methods=$12, operation_attachments=$13, quantity=$14, price=$15, paid=$16, old_account=$17, status=$18, work_stage=$19, notes=$20,
+     message_text=$21, quality_notes=$22, damaged_pieces=$23, production_notes=$24, finishing_notes=$25, details=$26, draft=$27, updated_by=$28
+     where id=$29`,
+    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? oldOrder.materials_status ?? "", JSON.stringify(order.operationMethods), JSON.stringify(order.operation_attachments ?? []), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, id],
   );
   await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, order);
   res.json({ ok: true });

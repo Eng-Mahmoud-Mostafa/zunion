@@ -68,6 +68,11 @@ export const orderSchema = z.object({
   finishing_notes: z.string().optional().default(""),
   details: z.string().optional().default(""),
   draft: z.boolean().optional().default(false),
+  operation_attachments: z.array(z.object({
+    method: z.string().default(""),
+    workOrder: z.boolean().optional().default(false),
+    logo: z.boolean().optional().default(false),
+  })).optional().default([]),
 }).superRefine((order, ctx) => {
   const isDraft = order.draft === true;
   if (isDraft) {

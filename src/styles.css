@@ -630,6 +630,19 @@ textarea:focus {
   stroke: currentColor;
 }
 
+.created-order-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.created-order-qr {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  padding: 3px;
+}
+
 .line-items {
   display: grid;
   gap: 12px;

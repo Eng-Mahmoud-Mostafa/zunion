@@ -1,4 +1,5 @@
 import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import QRCode from "qrcode";
 import * as XLSX from "xlsx";
 import {
   ArrowDownCircle,
@@ -175,6 +176,7 @@ type Order = {
   materialsStatus?: string;
   operationMethods?: string[];
   operationItems?: OperationItem[];
+  operationAttachments?: { method: string; workOrder: boolean; logo: boolean }[];
   logoFileName?: string;
   workOrderFileName?: string;
   details: string;
@@ -849,11 +851,58 @@ function printableRecord(fields: Array<[string, unknown]>) {
   return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong><span class="record-value">${printableCell(value)}</span></div>`).join("")}</div>`;
 }
 
-function printOrderDocument(order: Order, _session?: Session | null) {
-  printOrderClean(order);
+function orderQrUrl(order: Order) {
+  const id = order.id || "";
+  return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)
+    ? `${window.location.origin}/api/orders/${encodeURIComponent(id)}/qr`
+    : "";
 }
 
-function printOrderClean(order: Order) {
+function QrImage({ text, size = 72, className }: { text: string; size?: number; className?: string }) {
+  const [src, setSrc] = useState<string>("");
+  useEffect(() => {
+    let alive = true;
+    setSrc("");
+    if (!text) return;
+    QRCode.toDataURL(text, { width: size * 2, margin: 1, errorCorrectionLevel: "M" })
+      .then((dataUrl) => { if (alive) setSrc(dataUrl); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [text, size]);
+  return src ? <img className={className} src={src} alt="QR" width={size} height={size} /> : null;
+}
+
+function printOrderDocument(order: Order, _session?: Session | null) {
+  void printOrderClean(order);
+}
+
+async function printOrderFromForm(order: Order, knownOrders: Order[]) {
+  const alreadySaved = knownOrders.some((existing) => existing.id === order.id);
+  let persistOk = Boolean(order.id) && alreadySaved;
+  if (order.id && !alreadySaved) {
+    try {
+      const body = JSON.stringify(orderToApi(order));
+      await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body })
+        .catch(() => backendJson("/api/orders", { method: "POST", body }));
+      persistOk = true;
+    } catch (error) {
+      console.warn("[Zunion] Order could not be persisted before printing; QR omitted.", error);
+    }
+  }
+  await printOrderClean(order, { includeQr: persistOk && Boolean(orderQrUrl(order)) });
+}
+
+async function printOrderClean(order: Order, options?: { includeQr?: boolean }) {
+  const qrUrl = options?.includeQr === false ? "" : orderQrUrl(order);
+  let qrHtml = "";
+  if (qrUrl) {
+    try {
+      const dataUrl = await QRCode.toDataURL(qrUrl, { width: 360, margin: 1, errorCorrectionLevel: "M", color: { dark: "#111111", light: "#ffffff" } });
+      qrHtml = `<img class="print-qr" src="${dataUrl}" alt="QR" />`;
+    } catch (error) {
+      console.warn("[Zunion] QR generation failed.", error);
+    }
+  }
   const operationItems = order.operationItems?.length
     ? order.operationItems
     : (order.operationMethods?.length ? order.operationMethods : []).map((method) => ({ method, logoImage: "", workOrderImage: "" }));
@@ -877,11 +926,14 @@ function printOrderClean(order: Order) {
   const printedAt = formatDateTimeEnglish(new Date());
   const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>${escapeHtml(`طباعة الأوردر ${order.order_number}`)}</title>
     <style>
-      @page{size:A4;margin:12mm}
+      @page{size:8in 8in;margin:2mm}
       *{box-sizing:border-box}
       body{font-family:Tahoma,Arial,sans-serif;color:#111827;margin:0;direction:rtl;padding:24px}
-      .doc-title{font-size:22px;font-weight:900;color:#111827;text-align:center;margin:0 0 4px}
+      .print-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
+      .print-title{flex:1;text-align:center;min-width:0}
+      .doc-title{font-size:22px;font-weight:900;color:#111827;text-align:center;margin:0}
       .doc-sub{font-size:12px;color:#4b5563;text-align:center;margin:0 0 18px}
+      .print-qr{width:100px;height:100px;flex:0 0 auto}
       .order-head{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;background:#f3f6fa;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin-bottom:18px}
       .order-head .oh-item{font-size:14px;font-weight:800;color:#111827}
       .order-head .oh-item small{display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:2px}
@@ -897,10 +949,13 @@ function printOrderClean(order: Order) {
       .op-img-label{font-size:12px;font-weight:800;color:#6b7280;margin-bottom:4px}
       .op-img img{max-width:100%;max-height:220px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px}
       .toolbar{margin-bottom:14px}.toolbar button{background:#ed1c24;color:#fff;border:0;border-radius:7px;padding:10px 18px;font-weight:800;cursor:pointer}
-      @media print{.toolbar{display:none!important}body{padding:0}}
+      @media print{.toolbar{display:none!important}body{padding:0}.print-qr{width:1.1in;height:1.1in}}
     </style></head><body>
     <div class="toolbar"><button onclick="window.print()">طباعة</button></div>
-    <div class="doc-title">أمر شغل</div>
+    <div class="print-head">
+      <div class="print-title"><div class="doc-title">أوردر رقم ${escapeHtml(order.order_number)}</div></div>
+      ${qrHtml}
+    </div>
     <div class="doc-sub">تاريخ الطباعة: ${escapeHtml(printedAt)}</div>
     <div class="order-head">
       <div class="oh-item"><small>رقم الأوردر</small><div dir="ltr">${escapeHtml(order.order_number)}</div></div>
@@ -1279,6 +1334,9 @@ function orderToApi(order: Order) {
     finishing_notes: calculated.finishing_notes,
     details: calculated.details,
     draft: calculated.draft === true,
+    operation_attachments: (calculated.operationItems || [])
+      .filter((item) => item.method.trim() || item.logoImage || item.workOrderImage)
+      .map((item) => ({ method: item.method.trim(), workOrder: Boolean(item.workOrderImage), logo: Boolean(item.logoImage) })),
   };
 }
 
@@ -5961,20 +6019,23 @@ function ZunionApp() {
                 <p className="muted">رقم الأوردر: <span className="data-value">{createdOrder.order_number}</span></p>
               </div>
               {canPrintCreatedOrder && (
-                <button type="button" className="ghost-btn print-order-btn" onClick={() => {
-                  addAudit(session, "ORDER_PRINTED", "orders", createdOrder.id);
-                  printOrderDocument(createdOrder, session);
-                }}>
-                  <Printer size={16} />
-                  طباعة الأوردر
-                </button>
+                <div className="created-order-actions">
+                  <QrImage text={orderQrUrl(createdOrder)} size={72} className="created-order-qr" />
+                  <button type="button" className="ghost-btn print-order-btn" onClick={() => {
+                    addAudit(session, "ORDER_PRINTED", "orders", createdOrder.id);
+                    printOrderDocument(createdOrder, session);
+                  }}>
+                    <Printer size={16} />
+                    طباعة الأوردر
+                  </button>
+                </div>
               )}
             </section>
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onPrint={(order) => printOrderClean(order)} />}
-          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onPrint={(order) => printOrderClean(order)} />}
+          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
