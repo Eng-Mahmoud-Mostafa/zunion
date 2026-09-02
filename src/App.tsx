@@ -3935,16 +3935,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <span>رقم الأوردر</span>
                 <input value={form.order_number} readOnly />
               </label>
-              <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
-                <span>على</span>
-                <select value={onFieldOptions.includes(form.source_person) ? form.source_person : ""} onChange={(event) => {
-                  setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
-                }} disabled={readOnly}>
-                  <option value="" disabled hidden>اختر</option>
-                  {onFieldOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-                <ErrorText message={errors.source_person} />
-              </label>
               <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
                 <span>اسم العميل<em className="nf-required">*</em></span>
                 <select
@@ -4031,6 +4021,16 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                   {paymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
                 </select>
                 <ErrorText message={errors.paymentMethod} />
+              </label>
+              <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
+                <span>على</span>
+                <select value={onFieldOptions.includes(form.source_person) ? form.source_person : ""} onChange={(event) => {
+                  setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
+                }} disabled={readOnly}>
+                  <option value="" disabled hidden>اختر</option>
+                  {onFieldOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
+                <ErrorText message={errors.source_person} />
               </label>
             </div>
 
