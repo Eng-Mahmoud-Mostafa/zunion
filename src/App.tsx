@@ -4032,10 +4032,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 </select>
                 <ErrorText message={errors.paymentMethod} />
               </label>
-              <label className="nf-field">
-                <span>على</span>
-                <input type="number" min={0} step="0.01" value={form.old_balance || ""} onChange={(event) => set("old_balance", Number(event.target.value))} disabled={readOnly} />
-              </label>
             </div>
 
             <div className={`nf-materials${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
