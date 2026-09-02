@@ -849,53 +849,8 @@ function printableRecord(fields: Array<[string, unknown]>) {
   return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong><span class="record-value">${printableCell(value)}</span></div>`).join("")}</div>`;
 }
 
-function orderPrintHtml(order: Order) {
-  const operationItems = order.operationItems?.length
-    ? order.operationItems
-    : (order.operationMethods?.length ? order.operationMethods : []).map((method) => ({ method, logoImage: "", workOrderImage: "" }));
-  const methodsHtml = operationItems.length
-    ? `<ol>${operationItems.map((item) => `<li>${escapeHtml(item.method || "—")}</li>`).join("")}</ol>`
-    : "<p>—</p>";
-  const imagesHtml = operationItems
-    .map((item, index) => {
-      const previews = [
-        item.logoImage ? `<img src="${escapeHtml(item.logoImage)}" alt="لوجو ${index + 1}" />` : "<span>لا توجد صورة لوجو</span>",
-        item.workOrderImage ? `<img src="${escapeHtml(item.workOrderImage)}" alt="أمر شغل ${index + 1}" />` : "<span>لا توجد صورة أمر شغل</span>",
-      ];
-      return `<div class="box print-attachment"><strong>مرفقات طريقة التشغيل ${index + 1}</strong><div>${previews.join("")}</div></div>`;
-    })
-    .join("");
-  return `<style>
-    .order-print .record-value{color:#111827!important}
-    .order-print ol{margin:0;padding-inline-start:22px}
-    .order-print .print-attachment img{display:block;max-width:100%;max-height:170px;object-fit:contain;margin:6px 0;border:1px solid #e5e7eb;border-radius:6px}
-    .order-print .print-attachment span{display:block;color:#4b5563;margin:6px 0}
-  </style><div class="order-print">
-    ${printableRecord([
-      ["رقم الأوردر", order.order_number],
-      ["تاريخ إنشاء الأوردر", formatDateTimeEnglish(order.created_at || new Date())],
-      ["تاريخ التسليم", order.delivery_date],
-      ["اسم العميل", order.client_name],
-      ["كود العميل", order.client_code],
-      ["طرف", order.source_person],
-      ["نوع المنتج", order.order_type],
-      ["العدد", formatNumber(order.quantity)],
-      ["السعر", formatMoney(order.price)],
-      ["الإجمالي", formatMoney(order.total)],
-      ["المدفوع", formatMoney(order.paid)],
-      ["طريقة الدفع", paymentMethods.find((method) => method.value === order.paymentMethod)?.label || order.paymentMethod || "—"],
-      ["المتبقي", formatMoney(order.remaining)],
-      ["الخامات", materialStatusLabel(order.materialsStatus)],
-      ["المرحلة الحالية", stageLabel(order.workStage)],
-    ])}
-    <h2 class="section-title">طريقة التشغيل</h2>
-    <div class="box"><strong>طرق التشغيل</strong>${methodsHtml}</div>
-    ${imagesHtml ? `<h2 class="section-title">المرفقات</h2><div class="grid">${imagesHtml}</div>` : ""}
-  </div>`;
-}
-
-function printOrderDocument(order: Order, session?: Session | null) {
-  printDocument(`طباعة الأوردر ${order.order_number}`, orderPrintHtml(order), session);
+function printOrderDocument(order: Order, _session?: Session | null) {
+  printOrderClean(order);
 }
 
 function printOrderClean(order: Order) {
@@ -3533,10 +3488,11 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 
   function handleCustomerInputChange(event: React.ChangeEvent<HTMLInputElement>) {
     const value = event.target.value;
+    const existing = value.trim() ? customers.find((customer) => customer.client_name.trim().toLowerCase() === value.trim().toLowerCase()) : undefined;
     setCustomerSearch(value);
     setCustomerHighlight(-1);
     setCustomerDropdownOpen(true);
-    setForm((current) => calculate({ ...current, client_name: value, client_code: "", customer_id: "", phone: "", updated_at: new Date().toISOString() }));
+    setForm((current) => calculate({ ...current, client_name: value, client_code: existing?.client_code ?? "", customer_id: existing?.id ?? "", phone: existing?.phone ?? "", updated_at: new Date().toISOString() }));
   }
 
   function handleCustomerKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -4009,13 +3965,13 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <input type="number" min={0} step="0.01" value={form.price || ""} onChange={(event) => set("price", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.price} />
               </label>
-              <Readonly className="nf-field" label="الإجمالي" value={computed.total} />
+              <ReadonlyText className="nf-field" label="الإجمالي" value={(form.quantity || form.price) ? formatNumber(computed.total) : ""} />
               <label className={`nf-field${errors.paid ? " nf-field-invalid" : ""}`}>
                 <span>دفع</span>
                 <input type="number" min={0} step="0.01" value={form.paid || ""} onChange={(event) => set("paid", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.paid} />
               </label>
-              <Readonly className="nf-field" label="المتبقي" value={computed.remaining} />
+              <ReadonlyText className="nf-field" label="المتبقي" value={(form.quantity || form.price || form.paid) ? formatNumber(computed.remaining) : ""} />
               <label className={`nf-field${errors.paymentMethod ? " nf-field-invalid" : ""}`}>
                 <span>طريقة الدفع</span>
                 <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)} disabled={readOnly}>
@@ -4087,7 +4043,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         ) : (
           <>
             <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : isEdit ? "تحديث الأوردر" : "إنشاء الأوردر"} <Send size={16} /></button>
-            {onSaveDraft && <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraftTemp} disabled={saving}><FilePlus size={16} /> حفظ مؤقت</button>}
+            {onSaveDraft && <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraftTemp} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>}
             {onSendToProduction && <button type="button" className="ghost-btn nf-btn nf-btn-to-op" onClick={sendToOperation} disabled={saving}><Truck size={16} /> اذهب للتشغيل</button>}
             {onPrint && <button type="button" className="ghost-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة الأوردر</button>}
             {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
@@ -5843,10 +5799,10 @@ function ZunionApp() {
         label: "الرئيسية",
         icon: ClipboardList,
         items: [
+          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
           { id: "new", label: "أوردر جديد", visible: can("orders.create"), icon: FilePlus },
           { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
           { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
-          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
         ],
       },
       {
