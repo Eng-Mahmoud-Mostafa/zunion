@@ -927,32 +927,35 @@ async function printOrderClean(order: Order, options?: { includeQr?: boolean }) 
   const printedAt = formatDateTimeEnglish(new Date());
   const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>${escapeHtml(`طباعة الأوردر ${order.order_number}`)}</title>
     <style>
-      @page{size:8in 8in;margin:2mm}
+      @page{size:8in 8in;margin:0.2in}
       *{box-sizing:border-box}
-      body{font-family:Tahoma,Arial,sans-serif;color:#111827;margin:0;direction:rtl;padding:24px}
-      .print-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
+      html,body{margin:0;padding:0;width:8in;background:#fff}
+      body{font-family:Tahoma,Arial,sans-serif;color:#111827;direction:rtl}
+      .print-order{width:7.6in;max-width:7.6in;min-height:7.6in;margin:0 auto;padding:0;box-sizing:border-box;direction:rtl;text-align:right}
+      .print-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:2px}
       .print-title{flex:1;text-align:center;min-width:0}
-      .doc-title{font-size:22px;font-weight:900;color:#111827;text-align:center;margin:0}
-      .doc-sub{font-size:12px;color:#4b5563;text-align:center;margin:0 0 18px}
-      .print-qr{width:100px;height:100px;flex:0 0 auto}
-      .order-head{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;background:#f3f6fa;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin-bottom:18px}
-      .order-head .oh-item{font-size:14px;font-weight:800;color:#111827}
-      .order-head .oh-item small{display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:2px}
-      table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:18px}
-      th,td{border:1px solid #d1d5db;padding:9px 12px;text-align:right;vertical-align:top}
+      .doc-title{font-size:20px;font-weight:900;color:#111827;text-align:center;margin:0;line-height:1.2}
+      .doc-sub{font-size:11px;color:#4b5563;text-align:center;margin:0 0 10px}
+      .print-qr{width:1in;height:1in;flex:0 0 auto;object-fit:contain}
+      .order-head{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px;background:#f3f6fa;border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;margin-bottom:12px}
+      .order-head .oh-item{font-size:12px;font-weight:800;color:#111827;text-align:right;break-inside:avoid}
+      .order-head .oh-item small{display:block;font-size:10px;font-weight:600;color:#6b7280;margin-bottom:1px}
+      table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px}
+      th,td{border:1px solid #d1d5db;padding:5px 9px;text-align:right;vertical-align:top;overflow-wrap:anywhere;word-break:break-word}
       th{background:#f8fafc;color:#111827;font-weight:800}
       td{color:#111827}
-      .section{font-size:15px;font-weight:900;color:#111827;margin:18px 0 8px;padding-bottom:6px;border-bottom:2px solid #e5e7eb}
-      .details-box{border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;min-height:56px;white-space:pre-wrap;font-size:13px;line-height:1.8}
-      .op-list{margin:0;padding-inline-start:22px}
-      .op-imgs{display:flex;flex-wrap:wrap;gap:16px}
-      .op-img{flex:1 1 200px;text-align:center}
-      .op-img-label{font-size:12px;font-weight:800;color:#6b7280;margin-bottom:4px}
-      .op-img img{max-width:100%;max-height:220px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px}
-      .toolbar{margin-bottom:14px}.toolbar button{background:#ed1c24;color:#fff;border:0;border-radius:7px;padding:10px 18px;font-weight:800;cursor:pointer}
-      @media print{.toolbar{display:none!important}body{padding:0}.print-qr{width:1.1in;height:1.1in}}
+      .section{font-size:14px;font-weight:900;color:#111827;margin:10px 0 4px;padding-bottom:3px;border-bottom:2px solid #e5e7eb;break-inside:avoid;page-break-inside:avoid}
+      .details-box{border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;min-height:34px;white-space:pre-wrap;font-size:12px;line-height:1.6;overflow-wrap:anywhere;word-break:break-word;break-inside:avoid;page-break-inside:avoid}
+      .op-list{margin:0;padding-inline-start:18px}
+      .op-imgs{display:flex;flex-wrap:wrap;gap:10px;break-inside:avoid;page-break-inside:avoid}
+      .op-img{flex:1 1 220px;text-align:center;break-inside:avoid;page-break-inside:avoid}
+      .op-img-label{font-size:11px;font-weight:800;color:#6b7280;margin-bottom:3px}
+      .op-img img{max-width:100%;max-height:200px;object-fit:contain;border:1px solid #e5e7eb;border-radius:6px}
+      .toolbar{margin-bottom:12px;text-align:center}.toolbar button{background:#ed1c24;color:#fff;border:0;border-radius:7px;padding:10px 18px;font-weight:800;cursor:pointer}
+      @media print{.toolbar{display:none!important}.print-qr{width:1.1in;height:1.1in}}
     </style></head><body>
     <div class="toolbar"><button onclick="window.print()">طباعة</button></div>
+    <div class="print-order">
     <div class="print-head">
       <div class="print-title"><div class="doc-title">أوردر رقم ${escapeHtml(order.order_number)}</div></div>
       ${qrHtml}
@@ -986,6 +989,7 @@ async function printOrderClean(order: Order, options?: { includeQr?: boolean }) 
     ${order.notes ? `<div class="section">ملاحظات</div><div class="details-box">${escapeHtml(order.notes)}</div>` : ""}
     ${order.client_message ? `<div class="section">رسالة العميل</div><div class="details-box">${escapeHtml(order.client_message)}</div>` : ""}
     ${order.quality_notes ? `<div class="section">ملاحظات الجودة</div><div class="details-box">${escapeHtml(order.quality_notes)}</div>` : ""}
+    </div>
     </body></html>`;
   if (!popup) {
     window.print();
