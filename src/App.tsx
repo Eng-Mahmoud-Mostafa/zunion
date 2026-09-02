@@ -3994,6 +3994,20 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 
           </section>
 
+          <section className="nf-card nf-card-details">
+            <label className="nf-field">
+              <span>التفاصيل</span>
+              <textarea
+                value={form.details || ""}
+                onChange={(event) => set("details", event.target.value)}
+                placeholder="اكتب تفاصيل الأوردر هنا..."
+                rows={4}
+                dir="rtl"
+                disabled={readOnly}
+              />
+            </label>
+          </section>
+
           {operationItems[0] && renderOperationCard(operationItems[0], 0)}
         </div>
         <div className="nf-col nf-col-left">
@@ -4004,20 +4018,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       <div className="nf-operation-error">
         <ErrorText message={errors.operationMethods} />
       </div>
-
-      <section className="nf-card nf-card-details">
-        <label className="nf-field">
-          <span>التفاصيل</span>
-          <textarea
-            value={form.details || ""}
-            onChange={(event) => set("details", event.target.value)}
-            placeholder="اكتب تفاصيل الأوردر هنا..."
-            rows={4}
-            dir="rtl"
-            disabled={readOnly}
-          />
-        </label>
-      </section>
 
       <div className="nf-actionbar">
         {readOnly ? (
