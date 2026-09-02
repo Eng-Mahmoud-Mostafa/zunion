@@ -219,6 +219,7 @@ const recentCustomersKey = "zunion-local-recent-customers-v1";
 const pinnedItemsKey = "zunion-local-pinned-items-v1";
 const searchCacheKey = "zunion-local-search-cache-v1";
 const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
+const onFieldOptions = ["أحمد", "رضا", "سامح"];
 
 type PermissionOverride = { allow: PermissionKey[]; deny: PermissionKey[] };
 type ManagedUser = {
@@ -963,7 +964,7 @@ async function printOrderClean(order: Order, options?: { includeQr?: boolean }) 
       <div class="oh-item"><small>تاريخ التسليم</small><div>${escapeHtml(order.delivery_date ? formatDateArabic(order.delivery_date) : "—")}</div></div>
       <div class="oh-item"><small>اسم العميل</small><div>${escapeHtml(order.client_name || "—")}</div></div>
       <div class="oh-item"><small>كود العميل</small><div>${escapeHtml(order.client_code || "—")}</div></div>
-      <div class="oh-item"><small>طرف</small><div>${escapeHtml(order.source_person || "—")}</div></div>
+      <div class="oh-item"><small>على</small><div>${escapeHtml(order.source_person || "—")}</div></div>
     </div>
     <table>
       <thead><tr><th>نوع المنتج</th><th>العدد</th></tr></thead>
@@ -1048,7 +1049,7 @@ const emptyOrder: Order = {
   id: "",
   created_by: "",
   order_number: "",
-  source_person: partyOptions[0],
+  source_person: "",
   client_name: "",
   client_code: "",
   phone: "",
@@ -3931,54 +3932,43 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <input value={form.order_number} readOnly />
               </label>
               <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
-                <span>طرف<em className="nf-required">*</em></span>
-                <select value={partyOptions.includes(form.source_person) ? form.source_person : "other"} onChange={(event) => {
-                  if (event.target.value === "other") {
-                    setForm((current) => calculate({ ...current, source_person: current.customParty || "", customParty: current.customParty || "", updated_at: new Date().toISOString() }));
-                  } else {
-                    setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
-                  }
+                <span>على</span>
+                <select value={onFieldOptions.includes(form.source_person) ? form.source_person : ""} onChange={(event) => {
+                  setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
                 }} disabled={readOnly}>
-                  {partyOptions.filter((option) => option !== "أخرى").map((option) => <option key={option} value={option}>{option}</option>)}
-                  <option value="other">أخرى</option>
+                  <option value="" disabled hidden>اختر</option>
+                  {onFieldOptions.map((option) => <option key={option} value={option}>{option}</option>)}
                 </select>
-                {!partyOptions.includes(form.source_person) && <input placeholder="اكتب الطرف" value={form.customParty || form.source_person} onChange={(event) => setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: event.target.value, updated_at: new Date().toISOString() }))} disabled={readOnly} />}
                 <ErrorText message={errors.source_person} />
               </label>
               <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
                 <span>اسم العميل<em className="nf-required">*</em></span>
-                <div className="nf-product-combobox" ref={customerBoxRef}>
-                  <input
-                    ref={customerRef}
-                    value={form.client_name}
-                    onChange={handleCustomerInputChange}
-                    onFocus={handleCustomerInputFocus}
-                    onKeyDown={handleCustomerKeyDown}
-                    placeholder={customers.length ? "اكتب أو اختر اسم العميل" : "اكتب اسم العميل"}
-                    disabled={readOnly}
-                  />
-                  {customerDropdownOpen && visibleCustomers.length > 0 && (
-                    <div className="nf-product-dropdown">
-                      {visibleCustomers.map((customer, index) => (
-                        <button
-                          type="button"
-                          key={customer.id}
-                          className={`nf-product-option${index === customerHighlight ? " selected" : ""}`}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => { setCustomerSearch(customer.client_name); selectCustomer(customer.id); setCustomerDropdownOpen(false); }}
-                        >
-                          {customer.client_name}
-                          {customer.client_code ? <small className="nf-customer-option-code">({customer.client_code})</small> : null}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <select
+                  value={form.customer_id || ""}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setCustomerSearch("");
+                    setCustomerHighlight(-1);
+                    if (value) selectCustomer(value);
+                    else {
+                      setForm((current) => calculate({ ...current, customer_id: "", client_name: "", client_code: "", phone: "", updated_at: new Date().toISOString() }));
+                    }
+                  }}
+                  onFocus={handleCustomerInputFocus}
+                  disabled={readOnly}
+                >
+                  <option value="" disabled hidden>اختر العميل</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}
+                    </option>
+                  ))}
+                </select>
                 <ErrorText message={errors.client_name} />
               </label>
               <label className="nf-field">
                 <span>كود العميل</span>
-                <input value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} readOnly />
+                <input value={form.client_code || nextCustomerCode(customers, form.source_person || "")} readOnly />
               </label>
               <RedDatePicker required className={`nf-field nf-field-delivery${errors.delivery_date ? " nf-field-invalid" : ""}`} label="تاريخ التسليم" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} error={errors.delivery_date} disabled={readOnly} />
             </div>
@@ -4111,7 +4101,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       <div className="form-grid" hidden>
         <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} disabled={readOnly} />
         <PartyField value={form.source_person} onChange={(value) => set("source_person", value)} disabled={readOnly} />
-        <Field label="اسم العميل" value={form.client_name} onChange={setClientName} disabled={readOnly} />
+        <label>اسم العميل<select value={form.customer_id || ""} onChange={(event) => event.target.value && selectCustomer(event.target.value)} disabled={readOnly}><option value="" disabled hidden>اختر العميل</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}</select></label>
         <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
         <Field label="رقم التليفون" value={form.phone} onChange={(value) => set("phone", value)} disabled={readOnly} />
         <Field label="تاريخ التسليم" type="date" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} disabled={readOnly} />
@@ -4166,14 +4156,13 @@ function ErrorText({ message }: { message?: string }) {
 }
 
 function PartyField({ value, onChange, disabled }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
-  const selected = partyOptions.includes(value) ? value : "أخرى";
   return (
     <label>
-      طرف
-      <select value={selected} onChange={(event) => onChange(event.target.value === "أخرى" ? "" : event.target.value)} disabled={disabled}>
-        {partyOptions.map((option) => <option key={option}>{option}</option>)}
+      على
+      <select value={onFieldOptions.includes(value) ? value : ""} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
+        <option value="" disabled hidden>اختر</option>
+        {onFieldOptions.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
-      {selected === "أخرى" && <input placeholder="اكتب الطرف" value={value === "أخرى" ? "" : value} onChange={(event) => onChange(event.target.value)} disabled={disabled} />}
     </label>
   );
 }

@@ -174,7 +174,7 @@ function orderQrPage(row: Record<string, unknown>) {
     { label: "تاريخ التسليم", value: qrDate(row.delivery_date) },
     { label: "اسم العميل", value: safeHtml(row.customer_name_snapshot) },
     { label: "كود العميل", value: safeHtml(row.customer_code_snapshot) },
-    { label: "طرف", value: safeHtml(row.source_party) },
+    { label: "على", value: safeHtml(row.source_party) },
     { label: "نوع المنتج", value: safeHtml(row.product_name_snapshot ?? row.type) },
     { label: "العدد", value: safeHtml(row.quantity) },
     { label: "الخامات", value: qrMaterials(row.materials_status) },
