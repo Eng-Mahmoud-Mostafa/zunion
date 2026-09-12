@@ -175,6 +175,7 @@ type Order = {
   customParty?: string;
   materialsStatus?: string;
   machineName?: string;
+  worker_name?: string;
   operationMethods?: string[];
   operationItems?: OperationItem[];
   operationAttachments?: { method: string; workOrder: boolean; logo: boolean }[];
@@ -1012,6 +1013,7 @@ const emptyOrder: Order = {
   customParty: "",
   materialsStatus: "",
   machineName: "",
+  worker_name: "",
   operationMethods: [""],
   operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
   logoFileName: "",
@@ -1222,6 +1224,7 @@ function orderFromApi(row: Record<string, unknown>): Order {
     customPaymentMethod: String(row.custom_payment_method ?? ""),
     materialsStatus: normalizeMaterialsStatus(row.materials_status),
     machineName: String(row.machine_name ?? ""),
+    worker_name: String(row.worker_name ?? ""),
     operationMethods: Array.isArray(row.operation_methods) ? row.operation_methods.map(String) : (() => {
       try {
         const parsed = JSON.parse(String(row.operation_methods ?? "[]")) as unknown[];
@@ -1266,6 +1269,7 @@ function orderToApi(order: Order) {
     customPaymentMethod: calculated.customPaymentMethod || "",
     materialsStatus: normalizeMaterialsStatus(calculated.materialsStatus) || "available",
     machineName: calculated.machineName || "",
+    worker_name: calculated.worker_name || "",
     operationMethods: operationMethods.length ? operationMethods : ["not_started"],
     quantity: Math.max(1, Number(calculated.quantity || 1)),
     price: calculated.price,
@@ -4249,13 +4253,13 @@ function workerRowFromDb(row: DbOrder, machine = ""): WorkerSpreadRow {
   return {
     id: String(row.id ?? ""),
     orderNumber: valueText(row.order_number),
-    deliveryDate: valueText(row.delivery_date),
+    deliveryDate: formatDisplayDate(row.delivery_date),
     party: orderParty(row),
     client: orderClientName(row),
     type: String(row.product_name_snapshot ?? row.order_type ?? row.service_type ?? ""),
     quantity: Number(orderPieces(row) || 0),
     machine: machine || String(row.machine_name ?? ""),
-    worker: "",
+    worker: String(row.worker_name ?? ""),
     started: status === "WORKER_STARTED" || status === "WORKER_DONE",
     problem: valueText(row.production_notes ?? row.quality_notes, ""),
     finished: status === "WORKER_DONE",
@@ -4266,17 +4270,112 @@ function workerRowFromOrder(order: Order): WorkerSpreadRow {
   return {
     id: order.id,
     orderNumber: order.order_number,
-    deliveryDate: order.delivery_date,
+    deliveryDate: formatDisplayDate(order.delivery_date),
     party: order.source_person,
     client: order.client_name,
     type: order.order_type || order.productName || "",
     quantity: Number(order.quantity || 0),
     machine: order.machineName ?? "",
-    worker: "",
+    worker: order.worker_name || "",
     started: order.operation_status !== "لم يبدأ",
     problem: order.production_notes || order.notes || "",
     finished: order.operation_status === "تم",
   };
+}
+
+function formatDisplayDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return raw;
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+function workerNameOptions(): string[] {
+  try {
+    const names = loadManagedUsers()
+      .filter((user) => user.role === "Worker" && user.status === "active")
+      .map((user) => (user.fullName || user.username).trim())
+      .filter((name) => name.length > 0);
+    return Array.from(new Set(names));
+  } catch {
+    return [];
+  }
+}
+
+function applyBackendStatus(order: Order, status: string): Order {
+  const operation = status === "SENT_TO_WORKER" || status === "WORKER_STARTED" || status === "WORKER_DONE";
+  return {
+    ...order,
+    workStage: operation ? "operation" : order.workStage,
+    order_status: operation ? "في التشغيل" : order.order_status,
+    operation_status: status === "WORKER_DONE" ? "تم" : operation ? "جاري التشغيل" : "لم يبدأ",
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function measureTextWidth(text: string, fontValue: string) {
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return text.length * 7;
+  ctx.font = fontValue;
+  return ctx.measureText(text).width;
+}
+
+function fitSelectFont(select: HTMLSelectElement) {
+  const style = window.getComputedStyle(select);
+  const family = style.fontFamily || "sans-serif";
+  const baseSize = parseFloat(style.fontSize) || 14;
+  const available = select.clientWidth - 28;
+  if (available <= 16 || select.options.length === 0) return;
+  const longest = Array.from(select.options).reduce(
+    (acc, option) => ((option.textContent || "").length > acc.length ? option.textContent || "" : acc),
+    "",
+  );
+  let size = Math.min(baseSize, 16);
+  while (size > 12 && measureTextWidth(longest, `bold ${size}px ${family}`) > available) {
+    size -= 1;
+  }
+  select.style.fontSize = `${size}px`;
+}
+
+function fitTextElement(el: HTMLElement, baseSize: number) {
+  const element = el.querySelector<HTMLElement>("button") || el;
+  const text = (element.textContent || "").trim();
+  if (!text) return;
+  element.style.whiteSpace = "nowrap";
+  element.style.overflow = "hidden";
+  element.style.textOverflow = "clip";
+  element.style.overflowWrap = "normal";
+  let size = baseSize;
+  element.style.fontSize = `${size}px`;
+  let guard = 0;
+  while (element.scrollWidth > element.clientWidth && size > 12 && guard < 24) {
+    size -= 1;
+    element.style.fontSize = `${size}px`;
+    guard += 1;
+  }
+  if (element.scrollWidth > element.clientWidth) {
+    element.dataset.wsFit = "wrapped";
+    element.style.whiteSpace = "normal";
+    element.style.overflow = "visible";
+    element.style.overflowWrap = "anywhere";
+    element.style.textOverflow = "clip";
+  } else {
+    element.dataset.wsFit = "fitted";
+  }
+}
+
+function applyWsTextFit(container: HTMLElement) {
+  for (const select of Array.from(container.querySelectorAll<HTMLSelectElement>("select"))) {
+    fitSelectFont(select);
+  }
+  const cells = Array.from(container.querySelectorAll<HTMLElement>("th, td"));
+  for (const cell of cells) {
+    if (cell.dataset.wsFit === "wrapped") continue;
+    if (cell.querySelector("select, textarea, input")) continue;
+    fitTextElement(cell, cell.tagName === "TH" ? 16 : 14);
+  }
 }
 
 function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
@@ -4289,6 +4388,21 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [spreadSort, setSpreadSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [machineFilter, setMachineFilter] = useState("all");
   const [machineOverrides, setMachineOverrides] = useState<Record<string, string>>({});
+  const [cellSaving, setCellSaving] = useState<Record<string, boolean>>({});
+  const [cellError, setCellError] = useState<Record<string, string>>({});
+  const [workerEditId, setWorkerEditId] = useState<string | null>(null);
+  const [problemEditId, setProblemEditId] = useState<string | null>(null);
+  const [problemDraft, setProblemDraft] = useState("");
+  const [workerOverrides, setWorkerOverrides] = useState<Record<string, string>>({});
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, Partial<Record<"started" | "finished", boolean>>>>({});
+  const [problemOverrides, setProblemOverrides] = useState<Record<string, string>>({});
+  const wsWrapRef = useRef<HTMLDivElement | null>(null);
+
+  function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+    const next = { ...record };
+    delete next[key];
+    return next;
+  }
 
   function renderOrdersListHeaders() {
     return ordersListHeaders.map((head) => (
@@ -4316,6 +4430,30 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       .finally(() => { if (active) setRemoteLoading(false); });
     return () => { active = false; };
   }, [queue]);
+
+  useEffect(() => {
+    if (queue !== "worker") return;
+    const wrap = wsWrapRef.current;
+    if (!wrap) return;
+    let raf = 0;
+    const fit = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => applyWsTextFit(wrap));
+    };
+    fit();
+    const delayed = window.setTimeout(fit, 350);
+    const ro = new ResizeObserver(fit);
+    ro.observe(wrap);
+    window.addEventListener("resize", fit);
+    window.addEventListener("load", fit);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(delayed);
+      ro.disconnect();
+      window.removeEventListener("resize", fit);
+      window.removeEventListener("load", fit);
+    };
+  }, [queue, orders, remoteOps, machineOverrides, workerOverrides, statusOverrides, problemOverrides, machineFilter, spreadSort, cellSaving, workerEditId, problemEditId, problemDraft]);
 
   if (queue === "worker") {
     return renderWorkerSpread();
@@ -4406,7 +4544,19 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       ? localRows.map(workerRowFromOrder)
       : dbRows.map((row) => workerRowFromDb(row));
 
-    const rows = baseRows.map((row) => ({ ...row, machine: machineOverrides[row.id] ?? row.machine }));
+    const rows = baseRows.map((row) => ({
+      ...row,
+      machine: machineOverrides[row.id] ?? row.machine,
+      worker: workerOverrides[row.id] ?? row.worker,
+      problem: problemOverrides[row.id] ?? row.problem,
+      started: statusOverrides[row.id]?.started ?? row.started,
+      finished: statusOverrides[row.id]?.finished ?? row.finished,
+    }));
+    const workerNames = Array.from(new Set([
+      ...workerNameOptions(),
+      ...orders.map((order) => order.worker_name || ""),
+      ...baseRows.map((row) => row.worker),
+    ])).filter((name) => name.trim().length > 0);
     let visibleRows = machineFilter === "all" ? rows : rows.filter((row) => row.machine === machineFilter);
     if (spreadSort) {
       const { key, dir } = spreadSort;
@@ -4433,12 +4583,91 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     }
 
     function saveMachine(id: string, machine: string) {
+      const key = `${id}:machine`;
       setMachineOverrides((current) => ({ ...current, [id]: machine }));
-      setOrders((current) => current.map((order) => order.id === id ? { ...order, machineName: machine } : order));
+      setCellSaving((current) => ({ ...current, [key]: true }));
+      setCellError((current) => withoutKey(current, key));
       backendJson(`/api/orders/${encodeURIComponent(id)}/machine`, {
         method: "PATCH",
         body: JSON.stringify({ machine_name: machine }),
-      }).catch(() => undefined);
+      })
+        .then(() => {
+          setOrders((current) => current.map((order) => order.id === id ? { ...order, machineName: machine } : order));
+          setCellSaving((current) => withoutKey(current, key));
+        })
+        .catch((error) => {
+          setMachineOverrides((current) => withoutKey(current, id));
+          setCellSaving((current) => withoutKey(current, key));
+          setCellError((current) => ({ ...current, [key]: error instanceof Error ? error.message : "تعذر حفظ الماكينة" }));
+        });
+    }
+
+    function saveWorker(id: string, name: string) {
+      setWorkerEditId(null);
+      const key = `${id}:worker`;
+      setCellSaving((current) => ({ ...current, [key]: true }));
+      setCellError((current) => withoutKey(current, key));
+      backendJson(`/api/orders/${encodeURIComponent(id)}/worker`, {
+        method: "PATCH",
+        body: JSON.stringify({ worker_name: name }),
+      })
+        .then(() => {
+          setWorkerOverrides((current) => ({ ...current, [id]: name }));
+          setOrders((current) => current.map((order) => order.id === id ? { ...order, worker_name: name } : order));
+          setCellSaving((current) => withoutKey(current, key));
+        })
+        .catch((error) => {
+          setCellSaving((current) => withoutKey(current, key));
+          setCellError((current) => ({ ...current, [key]: error instanceof Error ? error.message : "تعذر حفظ العامل" }));
+        });
+    }
+
+    function saveProblem(id: string) {
+      const value = problemDraft;
+      setProblemEditId(null);
+      const key = `${id}:problem`;
+      setCellSaving((current) => ({ ...current, [key]: true }));
+      setCellError((current) => withoutKey(current, key));
+      backendJson(`/api/orders/${encodeURIComponent(id)}/problem`, {
+        method: "PATCH",
+        body: JSON.stringify({ production_notes: value }),
+      })
+        .then(() => {
+          setProblemOverrides((current) => ({ ...current, [id]: value }));
+          setOrders((current) => current.map((order) => order.id === id ? { ...order, production_notes: value } : order));
+          setCellSaving((current) => withoutKey(current, key));
+        })
+        .catch((error) => {
+          setCellSaving((current) => withoutKey(current, key));
+          setCellError((current) => ({ ...current, [key]: error instanceof Error ? error.message : "تعذر حفظ المشكلة" }));
+        });
+    }
+
+    function saveStatus(id: string, nextStatus: string, field: "started" | "finished") {
+      const key = `${id}:${field}`;
+      const desired = field === "started" ? nextStatus !== "SENT_TO_WORKER" : nextStatus === "WORKER_DONE";
+      setCellSaving((current) => ({ ...current, [key]: true }));
+      setCellError((current) => withoutKey(current, key));
+      backendJson(`/api/orders/${encodeURIComponent(id)}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      })
+        .then(() => {
+          setStatusOverrides((current) => ({ ...current, [id]: { ...current[id], [field]: desired } }));
+          setOrders((current) => current.map((order) => order.id === id ? applyBackendStatus(order, nextStatus) : order));
+          setCellSaving((current) => withoutKey(current, key));
+        })
+        .catch((error) => {
+          setCellSaving((current) => withoutKey(current, key));
+          setCellError((current) => ({ ...current, [key]: error instanceof Error ? error.message : "تعذر حفظ الحالة" }));
+        });
+    }
+
+    function cellFeedback(id: string, field: string) {
+      if (cellSaving[`${id}:${field}`]) return <span className="ws-feedback ws-saving">جارِ الحفظ…</span>;
+      const error = cellError[`${id}:${field}`];
+      if (error) return <span className="ws-feedback ws-error" title={error}>فشل الحفظ</span>;
+      return null;
     }
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
@@ -4454,9 +4683,8 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
 
     return (
       <div className="ws-screen">
-        <div className="ws-band ws-band-red">ده شكل التشغيل</div>
-        <div className="ws-band ws-band-yellow">ممكن نعمل ترتيب حسب كل خانة</div>
-        <div className="ws-table-wrap">
+        <div className="ws-band ws-band-red">التشغيل</div>
+        <div className="ws-table-wrap" ref={wsWrapRef}>
           <table className="ws-table">
             <thead>
               <tr>
@@ -4484,7 +4712,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
               {visibleRows.length === 0 && <EmptyRow colSpan={11} />}
               {visibleRows.map((row) => (
                 <tr key={row.id}>
-                  <td className="ws-num"><button type="button" className="ws-order-link" onClick={() => onOrderClick?.(row.orderNumber)}>{row.orderNumber}</button></td>
+                  <td className="ws-num"><span className="ws-num-text">{row.orderNumber}</span></td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td>{row.party}</td>
                   <td>{row.client}</td>
@@ -4495,11 +4723,54 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                       <option value="">—</option>
                       {machineOptions.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
                     </select>
+                    {cellFeedback(row.id, "machine")}
                   </td>
-                  <td className="ws-worker">{row.worker}</td>
-                  <td className={row.started ? "ws-tam-on" : ""}>{row.started ? "تم" : ""}</td>
-                  <td className="ws-problem">{row.problem}</td>
-                  <td className={row.finished ? "ws-tam-on" : ""}>{row.finished ? "تم" : ""}</td>
+                  <td className="ws-worker">
+                    {workerEditId === row.id ? (
+                      <select
+                        autoFocus
+                        value={row.worker || ""}
+                        onChange={(event) => saveWorker(row.id, event.target.value)}
+                        onBlur={() => setWorkerEditId(null)}
+                      >
+                        <option value="">—</option>
+                        {workerNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    ) : (
+                      <button type="button" className="ws-cell-edit" onClick={() => setWorkerEditId(row.id)}>
+                        {row.worker || "—"}
+                      </button>
+                    )}
+                    {cellFeedback(row.id, "worker")}
+                  </td>
+                  <td className={`ws-cell-action${row.started ? " ws-tam-on" : ""}`}>
+                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, row.started ? "SENT_TO_WORKER" : "WORKER_STARTED", "started")}>
+                      {row.started ? "تم" : "ابدأ"}
+                    </button>
+                    {cellFeedback(row.id, "started")}
+                  </td>
+                  <td className="ws-problem">
+                    {problemEditId === row.id ? (
+                      <span className="ws-problem-editor">
+                        <textarea value={problemDraft} rows={2} onChange={(event) => setProblemDraft(event.target.value)} />
+                        <span className="ws-problem-actions">
+                          <button type="button" className="ws-btn-save" onClick={() => saveProblem(row.id)}>حفظ</button>
+                          <button type="button" className="ws-btn-cancel" onClick={() => setProblemEditId(null)}>إلغاء</button>
+                        </span>
+                      </span>
+                    ) : (
+                      <button type="button" className="ws-cell-edit ws-problem-text" onClick={() => { setProblemEditId(row.id); setProblemDraft(row.problem); }}>
+                        {row.problem || "أضف مشكلة"}
+                      </button>
+                    )}
+                    {cellFeedback(row.id, "problem")}
+                  </td>
+                  <td className={`ws-cell-action${row.finished ? " ws-tam-on" : ""}`}>
+                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, row.finished ? "WORKER_STARTED" : "WORKER_DONE", "finished")}>
+                      {row.finished ? "تم" : "إنهاء"}
+                    </button>
+                    {cellFeedback(row.id, "finished")}
+                  </td>
                 </tr>
               ))}
             </tbody>

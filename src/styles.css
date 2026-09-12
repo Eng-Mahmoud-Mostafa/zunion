@@ -5505,13 +5505,6 @@ input[type="date"] {
   font-size: 26px;
 }
 
-.ws-band-yellow {
-  background: #FFFF00;
-  color: #FF4500;
-  min-height: 58px;
-  font-size: 22px;
-}
-
 .ws-table-wrap {
   width: 100%;
   overflow-x: auto;
@@ -5532,7 +5525,7 @@ input[type="date"] {
   padding: 8px 12px;
   height: 57px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -5540,14 +5533,14 @@ input[type="date"] {
 .ws-table thead td {
   text-align: center;
   font-weight: bold;
-  font-size: 20px;
+  font-size: 16px;
   color: #000000;
   cursor: pointer;
   user-select: none;
 }
 
 .ws-table tbody td {
-  font-size: 20px;
+  font-size: 14px;
   color: #000000;
   text-align: center;
 }
@@ -5583,7 +5576,7 @@ input[type="date"] {
   background: #FFFF00;
   color: #FF0000;
   font-weight: bold;
-  font-size: 18px;
+  font-size: 14px;
   padding: 4px 6px;
   cursor: pointer;
 }
@@ -5608,17 +5601,13 @@ input[type="date"] {
   font-weight: bold;
 }
 
-.ws-order-link {
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  font: inherit;
+.ws-num-text {
+  display: inline-block;
   font-weight: bold;
   color: #000000;
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
+  text-decoration: none;
+  cursor: default;
+  pointer-events: none;
 }
 
 .ws-table tbody .ws-qty {
@@ -5629,6 +5618,7 @@ input[type="date"] {
 .ws-table tbody .ws-machine {
   background: #FFFF00;
   padding: 2px 6px;
+  position: relative;
 }
 
 .ws-table tbody .ws-machine select {
@@ -5640,6 +5630,111 @@ input[type="date"] {
 .ws-table tbody .ws-tam-on {
   color: #FF0000;
   font-weight: bold;
+}
+
+.ws-table tbody .ws-worker,
+.ws-table tbody .ws-problem,
+.ws-table tbody .ws-cell-action {
+  position: relative;
+}
+
+.ws-table tbody .ws-worker select {
+  width: 100%;
+  min-width: 84px;
+  border: 1px solid #555555;
+  background: #FFFF00;
+  color: #000000;
+  font-weight: bold;
+  font-size: 14px;
+  padding: 3px 4px;
+  cursor: pointer;
+}
+
+.ws-cell-edit {
+  display: inline-block;
+  max-width: 100%;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: 0;
+  font: inherit;
+  font-weight: bold;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.ws-cell-edit:hover {
+  background: rgba(255, 0, 0, 0.08);
+  border-color: #999999;
+}
+
+.ws-cell-edit.ws-problem-text {
+  max-width: 200px;
+}
+
+.ws-feedback {
+  display: block;
+  font-size: 11px;
+  font-weight: bold;
+  text-align: center;
+  margin-top: 2px;
+}
+
+.ws-feedback.ws-saving {
+  color: #B8860B;
+}
+
+.ws-feedback.ws-error {
+  color: #CC0000;
+}
+
+.ws-problem-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+
+.ws-problem-editor textarea {
+  width: 100%;
+  min-width: 160px;
+  border: 1px solid #555555;
+  border-radius: 4px;
+  background: #FFFFFF;
+  color: #000000;
+  font-size: 13px;
+  padding: 4px 6px;
+  resize: vertical;
+}
+
+.ws-problem-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ws-btn-save,
+.ws-btn-cancel {
+  border: 1px solid #555555;
+  border-radius: 4px;
+  padding: 2px 12px;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.ws-btn-save {
+  background: #DDEEBB;
+  color: #000000;
+}
+
+.ws-btn-cancel {
+  background: #F5E6E6;
+  color: #000000;
 }
 
 .ws-worker-hd-only {

@@ -11,7 +11,7 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, machineSchema, orderSchema, productSchema, statusSchema } from "./validation.js";
+import { customerSchema, machineSchema, orderSchema, problemSchema, productSchema, statusSchema, workerSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { effectivePermissions, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
@@ -997,15 +997,15 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
     const result = await client.query<{ id: string }>(
       `insert into orders (
         order_number, customer_id, source_party, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
-        delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, machine_name, operation_methods, operation_attachments,
+        delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, machine_name, worker_name, operation_methods, operation_attachments,
         quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
         damaged_pieces, production_notes, finishing_notes, details, draft, created_by, updated_by
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$31) returning id`,
+      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$32) returning id`,
       [
         nextOrderNumber(), customerId, order.source_party, order.customer_name_snapshot, order.customer_code_snapshot,
         order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
         order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? "", order.machineName ?? "",
-        JSON.stringify(order.operationMethods),
+        order.worker_name ?? "", JSON.stringify(order.operationMethods),
         JSON.stringify(order.operation_attachments ?? []),
         order.quantity, order.price, order.paid,
         order.old_account, order.status ?? "NEW", order.workStage ?? "new", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
@@ -1070,10 +1070,10 @@ app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operato
   await query(
     `update orders set source_party=$1, customer_name_snapshot=$2, customer_code_snapshot=$3, phone_snapshot=$4,
      delivery_date=$5, type=$6, product_id=$7, product_name_snapshot=$8, payment_method=$9, custom_payment_method=$10,
-     materials_status=$11, machine_name=$12, operation_methods=$13, operation_attachments=$14, quantity=$15, price=$16, paid=$17, old_account=$18, status=$19, work_stage=$20, notes=$21,
-     message_text=$22, quality_notes=$23, damaged_pieces=$24, production_notes=$25, finishing_notes=$26, details=$27, draft=$28, updated_by=$29
-     where id=$30`,
-    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? oldOrder.materials_status ?? "", order.machineName ?? "", JSON.stringify(order.operationMethods), JSON.stringify(order.operation_attachments ?? []), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, id],
+     materials_status=$11, machine_name=$12, worker_name=$13, operation_methods=$14, operation_attachments=$15, quantity=$16, price=$17, paid=$18, old_account=$19, status=$20, work_stage=$21, notes=$22,
+     message_text=$23, quality_notes=$24, damaged_pieces=$25, production_notes=$26, finishing_notes=$27, details=$28, draft=$29, updated_by=$30
+     where id=$31`,
+    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? oldOrder.materials_status ?? "", order.machineName ?? "", order.worker_name ?? "", JSON.stringify(order.operationMethods), JSON.stringify(order.operation_attachments ?? []), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, id],
   );
   await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, order);
   res.json({ ok: true });
@@ -1087,6 +1087,28 @@ app.patch("/api/orders/:id/machine", requireAuth, requireRole("Master", "Helper"
   if (!oldOrder) return res.status(404).json({ message: "Order not found" });
   await query(`update orders set machine_name=$1, updated_by=$2 where id=$3`, [parsed.data.machine_name, req.user!.id, id]);
   await audit(req.user!, "MACHINE_SET", "orders", id, { machine_name: oldOrder.machine_name ?? "" }, parsed.data);
+  res.json({ ok: true });
+});
+
+app.patch("/api/orders/:id/worker", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = workerSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid worker", issues: parsed.error.issues });
+  const oldOrder = await loadOrder(id);
+  if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  await query(`update orders set worker_name=$1, updated_by=$2 where id=$3`, [parsed.data.worker_name, req.user!.id, id]);
+  await audit(req.user!, "WORKER_ASSIGNED", "orders", id, { worker_name: oldOrder.worker_name ?? "" }, parsed.data);
+  res.json({ ok: true });
+});
+
+app.patch("/api/orders/:id/problem", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = problemSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid problem", issues: parsed.error.issues });
+  const oldOrder = await loadOrder(id);
+  if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  await query(`update orders set production_notes=$1, updated_by=$2 where id=$3`, [parsed.data.production_notes, req.user!.id, id]);
+  await audit(req.user!, "PROBLEM_SET", "orders", id, { production_notes: oldOrder.production_notes ?? "" }, parsed.data);
   res.json({ ok: true });
 });
 

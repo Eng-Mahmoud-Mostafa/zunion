@@ -31,6 +31,7 @@ export type DbOrder = {
   work_stage?: string | null;
   workStage?: string | null;
   machine_name?: string | null;
+  worker_name?: string | null;
   production_notes?: string | null;
   quality_notes?: string | null;
   created_at: string | null;
