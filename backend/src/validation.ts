@@ -53,6 +53,7 @@ export const orderSchema = z.object({
   paymentMethod: z.enum(paymentMethods).default("cash"),
   customPaymentMethod: z.string().optional().default(""),
   materialsStatus: z.preprocess(normalizeMaterialsStatus, z.enum(materialsStatuses).default("available").optional()),
+  machineName: z.string().default(""),
   operationMethods: z.array(z.string().trim()).default(["not_started"]),
   quantity: z.coerce.number().default(0),
   price: z.coerce.number().min(0).default(0),
@@ -109,6 +110,10 @@ export const statusSchema = z.object({
   production_notes: z.string().optional(),
   finishing_notes: z.string().optional(),
   damaged_pieces: z.coerce.number().int().min(0).optional(),
+});
+
+export const machineSchema = z.object({
+  machine_name: z.string().default(""),
 });
 
 export const customerSchema = z.object({

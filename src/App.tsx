@@ -174,6 +174,7 @@ type Order = {
   customPaymentMethod?: string;
   customParty?: string;
   materialsStatus?: string;
+  machineName?: string;
   operationMethods?: string[];
   operationItems?: OperationItem[];
   operationAttachments?: { method: string; workOrder: boolean; logo: boolean }[];
@@ -220,6 +221,7 @@ const pinnedItemsKey = "zunion-local-pinned-items-v1";
 const searchCacheKey = "zunion-local-search-cache-v1";
 const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
 const onFieldOptions = ["أحمد", "رضا", "سامح"];
+const machineOptions = ["تاجيما 2015", "تاجيما 2007", "الجلوبال", "swf", "تاجيما 2005", "فيا الي جوا", "فيا الي برا"];
 
 type PermissionOverride = { allow: PermissionKey[]; deny: PermissionKey[] };
 type ManagedUser = {
@@ -1009,6 +1011,7 @@ const emptyOrder: Order = {
   customPaymentMethod: "",
   customParty: "",
   materialsStatus: "",
+  machineName: "",
   operationMethods: [""],
   operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
   logoFileName: "",
@@ -1218,6 +1221,7 @@ function orderFromApi(row: Record<string, unknown>): Order {
     paymentMethod: String(row.payment_method ?? "cash"),
     customPaymentMethod: String(row.custom_payment_method ?? ""),
     materialsStatus: normalizeMaterialsStatus(row.materials_status),
+    machineName: String(row.machine_name ?? ""),
     operationMethods: Array.isArray(row.operation_methods) ? row.operation_methods.map(String) : (() => {
       try {
         const parsed = JSON.parse(String(row.operation_methods ?? "[]")) as unknown[];
@@ -1261,6 +1265,7 @@ function orderToApi(order: Order) {
     paymentMethod: calculated.paymentMethod || "cash",
     customPaymentMethod: calculated.customPaymentMethod || "",
     materialsStatus: normalizeMaterialsStatus(calculated.materialsStatus) || "available",
+    machineName: calculated.machineName || "",
     operationMethods: operationMethods.length ? operationMethods : ["not_started"],
     quantity: Math.max(1, Number(calculated.quantity || 1)),
     price: calculated.price,
@@ -4224,6 +4229,56 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
   );
 }
 
+type WorkerSpreadRow = {
+  id: string;
+  orderNumber: string;
+  deliveryDate: string;
+  party: string;
+  client: string;
+  type: string;
+  quantity: number;
+  machine: string;
+  worker: string;
+  started: boolean;
+  problem: string;
+  finished: boolean;
+};
+
+function workerRowFromDb(row: DbOrder, machine = ""): WorkerSpreadRow {
+  const status = String(row.status ?? "").trim();
+  return {
+    id: String(row.id ?? ""),
+    orderNumber: valueText(row.order_number),
+    deliveryDate: valueText(row.delivery_date),
+    party: orderParty(row),
+    client: orderClientName(row),
+    type: String(row.product_name_snapshot ?? row.order_type ?? row.service_type ?? ""),
+    quantity: Number(orderPieces(row) || 0),
+    machine: machine || String(row.machine_name ?? ""),
+    worker: "",
+    started: status === "WORKER_STARTED" || status === "WORKER_DONE",
+    problem: valueText(row.production_notes ?? row.quality_notes, ""),
+    finished: status === "WORKER_DONE",
+  };
+}
+
+function workerRowFromOrder(order: Order): WorkerSpreadRow {
+  return {
+    id: order.id,
+    orderNumber: order.order_number,
+    deliveryDate: order.delivery_date,
+    party: order.source_person,
+    client: order.client_name,
+    type: order.order_type || order.productName || "",
+    quantity: Number(order.quantity || 0),
+    machine: order.machineName ?? "",
+    worker: "",
+    started: order.operation_status !== "لم يبدأ",
+    problem: order.production_notes || order.notes || "",
+    finished: order.operation_status === "تم",
+  };
+}
+
 function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
@@ -4231,6 +4286,9 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [editing, setEditing] = useState<Order | null>(null);
   const [page, setPage] = useState(1);
   const [dateSort, setDateSort] = useState<"none" | "asc" | "desc">("none");
+  const [spreadSort, setSpreadSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [machineFilter, setMachineFilter] = useState("all");
+  const [machineOverrides, setMachineOverrides] = useState<Record<string, string>>({});
 
   function renderOrdersListHeaders() {
     return ordersListHeaders.map((head) => (
@@ -4258,6 +4316,10 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       .finally(() => { if (active) setRemoteLoading(false); });
     return () => { active = false; };
   }, [queue]);
+
+  if (queue === "worker") {
+    return renderWorkerSpread();
+  }
 
   if (queue && remoteOps && remoteOps.orders.length > 0 && orders.length === 0) {
     if (remoteLoading) return <LoadingPanel />;
@@ -4287,7 +4349,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   }
 
   const baseOrders = useMemo(() => {
-    if (queue === "worker") return orders.filter((order) => order.workStage === "operation");
     if (queue === "finish") return orders.filter((order) => order.workStage === "finishing");
     return roleOrders(session.role, orders);
   }, [orders, queue, session.role]);
@@ -4328,6 +4389,122 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     if (!confirm("هل تريد حذف الأوردر؟")) return;
     setOrders((current) => current.filter((order) => order.id !== id));
     addAudit(session, "ORDER_DELETED", "orders", id);
+  }
+
+  function renderWorkerSpread() {
+    if (remoteLoading && !remoteOps) return <LoadingPanel />;
+    if (remoteError && !remoteOps && orders.length === 0) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
+
+    const dbRows = (remoteOps?.orders ?? []).filter((row) => {
+      const stage = String(row.work_stage ?? row.workStage ?? "").trim();
+      const status = String(row.status ?? "").trim();
+      return stage === "operation" || ["SENT_TO_WORKER", "WORKER_STARTED", "WORKER_DONE"].includes(status);
+    });
+    const baseRows: WorkerSpreadRow[] = dbRows.length > 0
+      ? dbRows.map((row) => workerRowFromDb(row))
+      : orders.filter((order) => order.workStage === "operation").map(workerRowFromOrder);
+
+    const rows = baseRows.map((row) => ({ ...row, machine: machineOverrides[row.id] ?? row.machine }));
+    let visibleRows = machineFilter === "all" ? rows : rows.filter((row) => row.machine === machineFilter);
+    if (spreadSort) {
+      const { key, dir } = spreadSort;
+      const sign = dir === "asc" ? 1 : -1;
+      visibleRows = [...visibleRows].sort((a, b) => {
+        const av = String((a as unknown as Record<string, unknown>)[key] ?? "");
+        const bv = String((b as unknown as Record<string, unknown>)[key] ?? "");
+        const an = Number(av);
+        const bn = Number(bv);
+        if (av !== "" && bv !== "" && !Number.isNaN(an) && !Number.isNaN(bn)) return (an - bn) * sign;
+        return av.localeCompare(bv, "ar") * sign;
+      });
+    }
+
+    function cycleSort(key: string) {
+      if (!spreadSort || spreadSort.key !== key) setSpreadSort({ key, dir: "asc" });
+      else if (spreadSort.dir === "asc") setSpreadSort({ key, dir: "desc" });
+      else setSpreadSort(null);
+    }
+
+    function sortIndicator(key: string) {
+      if (!spreadSort || spreadSort.key !== key) return "";
+      return spreadSort.dir === "asc" ? " ↑" : " ↓";
+    }
+
+    function saveMachine(id: string, machine: string) {
+      setMachineOverrides((current) => ({ ...current, [id]: machine }));
+      setOrders((current) => current.map((order) => order.id === id ? { ...order, machineName: machine } : order));
+      backendJson(`/api/orders/${encodeURIComponent(id)}/machine`, {
+        method: "PATCH",
+        body: JSON.stringify({ machine_name: machine }),
+      }).catch(() => undefined);
+    }
+
+    const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
+      { key: "orderNumber", label: "رقم اوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
+      { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
+      { key: "party", label: "طرف", cls: "ws-hd", rowSpan: 2 },
+      { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
+      { key: "type", label: "النوع", cls: "ws-hd", rowSpan: 2 },
+      { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
+      { key: "machine", label: "المكنه المقترحه", cls: "ws-hd ws-hd-machine", onClick: true },
+      { key: "operation", label: "التشغيل", cls: "ws-hd ws-hd-op", colSpan: 4 },
+    ];
+
+    return (
+      <div className="ws-screen">
+        <div className="ws-band ws-band-red">ده شكل التشغيل</div>
+        <div className="ws-band ws-band-yellow">ممكن نعمل ترتيب حسب كل خانة</div>
+        <div className="ws-table-wrap">
+          <table className="ws-table">
+            <thead>
+              <tr>
+                {spreadHeaderRow1.map((col) => (
+                  <th key={col.key} className={col.cls} rowSpan={col.rowSpan} colSpan={col.colSpan}
+                      onClick={col.key !== "operation" ? () => cycleSort(col.key) : undefined}>
+                    {col.label}{col.key !== "operation" ? sortIndicator(col.key) : ""}
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                <th className="ws-machine-filter">
+                  <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)}>
+                    <option value="all">الكل</option>
+                    {machineOptions.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
+                  </select>
+                </th>
+                <th className="ws-hd ws-worker" onClick={() => cycleSort("worker")}>اسم العامل{sortIndicator("worker")}</th>
+                <th className="ws-hd ws-bad" onClick={() => cycleSort("started")}>بدء{sortIndicator("started")}</th>
+                <th className="ws-hd ws-problem" onClick={() => cycleSort("problem")}>مشكله{sortIndicator("problem")}</th>
+                <th className="ws-hd ws-hd-end" onClick={() => cycleSort("finished")}>انتهى{sortIndicator("finished")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.length === 0 && <EmptyRow colSpan={11} />}
+              {visibleRows.map((row) => (
+                <tr key={row.id}>
+                  <td className="ws-num"><button type="button" className="ws-order-link" onClick={() => onOrderClick?.(row.orderNumber)}>{row.orderNumber}</button></td>
+                  <td className="ws-date">{row.deliveryDate || ""}</td>
+                  <td>{row.party}</td>
+                  <td>{row.client}</td>
+                  <td>{row.type}</td>
+                  <td className="ws-qty">{row.quantity || ""}</td>
+                  <td className="ws-machine">
+                    <select value={row.machine} onChange={(event) => saveMachine(row.id, event.target.value)}>
+                      <option value="">—</option>
+                      {machineOptions.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
+                    </select>
+                  </td>
+                  <td className="ws-worker">{row.worker}</td>
+                  <td className={row.started ? "ws-tam-on" : ""}>{row.started ? "تم" : ""}</td>
+                  <td className="ws-problem">{row.problem}</td>
+                  <td className={row.finished ? "ws-tam-on" : ""}>{row.finished ? "تم" : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
   }
 
   return (

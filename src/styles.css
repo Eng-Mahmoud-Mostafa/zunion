@@ -5480,3 +5480,173 @@ input[type="date"] {
   background: #f8f9fb;
   cursor: default;
 }
+
+/* ============ التشغيل spreadsheet view ============ */
+.ws-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+}
+
+.ws-band {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-weight: bold;
+}
+
+.ws-band-red {
+  background: #FF0000;
+  color: #FFFFFF;
+  min-height: 46px;
+  font-size: 26px;
+}
+
+.ws-band-yellow {
+  background: #FFFF00;
+  color: #FF4500;
+  min-height: 58px;
+  font-size: 22px;
+}
+
+.ws-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  background: #EFEFEF;
+}
+
+.ws-table {
+  border-collapse: collapse;
+  min-width: 1800px;
+  width: 100%;
+  table-layout: fixed;
+  background: #EFEFEF;
+}
+
+.ws-table th,
+.ws-table td {
+  border: 1px solid #555555;
+  padding: 8px 12px;
+  height: 57px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-table thead th,
+.ws-table thead td {
+  text-align: center;
+  font-weight: bold;
+  font-size: 20px;
+  color: #000000;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ws-table tbody td {
+  font-size: 20px;
+  color: #000000;
+  text-align: center;
+}
+
+.ws-hd {
+  background: #EFEFEF;
+}
+
+.ws-hd-date {
+  color: #769547 !important;
+  background: #EFEFEF;
+}
+
+.ws-hd-qty,
+.ws-hd-machine {
+  color: #FF0000 !important;
+  background: #EFEFEF;
+}
+
+.ws-hd-op {
+  background: #EFEFEF;
+}
+
+.ws-machine-filter {
+  background: #FFFF00 !important;
+  color: #FF0000 !important;
+}
+
+.ws-machine-filter select,
+.ws-machine select {
+  width: 100%;
+  border: 1px solid #555555;
+  background: #FFFF00;
+  color: #FF0000;
+  font-weight: bold;
+  font-size: 18px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.ws-worker-hd {
+  background: none;
+}
+
+.ws-hd.ws-worker {
+  background: #FFFF00;
+  color: #FF0000;
+}
+
+.ws-hd.ws-hd-end {
+  background: #FFFF00;
+  color: #000000;
+}
+
+.ws-table tbody .ws-num {
+  background: #FFFF00;
+  color: #000000;
+  font-weight: bold;
+}
+
+.ws-order-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: bold;
+  color: #000000;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
+.ws-table tbody .ws-qty {
+  font-weight: bold;
+  color: #FF0000;
+}
+
+.ws-table tbody .ws-machine {
+  background: #FFFF00;
+  padding: 2px 6px;
+}
+
+.ws-table tbody .ws-machine select {
+  background: #FFFF00;
+  color: #FF0000;
+  font-weight: bold;
+}
+
+.ws-table tbody .ws-tam-on {
+  color: #FF0000;
+  font-weight: bold;
+}
+
+.ws-worker-hd-only {
+  background: #FFFF00;
+  color: #FF0000;
+}
+
+@media print {
+  .ws-screen { display: block; }
+}

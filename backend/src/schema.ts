@@ -178,7 +178,9 @@ create table if not exists orders (
   payment_method text not null default 'cash',
   custom_payment_method text,
   materials_status text not null default '',
+  machine_name text not null default '',
   operation_methods jsonb not null default '[]'::jsonb,
+  operation_attachments jsonb not null default '[]'::jsonb,
   quantity integer not null default 1,
   price numeric not null default 0,
   total numeric not null default 0,
@@ -219,6 +221,8 @@ set materials_status = case
 end
 where materials_status in ('موجود', 'متوفرة', 'غير موجود', 'غير متوفرة');
 alter table orders add column if not exists operation_methods jsonb not null default '[]'::jsonb;
+alter table orders add column if not exists operation_attachments jsonb not null default '[]'::jsonb;
+alter table orders add column if not exists machine_name text not null default '';
 alter table orders drop constraint if exists orders_work_stage_check;
 alter table orders add constraint orders_work_stage_check check (work_stage in ('new', 'operation', 'finishing', 'completed', 'cancelled'));
 update orders
@@ -387,14 +391,14 @@ insert into users (email, role, username, full_name, password_salt, password_has
   ('omar@zunion.local', 'Operator', 'omar', 'Omar', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
   ('youssef@zunion.local', 'Operator', 'youssef', 'Youssef', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
   ('khalifa@zunion.local', 'Operator', 'khalifa', 'Khalifa', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('opr1@zunion.local', 'Operator', 'opr 1', 'Opr 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('opr2@zunion.local', 'Operator', 'opr 2', 'Opr 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('opr3@zunion.local', 'Operator', 'opr 3', 'Opr 3', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('supervisor1@zunion.local', 'Supervisor', 'supervisor 1', 'Supervisor 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('supervisor2@zunion.local', 'Supervisor', 'supervisor 2', 'Supervisor 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('supervisor3@zunion.local', 'Supervisor', 'supervisor 3', 'Supervisor 3', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('finishing1@zunion.local', 'Finishing', 'finishing 1', 'Finishing 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('finishing2@zunion.local', 'Finishing', 'finishing 2', 'Finishing 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false)
+  ('opr1@zunion.local', 'Operator', 'opr1', 'Opr 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr2@zunion.local', 'Operator', 'opr2', 'Opr 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr3@zunion.local', 'Operator', 'opr3', 'Opr 3', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor1@zunion.local', 'Supervisor', 'supervisor1', 'Supervisor 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor2@zunion.local', 'Supervisor', 'supervisor2', 'Supervisor 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor3@zunion.local', 'Supervisor', 'supervisor3', 'Supervisor 3', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing1@zunion.local', 'Finishing', 'finishing1', 'Finishing 1', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing2@zunion.local', 'Finishing', 'finishing2', 'Finishing 2', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false)
 on conflict (email) do update set role = excluded.role;
 
 with default_permissions(name, description, permissions) as (
@@ -549,14 +553,14 @@ insert into users_profile (username, full_name, email, role, password_salt, pass
   ('omar', 'Omar', 'omar@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
   ('youssef', 'Youssef', 'youssef@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
   ('khalifa', 'Khalifa', 'khalifa@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('opr 1', 'Opr 1', 'opr1@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('opr 2', 'Opr 2', 'opr2@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('opr 3', 'Opr 3', 'opr3@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('supervisor 1', 'Supervisor 1', 'supervisor1@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('supervisor 2', 'Supervisor 2', 'supervisor2@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('supervisor 3', 'Supervisor 3', 'supervisor3@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('finishing 1', 'Finishing 1', 'finishing1@zunion.local', 'Finishing', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
-  ('finishing 2', 'Finishing 2', 'finishing2@zunion.local', 'Finishing', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false)
+  ('opr1', 'Opr 1', 'opr1@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr2', 'Opr 2', 'opr2@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('opr3', 'Opr 3', 'opr3@zunion.local', 'Operator', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor1', 'Supervisor 1', 'supervisor1@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor2', 'Supervisor 2', 'supervisor2@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('supervisor3', 'Supervisor 3', 'supervisor3@zunion.local', 'Supervisor', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing1', 'Finishing 1', 'finishing1@zunion.local', 'Finishing', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false),
+  ('finishing2', 'Finishing 2', 'finishing2@zunion.local', 'Finishing', 'zunion-default', encode(hmac('zunion-default:1234', 'dev-change-me', 'sha256'), 'hex'), false)
 on conflict (username) do update set
   full_name = excluded.full_name,
   role = excluded.role,
