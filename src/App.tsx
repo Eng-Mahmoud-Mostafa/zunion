@@ -4395,14 +4395,16 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     if (remoteLoading && !remoteOps) return <LoadingPanel />;
     if (remoteError && !remoteOps && orders.length === 0) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
 
-    const dbRows = (remoteOps?.orders ?? []).filter((row) => {
-      const stage = String(row.work_stage ?? row.workStage ?? "").trim();
-      const status = String(row.status ?? "").trim();
+    const stageMatch = (stageValue: string, statusValue: string) => {
+      const stage = stageValue.trim();
+      const status = statusValue.trim();
       return stage === "operation" || ["SENT_TO_WORKER", "WORKER_STARTED", "WORKER_DONE"].includes(status);
-    });
-    const baseRows: WorkerSpreadRow[] = dbRows.length > 0
-      ? dbRows.map((row) => workerRowFromDb(row))
-      : orders.filter((order) => order.workStage === "operation").map(workerRowFromOrder);
+    };
+    const localRows = orders.filter((order) => stageMatch(String(order.workStage ?? ""), String(order.order_status ?? "")));
+    const dbRows = (remoteOps?.orders ?? []).filter((row) => stageMatch(String(row.work_stage ?? row.workStage ?? ""), String(row.status ?? "")));
+    const baseRows: WorkerSpreadRow[] = localRows.length > 0
+      ? localRows.map(workerRowFromOrder)
+      : dbRows.map((row) => workerRowFromDb(row));
 
     const rows = baseRows.map((row) => ({ ...row, machine: machineOverrides[row.id] ?? row.machine }));
     let visibleRows = machineFilter === "all" ? rows : rows.filter((row) => row.machine === machineFilter);
