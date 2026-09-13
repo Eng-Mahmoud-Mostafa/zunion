@@ -1135,26 +1135,6 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.all("/api/_migrate/machine-assignments", async (req, res) => {
-  if (req.method !== "POST" && req.method !== "GET") return res.status(405).json({ message: "Method not allowed" });
-  if (!config.migrateToken || req.query.token !== config.migrateToken) return res.status(403).json({ message: "Forbidden" });
-  try {
-    await query(`create table if not exists machine_assignments (
-  id uuid primary key default gen_random_uuid(),
-  order_id uuid not null,
-  machine_name text not null default '',
-  position integer not null default 0,
-  created_by uuid references users(id) on delete set null,
-  updated_by uuid references users(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-); alter table machine_assignments add column if not exists position integer not null default 0; create unique index if not exists machine_assignments_order_uniq on machine_assignments(order_id); create index if not exists machine_assignments_machine_pos_idx on machine_assignments(machine_name, position);`);
-    res.json({ ok: true });
-  } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
-  }
-});
-
 app.get("/api/machine-assignments", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (_req, res) => {
   const assignments = await listMachineAssignments();
   res.json({ assignments });
