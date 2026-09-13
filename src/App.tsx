@@ -5037,7 +5037,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
       { key: "orderNumber", label: "رقم اوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
-      { key: "goto", label: "اذهب للتشغيل", cls: "ws-hd ws-hd-goto", rowSpan: 2 },
+      ...(queue === "worker" ? [{ key: "goto", label: "اذهب للتشغيل", cls: "ws-hd ws-hd-goto", rowSpan: 2 }] : []),
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "party", label: "طرف", cls: "ws-hd", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
@@ -5075,15 +5075,17 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
               </tr>
             </thead>
             <tbody>
-              {visibleRows.length === 0 && <EmptyRow colSpan={12} />}
+              {visibleRows.length === 0 && <EmptyRow colSpan={queue === "worker" ? 12 : 11} />}
               {visibleRows.map((row) => (
                 <tr key={row.id}>
                   <td className="ws-num"><span className="ws-num-text">{row.orderNumber}</span></td>
-                  <td className="ws-goto">
-                    <button type="button" className="ws-goto-btn" title="اذهب لتوزيع الأوردر على المكن" onClick={() => onGoToMachineDist?.(row.id)}>
-                      اذهب للتشغيل
-                    </button>
-                  </td>
+                  {queue === "worker" && (
+                    <td className="ws-goto">
+                      <button type="button" className="ws-goto-btn" title="اذهب لتوزيع الأوردر على المكن" onClick={() => onGoToMachineDist?.(row.id)}>
+                        اذهب للتشغيل
+                      </button>
+                    </td>
+                  )}
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td>{row.party}</td>
                   <td>{row.client}</td>
