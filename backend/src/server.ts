@@ -1113,27 +1113,6 @@ app.patch("/api/orders/:id/problem", requireAuth, requireRole("Master", "Helper"
   res.json({ ok: true });
 });
 
-app.all("/api/_migrate/finishing-work-stages", async (req, res) => {
-  if (String(req.query.token ?? "") !== config.migrateToken || !config.migrateToken) return res.status(403).json({ ok: false });
-  const result = await query(
-    `update orders set work_stage = case
-       when status in ('SENT_TO_WORKER', 'WORKER_STARTED') then 'operation'
-       when status in ('WORKER_DONE', 'SENT_TO_FINISH', 'FINISH_STARTED', 'FINISH_DONE') then 'finishing'
-       when status in ('READY', 'CUSTOMER_MESSAGED', 'DELIVERED') then 'completed'
-       when status = 'CANCELLED' then 'cancelled'
-       else 'new'
-     end
-     where work_stage is distinct from (case
-       when status in ('SENT_TO_WORKER', 'WORKER_STARTED') then 'operation'
-       when status in ('WORKER_DONE', 'SENT_TO_FINISH', 'FINISH_STARTED', 'FINISH_DONE') then 'finishing'
-       when status in ('READY', 'CUSTOMER_MESSAGED', 'DELIVERED') then 'completed'
-       when status = 'CANCELLED' then 'cancelled'
-       else 'new'
-     end)`,
-  );
-  res.json({ ok: true, updated: result.rowCount });
-});
-
 app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
   const id = param(req.params.id);
   const parsed = statusSchema.safeParse(req.body);

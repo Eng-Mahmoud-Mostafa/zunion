@@ -18,7 +18,6 @@ export const config = {
   cookieSecret: process.env.COOKIE_SECRET ?? "dev-change-me",
   uploadDir: process.env.UPLOAD_DIR ?? (process.env.VERCEL ? "/tmp/uploads" : "uploads"),
   otpDevMode: process.env.OTP_DEV_MODE === "true",
-  migrateToken: process.env.MIGRATE_TOKEN ?? "",
   resend: {
     apiKey: resendApiKey,
     from: process.env.RESEND_FROM ?? `Zunion <${resendFromEmail}>`,
