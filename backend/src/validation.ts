@@ -135,3 +135,27 @@ export const customerSchema = z.object({
   old_balance: z.coerce.number().default(0),
   notes: z.string().optional().default(""),
 });
+
+export const MACHINE_NAMES = [
+  "تاجيما 2015",
+  "تاجيما 2007",
+  "الجلوبال",
+  "swf",
+  "تاجيما 2005",
+  "فيا الي جوا",
+  "فيا الي برا",
+] as const;
+
+export const machineAssignmentSchema = z.object({
+  order_id: z.string().min(1),
+  machine_name: z.enum(MACHINE_NAMES),
+});
+
+export const machineMoveSchema = z.object({
+  machine_name: z.enum(MACHINE_NAMES),
+});
+
+export const machineReorderSchema = z.object({
+  machine_name: z.enum(MACHINE_NAMES),
+  ids: z.array(z.string().min(1)).max(500),
+});

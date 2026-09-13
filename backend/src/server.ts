@@ -11,8 +11,9 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, machineSchema, orderSchema, problemSchema, productSchema, statusSchema, workerSchema } from "./validation.js";
+import { customerSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, statusSchema, workerSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
+import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { effectivePermissions, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
@@ -1134,9 +1135,83 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/api/_migrate/machine-assignments", async (req, res) => {
+  if (!config.migrateToken || req.header("x-migrate-token") !== config.migrateToken) return res.status(403).json({ message: "Forbidden" });
+  try {
+    await query(`create table if not exists machine_assignments (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null,
+  machine_name text not null default '',
+  position integer not null default 0,
+  created_by uuid references users(id) on delete set null,
+  updated_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+); alter table machine_assignments add column if not exists position integer not null default 0; create unique index if not exists machine_assignments_order_uniq on machine_assignments(order_id); create index if not exists machine_assignments_machine_pos_idx on machine_assignments(machine_name, position);`);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/machine-assignments", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (_req, res) => {
+  const assignments = await listMachineAssignments();
+  res.json({ assignments });
+});
+
+app.post("/api/machine-assignments", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const parsed = machineAssignmentSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid machine assignment", issues: parsed.error.issues });
+  const order = await loadOrder(parsed.data.order_id);
+  if (!order) return res.status(404).json({ message: "الأوردر غير موجود" });
+  try {
+    const assignment = await appendMachineAssignment(parsed.data.order_id, parsed.data.machine_name, req.user!.id);
+    await audit(req.user!, "MACHINE_ASSIGNED", "machine_assignments", assignment.id, undefined, { order_id: assignment.order_id, machine_name: assignment.machine_name, position: assignment.position });
+    res.status(201).json({ assignment });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === "23505" || code === "ZUNION_ASSIGNED") return res.status(409).json({ message: "هذا الأوردر مخصص لمكنة بالفعل" });
+    throw error;
+  }
+});
+
+app.patch("/api/machine-assignments/reorder", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const parsed = machineReorderSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid reorder", issues: parsed.error.issues });
+  try {
+    const count = await reorderMachineAssignments(parsed.data.machine_name, parsed.data.ids);
+    await audit(req.user!, "MACHINE_REORDERED", "machine_assignments", undefined, undefined, { machine_name: parsed.data.machine_name, ids: parsed.data.ids });
+    res.json({ ok: true, count });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === "ZUNION_BAD_REORDER") return res.status(400).json({ message: (error as Error).message });
+    throw error;
+  }
+});
+
+app.patch("/api/machine-assignments/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = machineMoveSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid machine move", issues: parsed.error.issues });
+  const oldAssignment = await loadMachineAssignment(id);
+  if (!oldAssignment) return res.status(404).json({ message: "Assignment not found" });
+  const assignment = await moveMachineAssignment(id, parsed.data.machine_name, req.user!.id);
+  await audit(req.user!, "MACHINE_MOVED", "machine_assignments", id, { machine_name: oldAssignment.machine_name }, { machine_name: assignment!.machine_name, position: assignment!.position });
+  res.json({ assignment });
+});
+
+app.delete("/api/machine-assignments/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const id = param(req.params.id);
+  const removed = await removeMachineAssignment(id);
+  if (!removed) return res.status(404).json({ message: "Assignment not found" });
+  await audit(req.user!, "MACHINE_REMOVED", "machine_assignments", id, { machine_name: removed.machine_name, position: removed.position }, undefined);
+  res.json({ ok: true });
+});
+
 app.delete("/api/orders/:id", requireAuth, requireRole("Master"), async (req, res) => {
   const id = param(req.params.id);
   const oldOrder = await loadOrder(id);
+  await query("delete from machine_assignments where order_id=$1", [id]);
   await query("delete from orders where id=$1", [id]);
   await audit(req.user!, "ORDER_DELETED", "orders", id, oldOrder, undefined);
   res.json({ ok: true });

@@ -19,6 +19,7 @@ import {
   Image,
   KeyRound,
   Landmark,
+  LayoutGrid,
   Loader2,
   Mail,
   MapPin,
@@ -65,7 +66,7 @@ import { allPermissionKeys, masterProtectedPermissions, roleDefaultPermissions, 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "addCustomer" | "addProduct" | "search" | "worker" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -497,6 +498,7 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   addProduct: "products.create",
   search: "orders.view",
   worker: "operation.view",
+  machineDist: "operation.view",
   finish: "finishing.view",
   customers: "customers.view",
   finance: "dailyAccounts.view",
@@ -4378,6 +4380,321 @@ function applyWsTextFit(container: HTMLElement) {
   }
 }
 
+type MachineAssignment = {
+  id: string;
+  order_id: string;
+  machine_name: string;
+  position: number;
+};
+
+type MachineDistModal =
+  | { kind: "add"; machine: string; position: number }
+  | { kind: "edit"; assignmentId: string; machine: string };
+
+function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Order[]; session: Session; onOrderClick?: (orderNumber: string) => void }) {
+  const [assignments, setAssignments] = useState<MachineAssignment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [modal, setModal] = useState<MachineDistModal | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmRemoveMode, setConfirmRemoveMode] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    backendJson<{ assignments: MachineAssignment[] }>("/api/machine-assignments")
+      .then((data) => { if (active) { setAssignments(data.assignments); setLoadError(""); } })
+      .catch((error) => { if (active) setLoadError(error instanceof Error ? error.message : "تعذر تحميل توزيع المكن"); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      backendJson<{ assignments: MachineAssignment[] }>("/api/machine-assignments")
+        .then((data) => setAssignments(data.assignments))
+        .catch(() => undefined);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const boardMachines = useMemo(() => [...machineOptions].reverse(), []);
+  const byMachine: Partial<Record<string, Map<number, MachineAssignment>>> = {};
+  for (const machine of boardMachines) byMachine[machine] = new Map();
+  for (const assignment of assignments) {
+    const bucket = byMachine[assignment.machine_name];
+    if (bucket) bucket.set(Number(assignment.position || 0), assignment);
+  }
+  const rowCount = Math.max(3, ...boardMachines.map((machine) => (byMachine[machine]?.size ?? 0)));
+  const assignedOrderIds = useMemo(() => new Set(assignments.map((a) => a.order_id)), [assignments]);
+  const orderById = useMemo(() => new Map(orders.map((o) => [o.id, o])), [orders]);
+
+  function machineQueue(machine: string): MachineAssignment[] {
+    return assignments
+      .filter((a) => a.machine_name === machine)
+      .sort((a, b) => (Number(a.position || 0)) - (Number(b.position || 0)));
+  }
+
+  function openAdd(machine: string, position: number) {
+    setSearchQuery("");
+    setSelectedOrderId(null);
+    setErr("");
+    setMsg("");
+    setModal({ kind: "add", machine, position });
+  }
+
+  function openEdit(assignmentId: string, machine: string) {
+    setMoveTarget(machine);
+    setConfirmRemoveMode(false);
+    setErr("");
+    setMsg("");
+    setModal({ kind: "edit", assignmentId, machine });
+  }
+
+  function closeModal() {
+    setModal(null);
+    setConfirmRemoveMode(false);
+  }
+
+  async function confirmAdd() {
+    if (!modal || modal.kind !== "add" || !selectedOrderId || busy) return;
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    try {
+      const data = await backendJson<{ assignment: MachineAssignment }>("/api/machine-assignments", {
+        method: "POST",
+        body: JSON.stringify({ order_id: selectedOrderId, machine_name: modal.machine }),
+      });
+      setAssignments((current) => [...current, data.assignment]);
+      setMsg(`تم توزيع الأوردر على ${modal.machine}`);
+      setModal(null);
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "تعذر حفظ التوزيع");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmMove() {
+    if (!modal || modal.kind !== "edit") return;
+    if (!moveTarget || moveTarget === modal.machine || busy) return;
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    try {
+      const data = await backendJson<{ assignment: MachineAssignment }>(`/api/machine-assignments/${encodeURIComponent(modal.assignmentId)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ machine_name: moveTarget }),
+      });
+      setAssignments((current) => current.map((a) => (a.id === data.assignment.id ? data.assignment : a)));
+      setModal({ kind: "edit", assignmentId: data.assignment.id, machine: data.assignment.machine_name });
+      setMoveTarget(data.assignment.machine_name);
+      setMsg(`تم نقل الأوردر إلى ${data.assignment.machine_name}`);
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "تعذر نقل الأوردر");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reorderStep(assignmentId: string, direction: -1 | 1) {
+    if (busy) return;
+    const assignment = assignments.find((a) => a.id === assignmentId);
+    if (!assignment) return;
+    const queue = machineQueue(assignment.machine_name);
+    const index = queue.findIndex((item) => item.id === assignmentId);
+    if (index < 0) return;
+    const target = index + direction;
+    if (target < 0 || target >= queue.length) return;
+    const ids = queue.map((item) => item.id);
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    try {
+      await backendJson("/api/machine-assignments/reorder", {
+        method: "PATCH",
+        body: JSON.stringify({ machine_name: assignment.machine_name, ids }),
+      });
+      setAssignments((current) => current.map((a) => {
+        if (a.machine_name !== assignment.machine_name) return a;
+        const idx = ids.indexOf(a.id);
+        return idx >= 0 ? { ...a, position: idx + 1 } : a;
+      }));
+      setMsg("تم ترتيب الطابور");
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "تعذر ترتيب الطابور");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmRemove() {
+    if (!modal || modal.kind !== "edit" || busy) return;
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    try {
+      await backendJson(`/api/machine-assignments/${encodeURIComponent(modal.assignmentId)}`, { method: "DELETE" });
+      setAssignments((current) => current.filter((a) => a.id !== modal.assignmentId));
+      setMsg("تمت إزالة الأوردر من الجدول (الأوردر نفسه لم يُحذف)");
+      setModal(null);
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "تعذر إزالة الأوردر");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function renderAddModal() {
+    if (!modal || modal.kind !== "add") return null;
+    const query = searchQuery.trim();
+    const eligible = orders.filter((order) => !assignedOrderIds.has(order.id) && !order.draft && order.workStage !== "cancelled");
+    const matches = eligible.filter((order) => !query || order.order_number.includes(query)).slice(0, 20);
+    const selectedOrder = selectedOrderId ? orderById.get(selectedOrderId) : undefined;
+    return (
+      <div className="md-modal-backdrop" onClick={closeModal}>
+        <div className="md-modal" onClick={(e) => e.stopPropagation()}>
+          <h3 className="md-modal-title">إضافة أوردر إلى {modal.machine}</h3>
+          <input className="md-search-input" autoFocus placeholder="ابحث برقم الأوردر…" value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setSelectedOrderId(null); }} />
+          <div className="md-search-list">
+            {matches.length === 0 ? (
+              <div className="md-search-empty">{query ? "لا توجد نتائج" : "أرقام الأوردرات المتاحة (من غير المُوزّعة)"}</div>
+            ) : matches.map((order) => (
+              <button key={order.id} type="button" className={`md-search-hit${selectedOrderId === order.id ? " md-search-hit-selected" : ""}`} onClick={() => setSelectedOrderId(order.id)}>
+                <span className="md-hit-num">{order.order_number}</span>
+                <span className="md-hit-type">{order.order_type || order.productName || ""}</span>
+                <span className="md-hit-client">{order.client_name}</span>
+              </button>
+            ))}
+          </div>
+          {selectedOrder && (
+            <div className="md-details">
+              <div>رقم الأوردر: <strong>{selectedOrder.order_number}</strong></div>
+              <div>النوع: <strong>{selectedOrder.order_type || selectedOrder.productName || ""}</strong></div>
+              <div>اسم العميل: <strong>{selectedOrder.client_name}</strong></div>
+            </div>
+          )}
+          <div className="md-modal-actions">
+            <button type="button" className="md-btn md-btn-primary" disabled={!selectedOrderId || busy} onClick={confirmAdd}>حفظ</button>
+            <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeModal}>إلغاء</button>
+          </div>
+          {busy && <div className="md-modal-status">جارِ الحفظ…</div>}
+        </div>
+      </div>
+    );
+  }
+
+  function renderEditModal() {
+    if (!modal || modal.kind !== "edit") return null;
+    const assignment = assignments.find((a) => a.id === modal.assignmentId);
+    if (!assignment) return null;
+    const queue = machineQueue(assignment.machine_name);
+    const index = queue.findIndex((item) => item.id === assignment.id);
+    const order = orderById.get(assignment.order_id);
+    return (
+      <div className="md-modal-backdrop" onClick={closeModal}>
+        <div className="md-modal" onClick={(e) => e.stopPropagation()}>
+          <h3 className="md-modal-title">تعديل توزيع المكن</h3>
+          <div className="md-edit-order">
+            <div className="md-line md-line-num">{order?.order_number ?? assignment.order_id}</div>
+            <div className="md-line">{order?.order_type || order?.productName || ""}</div>
+            <div className="md-line">{order?.client_name || ""}</div>
+          </div>
+          <div className="md-field">
+            <label>نقل إلى مكنة:</label>
+            <select value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)}>
+              {boardMachines.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
+            </select>
+          </div>
+          <div className="md-field">
+            <label>الترتيب في طابور {assignment.machine_name}:</label>
+            <div className="md-reorder-row">
+              <button type="button" className="md-btn" disabled={busy || index <= 0} onClick={() => reorderStep(assignment.id, -1)}>تحريك لأعلى</button>
+              <button type="button" className="md-btn" disabled={busy || index >= queue.length - 1} onClick={() => reorderStep(assignment.id, 1)}>تحريك لأسفل</button>
+            </div>
+          </div>
+          <div className="md-modal-actions">
+            <button type="button" className="md-btn md-btn-primary" disabled={busy || !moveTarget || moveTarget === assignment.machine_name} onClick={confirmMove}>حفظ</button>
+            <button type="button" className="md-btn md-btn-danger" disabled={busy} onClick={() => { if (!confirmRemoveMode) setConfirmRemoveMode(true); else void confirmRemove(); }}>
+              {confirmRemoveMode ? "تأكيد الإزالة" : "إزالة من الجدول"}
+            </button>
+            <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeModal}>إلغاء</button>
+          </div>
+          {order?.order_number && (
+            <button type="button" className="md-btn md-btn-open" disabled={busy} onClick={() => onOrderClick?.(order.order_number)}>فتح الأوردر</button>
+          )}
+          {busy && <div className="md-modal-status">جارِ الحفظ…</div>}
+        </div>
+      </div>
+    );
+  }
+
+  if (loading && assignments.length === 0) return <LoadingPanel />;
+  if (loadError && assignments.length === 0) return <ErrorPanel message={loadError} />;
+
+  return (
+    <div className="md-screen">
+      <div className="md-band">ده توزيع الشغل على المكن</div>
+      {(msg || err) && (
+        <div className="md-status">
+          {msg && <div className="md-status-ok">{msg}</div>}
+          {err && <div className="md-status-err">{err}</div>}
+        </div>
+      )}
+      <div className="md-board-wrap">
+        <table className="md-table" dir="rtl">
+          <thead>
+            <tr>
+              {boardMachines.map((machine) => <th key={machine} className="md-head">{machine}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: rowCount }, (_, index) => {
+              const position = index + 1;
+              return (
+                <tr key={position}>
+                  {boardMachines.map((machine) => {
+                    const assignment = byMachine[machine]?.get(position);
+                    const order = assignment ? orderById.get(assignment.order_id) : undefined;
+                    if (assignment && order) {
+                      return (
+                        <td key={machine} className="md-cell md-cell-filled" onClick={() => openEdit(assignment.id, machine)}>
+                          <div className="md-cell-lines">
+                            <div className="md-line md-line-num">{order.order_number}</div>
+                            <div className="md-line">{order.order_type || order.productName || ""}</div>
+                            <div className="md-line">{order.client_name}</div>
+                          </div>
+                          <span className="md-open-hint">تعديل / نقل / إزالة</span>
+                        </td>
+                      );
+                    }
+                    if (assignment) {
+                      return <td key={machine} className="md-cell md-cell-orphan">—</td>;
+                    }
+                    return (
+                      <td key={machine} className="md-cell md-cell-empty" onClick={() => openAdd(machine, position)}>
+                        <span className="md-add-hint">+ إضافة</span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {modal && (modal.kind === "add" ? renderAddModal() : renderEditModal())}
+    </div>
+  );
+}
+
 function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
@@ -6104,7 +6421,7 @@ function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSectio
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "addCustomer", "addProduct", "search", "worker", "finish", "customers", "finance", "reports", "audit", "import", "alerts", "settings"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "customers", "finance", "reports", "audit", "import", "alerts", "settings"];
 
 function viewFromHash(): View {
   const raw = window.location.hash.replace(/^#\/?/, "");
@@ -6264,6 +6581,7 @@ function ZunionApp() {
         icon: Cog,
         items: [
           { id: "worker", label: "التشغيل", visible: can("operation.view"), icon: Cog },
+          { id: "machineDist", label: "توزيع المكن", visible: can("operation.view"), icon: LayoutGrid },
           { id: "alerts", label: "التنبيهات", visible: can("orders.view"), icon: BadgeInfo },
         ],
       },
@@ -6416,6 +6734,7 @@ function ZunionApp() {
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
            {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+            {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
            {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
           {view === "finance" && <FinancePageModern session={session} />}
