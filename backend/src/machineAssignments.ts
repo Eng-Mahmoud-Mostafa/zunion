@@ -26,7 +26,7 @@ export async function listMachineAssignments(): Promise<MachineAssignmentRow[]> 
   return rows;
 }
 
-export async function appendMachineAssignment(orderId: string, machineName: string, userId: string): Promise<MachineAssignmentRow> {
+export async function appendMachineAssignment(orderId: string, machineName: string, userId: string, position?: number): Promise<MachineAssignmentRow> {
   return tx(async (client) => {
     const dup = await client.query<{ id: string }>("select id from machine_assignments where order_id=$1 limit 1", [orderId]);
     if (dup.rows[0]) {
@@ -36,11 +36,19 @@ export async function appendMachineAssignment(orderId: string, machineName: stri
       "select max(position) as max from machine_assignments where machine_name=$1",
       [machineName],
     );
-    const position = Math.max(1, Number(max.rows[0]?.max ?? 0) + 1);
+    const next = Math.max(1, Number(max.rows[0]?.max ?? 0) + 1);
+    const target = Number.isInteger(position) && (position as number) >= 1 && (position as number) <= next ? position as number : next;
+    if (target < next) {
+      await client.query(
+        `update machine_assignments set position = position + 1
+         where machine_name=$1 and position >= $2`,
+        [machineName, target],
+      );
+    }
     const inserted = await client.query<MachineAssignmentRow>(
       `insert into machine_assignments (order_id, machine_name, position, created_by, updated_by)
        values ($1,$2,$3,$4,$4) returning *`,
-      [orderId, machineName, position, userId],
+      [orderId, machineName, target, userId],
     );
     return inserted.rows[0];
   });

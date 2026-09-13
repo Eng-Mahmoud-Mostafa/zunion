@@ -5610,6 +5610,33 @@ input[type="date"] {
   pointer-events: none;
 }
 
+.ws-table tbody .ws-goto {
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.ws-goto-btn {
+  background: #FF0000;
+  color: #FFFFFF;
+  border: 1px solid #B00000;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s ease, transform .15s ease;
+}
+
+.ws-goto-btn:hover {
+  background: #CC0000;
+  transform: translateY(-1px);
+}
+
+.ws-goto-btn:active {
+  transform: translateY(0);
+}
+
 .ws-table tbody .ws-qty {
   font-weight: bold;
   color: #FF0000;
@@ -5858,6 +5885,16 @@ input[type="date"] {
 .md-add-hint {
   font-size: 22px;
   color: #999999;
+}
+
+.md-cell-highlight {
+  animation: md-blink 1s ease-in-out 3;
+  box-shadow: inset 0 0 0 4px #FF0000;
+}
+
+@keyframes md-blink {
+  0%, 100% { background-color: #F2F2F2; }
+  50% { background-color: #FFECB3; }
 }
 
 .md-open-hint {

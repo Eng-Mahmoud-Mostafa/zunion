@@ -1146,7 +1146,7 @@ app.post("/api/machine-assignments", requireAuth, requireRole("Master", "Helper"
   const order = await loadOrder(parsed.data.order_id);
   if (!order) return res.status(404).json({ message: "الأوردر غير موجود" });
   try {
-    const assignment = await appendMachineAssignment(parsed.data.order_id, parsed.data.machine_name, req.user!.id);
+    const assignment = await appendMachineAssignment(parsed.data.order_id, parsed.data.machine_name, req.user!.id, parsed.data.position);
     await audit(req.user!, "MACHINE_ASSIGNED", "machine_assignments", assignment.id, undefined, { order_id: assignment.order_id, machine_name: assignment.machine_name, position: assignment.position });
     res.status(201).json({ assignment });
   } catch (error) {

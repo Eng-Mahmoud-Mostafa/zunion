@@ -149,6 +149,7 @@ export const MACHINE_NAMES = [
 export const machineAssignmentSchema = z.object({
   order_id: z.string().min(1),
   machine_name: z.enum(MACHINE_NAMES),
+  position: z.number().int().min(1).optional(),
 });
 
 export const machineMoveSchema = z.object({
