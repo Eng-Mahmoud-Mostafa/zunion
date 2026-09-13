@@ -5628,6 +5628,22 @@ input[type="date"] {
   transition: background .15s ease, transform .15s ease;
 }
 
+.ws-goto-btn:disabled {
+  background: #A00000;
+  border-color: #700000;
+  cursor: not-allowed;
+  transform: none;
+  opacity: 0.85;
+}
+
+.ws-goto-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: #B00000;
+  white-space: nowrap;
+}
+
 .ws-goto-btn:hover {
   background: #CC0000;
   transform: translateY(-1px);

@@ -222,8 +222,8 @@ alter table orders add constraint orders_work_stage_check check (work_stage in (
 update orders
 set work_stage = case
   when status = 'NEW' then 'new'
-  when status in ('SENT_TO_WORKER', 'WORKER_STARTED', 'WORKER_DONE') then 'operation'
-  when status in ('SENT_TO_FINISH', 'FINISH_STARTED', 'FINISH_DONE') then 'finishing'
+  when status in ('SENT_TO_WORKER', 'WORKER_STARTED') then 'operation'
+  when status in ('WORKER_DONE', 'SENT_TO_FINISH', 'FINISH_STARTED', 'FINISH_DONE') then 'finishing'
   when status in ('READY', 'CUSTOMER_MESSAGED', 'DELIVERED') then 'completed'
   when status = 'CANCELLED' then 'cancelled'
   else 'new'

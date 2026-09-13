@@ -98,8 +98,8 @@ function orderVisibility(role: UserRole) {
 
 function workStageFromStatus(status: string) {
   if (status === "NEW") return "new";
-  if (["SENT_TO_WORKER", "WORKER_STARTED", "WORKER_DONE"].includes(status)) return "operation";
-  if (["SENT_TO_FINISH", "FINISH_STARTED", "FINISH_DONE"].includes(status)) return "finishing";
+  if (["SENT_TO_WORKER", "WORKER_STARTED"].includes(status)) return "operation";
+  if (["WORKER_DONE", "SENT_TO_FINISH", "FINISH_STARTED", "FINISH_DONE"].includes(status)) return "finishing";
   if (["READY", "CUSTOMER_MESSAGED", "DELIVERED"].includes(status)) return "completed";
   if (status === "CANCELLED") return "cancelled";
   return "new";
@@ -1111,6 +1111,27 @@ app.patch("/api/orders/:id/problem", requireAuth, requireRole("Master", "Helper"
   await query(`update orders set production_notes=$1, updated_by=$2 where id=$3`, [parsed.data.production_notes, req.user!.id, id]);
   await audit(req.user!, "PROBLEM_SET", "orders", id, { production_notes: oldOrder.production_notes ?? "" }, parsed.data);
   res.json({ ok: true });
+});
+
+app.all("/api/_migrate/finishing-work-stages", async (req, res) => {
+  if (String(req.query.token ?? "") !== config.migrateToken || !config.migrateToken) return res.status(403).json({ ok: false });
+  const result = await query(
+    `update orders set work_stage = case
+       when status in ('SENT_TO_WORKER', 'WORKER_STARTED') then 'operation'
+       when status in ('WORKER_DONE', 'SENT_TO_FINISH', 'FINISH_STARTED', 'FINISH_DONE') then 'finishing'
+       when status in ('READY', 'CUSTOMER_MESSAGED', 'DELIVERED') then 'completed'
+       when status = 'CANCELLED' then 'cancelled'
+       else 'new'
+     end
+     where work_stage is distinct from (case
+       when status in ('SENT_TO_WORKER', 'WORKER_STARTED') then 'operation'
+       when status in ('WORKER_DONE', 'SENT_TO_FINISH', 'FINISH_STARTED', 'FINISH_DONE') then 'finishing'
+       when status in ('READY', 'CUSTOMER_MESSAGED', 'DELIVERED') then 'completed'
+       when status = 'CANCELLED' then 'cancelled'
+       else 'new'
+     end)`,
+  );
+  res.json({ ok: true, updated: result.rowCount });
 });
 
 app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {

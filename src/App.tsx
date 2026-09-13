@@ -1196,6 +1196,7 @@ function apiStatusFromOrder(order: Order) {
   if (order.workStage === "cancelled") return "CANCELLED";
   if (order.order_status === "تم التسليم") return "DELIVERED";
   if (order.order_status === "جاهز" || order.workStage === "completed") return "READY";
+  if (order.workStage === "finishing" && order.finishing_status !== "تم" && order.operation_status === "تم") return "WORKER_DONE";
   if (order.workStage === "finishing") return order.finishing_status === "تم" ? "FINISH_DONE" : "SENT_TO_FINISH";
   if (order.workStage === "operation") return order.operation_status === "تم" ? "WORKER_DONE" : "SENT_TO_WORKER";
   return "NEW";
@@ -4252,6 +4253,7 @@ type WorkerSpreadRow = {
 
 function workerRowFromDb(row: DbOrder, machine = ""): WorkerSpreadRow {
   const status = String(row.status ?? "").trim();
+  const stage = String(row.work_stage ?? row.workStage ?? "").trim();
   return {
     id: String(row.id ?? ""),
     orderNumber: valueText(row.order_number),
@@ -4264,7 +4266,7 @@ function workerRowFromDb(row: DbOrder, machine = ""): WorkerSpreadRow {
     worker: String(row.worker_name ?? ""),
     started: status === "WORKER_STARTED" || status === "WORKER_DONE",
     problem: valueText(row.production_notes ?? row.quality_notes, ""),
-    finished: status === "WORKER_DONE",
+    finished: stage === "finishing" || status === "WORKER_DONE",
   };
 }
 
@@ -4281,7 +4283,7 @@ function workerRowFromOrder(order: Order): WorkerSpreadRow {
     worker: order.worker_name || "",
     started: order.operation_status !== "لم يبدأ",
     problem: order.production_notes || order.notes || "",
-    finished: order.operation_status === "تم",
+    finished: order.workStage === "finishing" || order.operation_status === "تم",
   };
 }
 
@@ -4306,12 +4308,14 @@ function workerNameOptions(): string[] {
 }
 
 function applyBackendStatus(order: Order, status: string): Order {
-  const operation = status === "SENT_TO_WORKER" || status === "WORKER_STARTED" || status === "WORKER_DONE";
+  const operation = status === "SENT_TO_WORKER" || status === "WORKER_STARTED";
+  const done = status === "WORKER_DONE";
   return {
     ...order,
-    workStage: operation ? "operation" : order.workStage,
-    order_status: operation ? "في التشغيل" : order.order_status,
-    operation_status: status === "WORKER_DONE" ? "تم" : operation ? "جاري التشغيل" : "لم يبدأ",
+    workStage: done ? "finishing" : operation ? "operation" : order.workStage,
+    order_status: done ? "في التشطيب" : operation ? "في التشغيل" : order.order_status,
+    operation_status: done ? "تم" : operation ? "جاري التشغيل" : "لم يبدأ",
+    finishing_status: done ? "جاري التشطيب" : operation ? "لم يبدأ" : order.finishing_status,
     updated_at: new Date().toISOString(),
   };
 }
@@ -4793,7 +4797,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     if (!queue || !goToOrderId) return;
     onGoToOrderHandled?.();
     const list = queue === "finish"
-      ? orders.filter((order) => order.workStage === "finishing")
+      ? orders.filter((order) => order.workStage === "finishing" || (order.workStage === "operation" && order.operation_status === "تم"))
       : roleOrders(session.role, orders);
     const index = list.findIndex((order) => order.id === goToOrderId);
     if (index >= 0) {
@@ -4851,7 +4855,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   }
 
   const baseOrders = useMemo(() => {
-    if (queue === "finish") return orders.filter((order) => order.workStage === "finishing");
+    if (queue === "finish") return orders.filter((order) => order.workStage === "finishing" || (order.workStage === "operation" && order.operation_status === "تم"));
     return roleOrders(session.role, orders);
   }, [orders, queue, session.role]);
 
@@ -4902,8 +4906,16 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       const status = statusValue.trim();
       return stage === "operation" || ["SENT_TO_WORKER", "WORKER_STARTED", "WORKER_DONE"].includes(status);
     };
-    const localRows = orders.filter((order) => stageMatch(String(order.workStage ?? ""), String(order.order_status ?? "")));
-    const dbRows = (remoteOps?.orders ?? []).filter((row) => stageMatch(String(row.work_stage ?? row.workStage ?? ""), String(row.status ?? "")));
+    const localRows = orders.filter((order) => {
+      const stage = String(order.workStage ?? "").trim();
+      const status = String(order.order_status ?? "").trim();
+      return stageMatch(stage, status) || (stage === "finishing" && order.operation_status === "تم");
+    });
+    const dbRows = (remoteOps?.orders ?? []).filter((row) => {
+      const stage = String(row.work_stage ?? row.workStage ?? "").trim();
+      const status = String(row.status ?? "").trim();
+      return stageMatch(stage, status) || (stage === "finishing" && status === "WORKER_DONE");
+    });
     const baseRows: WorkerSpreadRow[] = localRows.length > 0
       ? localRows.map(workerRowFromOrder)
       : dbRows.map((row) => workerRowFromDb(row));
@@ -5138,9 +5150,16 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                   </td>
                   {queue === "worker" && (
                     <td className="ws-goto">
-                      <button type="button" className="ws-goto-btn" title="اذهب للتشطيب" onClick={() => onGoToFinish?.(row.id)}>
+                      <button
+                        type="button"
+                        className="ws-goto-btn"
+                        disabled={!row.finished}
+                        title={row.finished ? "اذهب للتشطيب" : "أكمل التشغيل أولاً"}
+                        onClick={() => onGoToFinish?.(row.id)}
+                      >
                         اذهب للتشطيب
                       </button>
+                      {!row.finished && <span className="ws-goto-hint">أكمل التشغيل أولاً</span>}
                     </td>
                   )}
                 </tr>
