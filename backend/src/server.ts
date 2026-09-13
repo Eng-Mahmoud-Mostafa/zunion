@@ -1135,8 +1135,9 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/_migrate/machine-assignments", async (req, res) => {
-  if (!config.migrateToken || req.header("x-migrate-token") !== config.migrateToken) return res.status(403).json({ message: "Forbidden" });
+app.all("/api/_migrate/machine-assignments", async (req, res) => {
+  if (req.method !== "POST" && req.method !== "GET") return res.status(405).json({ message: "Method not allowed" });
+  if (!config.migrateToken || req.query.token !== config.migrateToken) return res.status(403).json({ message: "Forbidden" });
   try {
     await query(`create table if not exists machine_assignments (
   id uuid primary key default gen_random_uuid(),
