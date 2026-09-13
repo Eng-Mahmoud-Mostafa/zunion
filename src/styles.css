@@ -5887,9 +5887,9 @@ input[type="date"] {
   color: #999999;
 }
 
-.md-cell-highlight {
+tr.ws-row-highlight td {
   animation: md-blink 1s ease-in-out 3;
-  box-shadow: inset 0 0 0 4px #FF0000;
+  box-shadow: inset 0 0 0 3px #FF0000;
 }
 
 @keyframes md-blink {

@@ -3256,7 +3256,7 @@ function UserDrawer({ open, onClose, user, orders }: {
   );
 }
 
-function OrdersListRow({ order, onCustomerClick, onOrderClick }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
+function OrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; highlight?: boolean }) {
   const operationStatus = orderOperationStatusText(order);
   const finishingStatus = orderFinishingStatusText(order);
   const readyStatus = orderReadyStatus(order);
@@ -3265,7 +3265,7 @@ function OrdersListRow({ order, onCustomerClick, onOrderClick }: { order: Orders
   const clientCode = String(order.client_code || "");
   const handleClick = onCustomerClick && clientName !== "--" ? () => onCustomerClick(clientCode, clientName) : undefined;
   return (
-    <tr>
+    <tr className={highlight ? "ws-row-highlight" : undefined} data-order-row-id={order.id}>
       <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
       <td>{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}</td>
@@ -4391,7 +4391,7 @@ type MachineDistModal =
   | { kind: "add"; machine: string; position: number }
   | { kind: "edit"; assignmentId: string; machine: string };
 
-function MachineDistributionPage({ orders, session, onOrderClick, goToOrderId, onGoToOrderHandled }: { orders: Order[]; session: Session; onOrderClick?: (orderNumber: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
+function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Order[]; session: Session; onOrderClick?: (orderNumber: string) => void }) {
   const [assignments, setAssignments] = useState<MachineAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -4403,7 +4403,6 @@ function MachineDistributionPage({ orders, session, onOrderClick, goToOrderId, o
   const [confirmRemoveMode, setConfirmRemoveMode] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
-  const [highlightOrderId, setHighlightOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -4422,38 +4421,6 @@ function MachineDistributionPage({ orders, session, onOrderClick, goToOrderId, o
     }, 15000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (!goToOrderId || loading) return;
-    const existing = assignments.find((a) => a.order_id === goToOrderId);
-    const targetOrder = orders.find((o) => o.id === goToOrderId);
-    onGoToOrderHandled?.();
-    if (existing) {
-      setModal(null);
-      setErr("");
-      setMsg("الأوردر مخصص بالفعل — تم إظهار موقعه في الجدول");
-      setHighlightOrderId(existing.order_id);
-      return;
-    }
-    if (!targetOrder) return;
-    const suggestion = targetOrder.machineName && machineOptions.includes(targetOrder.machineName) ? targetOrder.machineName : "";
-    const suggestedPosition = suggestion ? (byMachine[suggestion]?.size ?? 0) + 1 : 1;
-    setBusy(false);
-    setErr("");
-    setMsg("");
-    setConfirmRemoveMode(false);
-    setSearchQuery(targetOrder.order_number);
-    setSelectedOrderId(targetOrder.id);
-    setModal({ kind: "add", machine: suggestion, position: suggestedPosition });
-  }, [goToOrderId, loading]);
-
-  useEffect(() => {
-    if (!highlightOrderId) return;
-    const el = document.querySelector<HTMLElement>(`[data-assignment-order-id="${highlightOrderId}"]`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    const timer = window.setTimeout(() => setHighlightOrderId(null), 4000);
-    return () => window.clearTimeout(timer);
-  }, [highlightOrderId]);
 
   const boardMachines = useMemo(() => [...machineOptions].reverse(), []);
   const byMachine: Partial<Record<string, Map<number, MachineAssignment>>> = {};
@@ -4713,7 +4680,7 @@ function MachineDistributionPage({ orders, session, onOrderClick, goToOrderId, o
                     const order = assignment ? orderById.get(assignment.order_id) : undefined;
                     if (assignment && order) {
                       return (
-                        <td key={machine} className={`md-cell md-cell-filled${highlightOrderId === order.id ? " md-cell-highlight" : ""}`} data-assignment-order-id={order.id} onClick={() => openEdit(assignment.id, machine)}>
+                        <td key={machine} className="md-cell md-cell-filled" data-assignment-order-id={order.id} onClick={() => openEdit(assignment.id, machine)}>
                           <div className="md-cell-lines">
                             <div className="md-line md-line-num">{order.order_number}</div>
                             <div className="md-line">{order.order_type || order.productName || ""}</div>
@@ -4743,7 +4710,7 @@ function MachineDistributionPage({ orders, session, onOrderClick, goToOrderId, o
   );
 }
 
-function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onGoToMachineDist }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onGoToMachineDist?: (orderId: string) => void }) {
+function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onGoToFinish, goToOrderId, onGoToOrderHandled }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onGoToFinish?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -4761,6 +4728,8 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [workerOverrides, setWorkerOverrides] = useState<Record<string, string>>({});
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Partial<Record<"started" | "finished", boolean>>>>({});
   const [problemOverrides, setProblemOverrides] = useState<Record<string, string>>({});
+  const [highlightOrderId, setHighlightOrderId] = useState<string | null>(null);
+  const [gotoNotice, setGotoNotice] = useState("");
   const wsWrapRef = useRef<HTMLDivElement | null>(null);
 
   function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -4819,6 +4788,36 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       window.removeEventListener("load", fit);
     };
   }, [queue, orders, remoteOps, machineOverrides, workerOverrides, statusOverrides, problemOverrides, machineFilter, spreadSort, cellSaving, workerEditId, problemEditId, problemDraft]);
+
+  useEffect(() => {
+    if (!queue || !goToOrderId) return;
+    onGoToOrderHandled?.();
+    const list = queue === "finish"
+      ? orders.filter((order) => order.workStage === "finishing")
+      : roleOrders(session.role, orders);
+    const index = list.findIndex((order) => order.id === goToOrderId);
+    if (index >= 0) {
+      setDateSort("none");
+      setMachineFilter("all");
+      setSpreadSort(null);
+      setPage(Math.max(1, Math.floor(index / 8) + 1));
+      setHighlightOrderId(goToOrderId);
+      setGotoNotice("");
+    } else {
+      setHighlightOrderId(null);
+      setGotoNotice("الأوردر لم يصل إلى مرحلة التشطيب بعد.");
+    }
+  }, [goToOrderId, queue, orders, session.role]);
+
+  useEffect(() => {
+    if (!highlightOrderId) return;
+    const timer = window.setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-order-row-id="${highlightOrderId}"]`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    const clear = window.setTimeout(() => { setHighlightOrderId(null); setGotoNotice(""); }, 4000);
+    return () => { window.clearTimeout(timer); window.clearTimeout(clear); };
+  }, [highlightOrderId]);
 
   if (queue === "worker") {
     return renderWorkerSpread();
@@ -5037,7 +5036,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
       { key: "orderNumber", label: "رقم اوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
-      ...(queue === "worker" ? [{ key: "goto", label: "اذهب للتشغيل", cls: "ws-hd ws-hd-goto", rowSpan: 2 }] : []),
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "party", label: "طرف", cls: "ws-hd", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
@@ -5045,6 +5043,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
       { key: "machine", label: "المكنه المقترحه", cls: "ws-hd ws-hd-machine", onClick: true },
       { key: "operation", label: "التشغيل", cls: "ws-hd ws-hd-op", colSpan: 4 },
+      ...(queue === "worker" ? [{ key: "goto", label: "اذهب للتشطيب", cls: "ws-hd ws-hd-goto", rowSpan: 2 }] : []),
     ];
 
     return (
@@ -5075,17 +5074,10 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
               </tr>
             </thead>
             <tbody>
-              {visibleRows.length === 0 && <EmptyRow colSpan={queue === "worker" ? 12 : 11} />}
+              {visibleRows.length === 0 && <EmptyRow colSpan={12} />}
               {visibleRows.map((row) => (
                 <tr key={row.id}>
                   <td className="ws-num"><span className="ws-num-text">{row.orderNumber}</span></td>
-                  {queue === "worker" && (
-                    <td className="ws-goto">
-                      <button type="button" className="ws-goto-btn" title="اذهب لتوزيع الأوردر على المكن" onClick={() => onGoToMachineDist?.(row.id)}>
-                        اذهب للتشغيل
-                      </button>
-                    </td>
-                  )}
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td>{row.party}</td>
                   <td>{row.client}</td>
@@ -5144,6 +5136,13 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                     </button>
                     {cellFeedback(row.id, "finished")}
                   </td>
+                  {queue === "worker" && (
+                    <td className="ws-goto">
+                      <button type="button" className="ws-goto-btn" title="اذهب للتشطيب" onClick={() => onGoToFinish?.(row.id)}>
+                        اذهب للتشطيب
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -5156,6 +5155,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   return (
     <div className="stack">
       {editing && <OrderForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
+      {gotoNotice && <div className="notice">{gotoNotice}</div>}
       <section className="table-wrap orders-list-table-wrap">
         <table className="orders-list-table">
           <thead>
@@ -5163,7 +5163,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
           </thead>
           <tbody>
             {visible.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
-            {visible.map((order) => <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
+            {visible.map((order) => <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
           </tbody>
         </table>
       </section>
@@ -6494,7 +6494,7 @@ function ZunionApp() {
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
   const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
-  const [machineGoOrderId, setMachineGoOrderId] = useState<string | null>(null);
+  const [finishGoOrderId, setFinishGoOrderId] = useState<string | null>(null);
   const [productDrawer, setProductDrawer] = useState<Product | null>(null);
   const [userDrawer, setUserDrawer] = useState<SearchableUser | null>(null);
   const logoClickRef = useRef({ count: 0, firstClickAt: 0 });
@@ -6790,9 +6790,9 @@ function ZunionApp() {
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-           {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onGoToMachineDist={(id) => { setMachineGoOrderId(id); setView("machineDist"); }} />}
-            {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} goToOrderId={machineGoOrderId} onGoToOrderHandled={() => setMachineGoOrderId(null)} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-           {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+{view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onGoToFinish={(id) => { setFinishGoOrderId(id); setView("finish"); }} />}
+            {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+            {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
           {view === "finance" && <FinancePageModern session={session} />}
           {view === "reports" && <ReportsPage session={session} />}
