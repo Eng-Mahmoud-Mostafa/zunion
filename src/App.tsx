@@ -6,6 +6,7 @@ import {
   ArrowUpDown,
   BadgeInfo,
   Banknote,
+  BarChart3,
   Bell,
   Building2,
   Calendar,
@@ -14,6 +15,7 @@ import {
   ClipboardList,
   Clock,
   Cog,
+  History,
   Copy,
   FilePlus,
   FileText,
@@ -6703,8 +6705,8 @@ function SidebarItemButton({ item, active, onSelect }: { item: SidebarItemConfig
   const Icon = item.icon;
   return (
     <button type="button" className={`sidebar-item${active ? " active" : ""}`} onClick={() => onSelect(item.id)}>
-      <Icon size={18} />
       <span>{item.label}</span>
+      <Icon size={18} />
     </button>
   );
 }
@@ -6735,7 +6737,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
             />
           ))}
         </nav>
-        <button className="sidebar-logout" type="button" onClick={onLogout}><LogOut size={16} /><span>تسجيل الخروج</span></button>
+        <button className="sidebar-logout" type="button" onClick={onLogout}><span>تسجيل الخروج</span><LogOut size={16} /></button>
       </aside>
       <button type="button" className="sidebar-overlay" aria-label="إغلاق القائمة" onClick={onCloseDrawer} />
     </>
@@ -6927,27 +6929,20 @@ function ZunionApp() {
   const isOperator = currentRole === "Operator" || currentRole === "Helper";
   const isSupervisor = currentRole === "Supervisor" || currentRole === "Worker";
   const isFinishing = currentRole === "Finishing" || currentRole === "Finish";
-  const can = (permission: PermissionKey) => hasPermission(session, permission);
   const canPrintCreatedOrder = hasPermission(session, "orders.print") || hasPermission(session, "operation.print");
   const sidebarItems = useMemo<SidebarItemConfig[]>(() => {
     const items: SidebarItemConfig[] = [
       { id: "dashboard", label: "الرئيسية", visible: true, icon: Home },
-      { id: "new", label: "اوردر جديد", visible: can("orders.create"), icon: FilePlus },
-      { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
-      { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
-      { id: "search", label: "بحث", visible: can("search.use") || can("orders.view"), icon: Search },
-      { id: "customerAccounts", label: "العمليات", visible: can("customers.view"), icon: CircleDollarSign },
-      { id: "worker", label: "التشغيل", visible: can("operation.view"), icon: Cog },
-      { id: "machineDist", label: "توزيع المكن", visible: can("operation.view"), icon: LayoutGrid },
-      { id: "alerts", label: "التنبيهات", visible: can("orders.view"), icon: Clock },
-      { id: "finish", label: "التشطيبات", visible: can("finishing.view"), icon: Wrench },
-      { id: "customers", label: "العملاء", visible: can("customers.view"), icon: Users },
-      { id: "finance", label: "مصروفات وإيرادات", visible: can("expenses.view") || can("revenues.view"), icon: WalletCards },
-      { id: "reports", label: "التقارير", visible: can("reports.view"), icon: BadgeInfo },
-      { id: "import", label: "الاستيراد والتصدير", visible: can("import.export"), icon: ArrowUpDown },
-      { id: "audit", label: "سجل العمليات", visible: can("audit.view"), icon: ClipboardList },
-      { id: "settings", label: "الإعدادات", visible: can("settings.view"), icon: Settings },
-      { id: "orders", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
+      { id: "new", label: "اوردر جديد", visible: true, icon: FilePlus },
+      { id: "addCustomer", label: "إضافة عميل", visible: true, icon: UserPlus },
+      { id: "search", label: "بحث", visible: true, icon: Search },
+      { id: "customerAccounts", label: "العمليات", visible: true, icon: Clock },
+      { id: "worker", label: "التشغيل", visible: true, icon: Cog },
+      { id: "finish", label: "التشطيبات", visible: true, icon: Wrench },
+      { id: "customers", label: "العملاء", visible: true, icon: Users },
+      { id: "reports", label: "التقارير", visible: true, icon: BarChart3 },
+      { id: "audit", label: "سجل العمليات", visible: true, icon: History },
+      { id: "settings", label: "الإعدادات", visible: true, icon: Settings },
     ];
     return items.filter((item) => item.visible);
   }, [session]);
