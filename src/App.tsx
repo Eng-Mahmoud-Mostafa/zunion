@@ -48,6 +48,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
+import CustomerAccountsPage from "./components/CustomerAccountsPage";
 import { formatDateArabic, formatDateTimeEnglish, formatMoney, formatNumber, normalizeDigitsToEnglish } from "./utils/formatters";
 import {
   getDashboardStats,
@@ -66,7 +67,7 @@ import { allPermissionKeys, masterProtectedPermissions, roleDefaultPermissions, 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "customers" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -501,6 +502,7 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   machineDist: "operation.view",
   finish: "finishing.view",
   customers: "customers.view",
+  customerAccounts: "customers.view",
   finance: "dailyAccounts.view",
   reports: "reports.view",
   import: "import.export",
@@ -6496,7 +6498,7 @@ function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSectio
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "customers", "finance", "reports", "audit", "import", "alerts", "settings"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "customers", "customerAccounts", "finance", "reports", "audit", "import", "alerts", "settings"];
 
 function viewFromHash(): View {
   const raw = window.location.hash.replace(/^#\/?/, "");
@@ -6647,6 +6649,7 @@ function ZunionApp() {
         icon: ArrowUpDown,
         items: [
           { id: "finance", label: "مصروفات وإيرادات", visible: can("expenses.view") || can("revenues.view"), icon: WalletCards },
+          { id: "customerAccounts", label: "حسابات العملاء", visible: can("customers.view"), icon: CircleDollarSign },
           { id: "reports", label: "التقارير", visible: can("reports.view"), icon: BadgeInfo },
           { id: "import", label: "الاستيراد والتصدير", visible: can("import.export"), icon: ArrowUpDown },
         ],
@@ -6813,6 +6816,7 @@ function ZunionApp() {
             {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
+          {view === "customerAccounts" && <CustomerAccountsPage orders={orders} customers={customers} session={session} />}
           {view === "finance" && <FinancePageModern session={session} />}
           {view === "reports" && <ReportsPage session={session} />}
           {view === "import" && <ImportExport orders={orders} setOrders={setOrders} session={session} />}

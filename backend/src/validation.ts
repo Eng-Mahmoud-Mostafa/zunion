@@ -160,3 +160,39 @@ export const machineReorderSchema = z.object({
   machine_name: z.enum(MACHINE_NAMES),
   ids: z.array(z.string().min(1)).max(500),
 });
+
+export const customerTransactionSchema = z
+  .object({
+    account_id: z.string().uuid(),
+    customer_id: z.string().uuid(),
+    txn_date: z.string().min(1, "التاريخ مطلوب"),
+    entry_type: z.enum(["charge", "payment"]),
+    order_id: z.string().uuid().optional().nullable(),
+    description: z.string().trim().max(2000).default(""),
+    logo: z.string().trim().max(500).default(""),
+    quantity: z.coerce.number().min(0).default(0),
+    price: z.coerce.number().min(0).default(0),
+    debit: z.coerce.number().min(0).default(0),
+    credit: z.coerce.number().min(0).default(0),
+    client_key: z.string().trim().min(1, "معرّف العملية مطلوب"),
+  })
+  .superRefine((txn, ctx) => {
+    if (txn.entry_type === "charge") {
+      if (!txn.order_id) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["order_id"], message: "رقم الأوردر مطلوب لعملية الشغل" });
+      }
+      if (txn.quantity < 1) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["quantity"], message: "العدد يجب أن يكون 1 على الأقل" });
+      }
+      if (txn.price <= 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["price"], message: "السعر مطلوب" });
+      }
+      txn.debit = Math.round(txn.quantity * txn.price * 100) / 100;
+      txn.credit = 0;
+    } else {
+      if (txn.credit <= 0) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["credit"], message: "مبلغ الدفعة مطلوب" });
+      }
+      txn.debit = 0;
+    }
+  });

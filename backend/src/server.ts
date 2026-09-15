@@ -11,9 +11,10 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, statusSchema, workerSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, statusSchema, workerSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
+import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions } from "./customerAccounts.js";
 import { effectivePermissions, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
@@ -31,6 +32,7 @@ const serviceRoutedPrefixes = [
   "/auth",
   "/orders",
   "/customers",
+  "/customer-accounts",
   "/products",
   "/search",
   "/monthly-periods",
@@ -69,6 +71,49 @@ app.get("/api/health", async (_req, res) => {
     email: config.resend.apiKey ? "configured" : "not_configured",
     time: new Date().toISOString(),
   });
+});
+
+// TEMP: one-time data migration for customer accounts. Remove after running on live DB.
+app.post("/api/_migrate/customer-accounts", async (req, res) => {
+  const { migrateToken } = config;
+  if (!migrateToken) return res.status(404).json({ message: "Not found" });
+  const provided = String(req.headers["x-migrate-token"] ?? "");
+  if (provided !== migrateToken) return res.status(401).json({ message: "Unauthorized" });
+  try {
+    const { rowCount: created } = await query(`
+      create table if not exists customer_accounts (
+        id uuid primary key default gen_random_uuid(),
+        customer_id uuid not null unique,
+        opening_balance numeric not null default 0,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+      create table if not exists customer_account_transactions (
+        id uuid primary key default gen_random_uuid(),
+        account_id uuid not null,
+        customer_id uuid not null,
+        txn_date date not null,
+        entry_type text not null,
+        order_id uuid,
+        description text not null default '',
+        logo text not null default '',
+        quantity numeric not null default 0,
+        price numeric not null default 0,
+        debit numeric not null default 0,
+        credit numeric not null default 0,
+        client_key text,
+        created_by uuid references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      );
+      create unique index if not exists customer_account_transactions_client_key_idx on customer_account_transactions (client_key) where client_key is not null;
+      create unique index if not exists customer_account_transactions_order_uniq on customer_account_transactions (order_id) where order_id is not null;
+      insert into customer_accounts (customer_id)
+      select c.id from customers c
+      where not exists (select 1 from customer_accounts a where a.customer_id = c.id);`);
+    res.status(200).json({ applied: true, accountsCreated: created ?? 0 });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "migration failed" });
+  }
 });
 
 const passwordCodeRate = new Map<string, number[]>();
@@ -995,6 +1040,7 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
       source_party: order.source_party,
       old_balance: order.old_account,
     });
+    await ensureCustomerAccount(customerId, client);
     const result = await client.query<{ id: string }>(
       `insert into orders (
         order_number, customer_id, source_party, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
@@ -1263,6 +1309,7 @@ app.post("/api/customers", requireAuth, requireRole("Master", "Helper", "Operato
     "insert into customers (name, code, phone, email, address, source_party, old_balance, notes) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id",
     [customer.name, customer.code, customer.phone, customer.email, customer.address, customer.source_party, customer.old_balance, customer.notes],
   );
+  await ensureCustomerAccount(rows[0].id);
   await audit(req.user!, "CUSTOMER_CREATED", "customers", rows[0].id, undefined, customer);
   res.status(201).json(rows[0]);
 });
@@ -1333,6 +1380,71 @@ app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper"
   const id = param(req.params.id);
   const { rows } = await query("select * from orders where customer_id=$1 order by created_at desc", [id]);
   res.json({ orders: rows });
+});
+
+app.get("/api/customer-accounts/:id", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const customerId = param(req.params.id);
+  const customer = await query("select * from customers where id=$1", [customerId]);
+  if (!customer.rows[0]) return res.status(404).json({ message: "Customer not found" });
+  const accountId = await ensureCustomerAccount(customerId);
+  res.json({ account_id: accountId });
+});
+
+app.get("/api/customer-accounts/:id/transactions", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const customerId = param(req.params.id);
+  const customer = await query("select * from customers where id=$1", [customerId]);
+  if (!customer.rows[0]) return res.status(404).json({ message: "Customer not found" });
+  await ensureCustomerAccount(customerId);
+  const result = await listTransactions(customerId, {
+    from: String(req.query.from ?? "") || undefined,
+    to: String(req.query.to ?? "") || undefined,
+    logo: String(req.query.logo ?? "") || undefined,
+    entryType: String(req.query.entry_type ?? "") || undefined,
+    q: String(req.query.q ?? "") || undefined,
+    limit: Number(String(req.query.limit ?? "200") || 200),
+    offset: Number(String(req.query.offset ?? "0") || 0),
+  });
+  res.json(result);
+});
+
+app.post("/api/customer-accounts/transactions", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const parsed = customerTransactionSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid transaction", issues: parsed.error.issues });
+  const txn = parsed.data;
+  const accountId = await ensureCustomerAccount(txn.customer_id);
+  const row = await createTransaction({
+    accountId,
+    customerId: txn.customer_id,
+    txnDate: txn.txn_date,
+    entryType: txn.entry_type,
+    orderId: txn.order_id ?? null,
+    description: txn.description,
+    logo: txn.logo,
+    quantity: txn.quantity,
+    price: txn.price,
+    debit: txn.debit,
+    credit: txn.credit,
+    clientKey: txn.client_key,
+    createdBy: req.user!.id,
+  });
+  await audit(req.user!, txn.entry_type === "charge" ? "CUSTOMER_ACCOUNT_CHARGED" : "CUSTOMER_ACCOUNT_PAID", "customer_account_transactions", row.id, undefined, {
+    customer_id: txn.customer_id,
+    order_id: txn.order_id,
+    entry_type: txn.entry_type,
+    debit: txn.debit,
+    credit: txn.credit,
+  });
+  res.status(201).json({ transaction: row });
+});
+
+app.delete("/api/customer-accounts/transactions/:id", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const txnId = param(req.params.id);
+  const customerId = String(req.query.customer_id ?? "");
+  const before = await query("select * from customer_account_transactions where id=$1", [txnId]);
+  const deleted = await deleteTransaction(txnId, customerId);
+  if (!deleted) return res.status(404).json({ message: "Transaction not found" });
+  await audit(req.user!, "CUSTOMER_ACCOUNT_TRANSACTION_DELETED", "customer_account_transactions", txnId, before.rows[0]);
+  res.json({ ok: true });
 });
 
 app.get("/api/products", requireAuth, async (_req, res) => {

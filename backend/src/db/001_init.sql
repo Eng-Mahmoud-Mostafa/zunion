@@ -642,6 +642,80 @@ alter table company_settings add column if not exists primary_color text default
 alter table company_settings add column if not exists created_at timestamptz not null default now();
 
 -- ============================================================================
+-- Customer Accounts (حسابات العملاء)
+-- ----------------------------------------------------------------------------
+-- One empty financial ledger account per registered customer (auto-created on
+-- customer insert, see customerAccounts.ensureCustomerAccount). Transactions
+-- are either a work charge (debit = quantity * price) or a payment (credit).
+-- Amounts stay exact because they are computed by Postgres/numeric. The
+-- client_key gives callers idempotency against double submits, and every charge
+-- must reference a unique order belonging to that customer (verified in the
+-- service layer, mirroring machine_assignments which deliberately avoids FKs
+-- on uuid-typed columns for Neon compatibility).
+-- ============================================================================
+create table if not exists customer_accounts (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null unique,
+  opening_balance numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table customer_accounts add column if not exists customer_id uuid not null unique;
+alter table customer_accounts add column if not exists opening_balance numeric not null default 0;
+alter table customer_accounts add column if not exists created_at timestamptz not null default now();
+alter table customer_accounts add column if not exists updated_at timestamptz not null default now();
+
+create table if not exists customer_account_transactions (
+  id uuid primary key default gen_random_uuid(),
+  account_id uuid not null,
+  customer_id uuid not null,
+  txn_date date not null,
+  entry_type text not null,
+  order_id uuid,
+  description text not null default '',
+  logo text not null default '',
+  quantity numeric not null default 0,
+  price numeric not null default 0,
+  debit numeric not null default 0,
+  credit numeric not null default 0,
+  client_key text,
+  created_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+alter table customer_account_transactions add column if not exists account_id uuid not null;
+alter table customer_account_transactions add column if not exists customer_id uuid not null;
+alter table customer_account_transactions add column if not exists txn_date date not null;
+alter table customer_account_transactions add column if not exists entry_type text not null;
+alter table customer_account_transactions drop constraint if exists customer_account_transactions_entry_type_check;
+alter table customer_account_transactions add constraint customer_account_transactions_entry_type_check check (entry_type in ('charge', 'payment'));
+alter table customer_account_transactions add column if not exists order_id uuid;
+alter table customer_account_transactions add column if not exists description text not null default '';
+alter table customer_account_transactions add column if not exists logo text not null default '';
+alter table customer_account_transactions add column if not exists quantity numeric not null default 0;
+alter table customer_account_transactions add column if not exists price numeric not null default 0;
+alter table customer_account_transactions add column if not exists debit numeric not null default 0;
+alter table customer_account_transactions add column if not exists credit numeric not null default 0;
+alter table customer_account_transactions add column if not exists client_key text;
+alter table customer_account_transactions add column if not exists created_by uuid references users(id) on delete set null;
+alter table customer_account_transactions add column if not exists created_at timestamptz not null default now();
+
+create unique index if not exists customer_account_transactions_client_key_idx on customer_account_transactions (client_key) where client_key is not null;
+create unique index if not exists customer_account_transactions_order_uniq on customer_account_transactions (order_id) where order_id is not null;
+
+alter table customer_accounts enable row level security;
+alter table customer_account_transactions enable row level security;
+
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'anon')
+     and exists (select 1 from pg_roles where rolname = 'authenticated')
+  then
+    revoke all on customer_accounts, customer_account_transactions from anon, authenticated;
+  end if;
+end $$;
+
+-- ============================================================================
 -- Row Level Security
 -- ----------------------------------------------------------------------------
 -- The application authenticates with its own opaque-cookie sessions

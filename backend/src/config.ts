@@ -16,6 +16,7 @@ export const config = {
   supabaseUrl: process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL,
   supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY,
   cookieSecret: process.env.COOKIE_SECRET ?? "dev-change-me",
+  migrateToken: process.env.MIGRATE_TOKEN ?? "",
   uploadDir: process.env.UPLOAD_DIR ?? (process.env.VERCEL ? "/tmp/uploads" : "uploads"),
   otpDevMode: process.env.OTP_DEV_MODE === "true",
   resend: {

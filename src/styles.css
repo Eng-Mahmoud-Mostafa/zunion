@@ -6094,3 +6094,79 @@ tr.ws-row-highlight td {
   font-size: 14px;
   margin-top: 8px;
 }
+
+/* ============================================================================
+   حسابات العملاء – Customer Accounts Statement
+   ============================================================================
+   Mirrors the Zunion design language: white surface, navy #062747 accents,
+   red #E60012 action buttons, borders #E5E7EB, soft shadows.
+   ========================================================================== */
+.ca-screen { display: flex; flex-direction: column; gap: 12px; }
+
+.ca-customer-pick { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+.ca-customer-pick select { min-width: 220px; font-size: 13px; padding: 6px 10px; border: 1px solid #E5E7EB; border-radius: 8px; background: #fff; color: #062747; font-weight: 600; }
+
+.ca-body { display: flex; flex-direction: column; gap: 14px; margin-top: 10px; }
+
+.ca-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.ca-card { display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; padding: 18px 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); font-weight: 800; }
+.ca-card span { font-size: 13px; margin-bottom: 6px; opacity: 0.85; }
+.ca-card strong { font-size: 22px; direction: ltr; unicode-bidi: embed; }
+
+.ca-card-debit { background: #062747; color: #fff; }
+.ca-card-debit strong { color: #fff; }
+
+.ca-card-credit { background: #F3F4F6; color: #062747; border: 1px solid #E5E7EB; }
+.ca-card-credit strong { color: #062747; }
+
+.ca-card-balance { background: #E60012; color: #fff; }
+.ca-card-balance strong { color: #fff; }
+
+.ca-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 12px 14px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 10px; }
+.ca-filters label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 700; color: #062747; }
+.ca-filters input, .ca-filters select { font-size: 12px; padding: 6px 8px; border: 1px solid #E5E7EB; border-radius: 8px; background: #fff; min-width: 110px; color: #062747; }
+
+.ca-advanced { background: #fff4f5; border-color: #fecdd3; }
+
+.ca-btn { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 800; padding: 7px 14px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: background 0.15s; }
+.ca-btn-search { background: #062747; color: #fff; border-color: #062747; }
+.ca-btn-search:hover { background: #0b345c; }
+
+.ca-btn-add { background: #E60012; color: #fff; border-color: #E60012; }
+.ca-btn-add:hover { background: #c00010; }
+
+.ca-btn-print { background: #fff; color: #062747; border-color: #062747; }
+.ca-btn-print:hover { background: #f3f6fa; }
+
+.ca-message { color: #062747; font-size: 12px; margin: 6px 0 0; font-weight: 700; }
+.ca-error { color: #E60012; font-size: 12px; margin: 6px 0 0; font-weight: 700; }
+
+.ca-table-wrap { overflow-x: auto; margin-top: 2px; }
+.ca-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.ca-table th { background: #062747; color: #fff; border: 1px solid #062747; padding: 8px 6px; font-weight: 800; text-align: right; white-space: nowrap; }
+.ca-table td { border: 1px solid #E5E7EB; padding: 7px 6px; text-align: right; color: #062747; white-space: nowrap; }
+.ca-table td.num { direction: ltr; unicode-bidi: embed; text-align: right; }
+.ca-table td.ca-debit { color: #062747; font-weight: 700; }
+.ca-table td.ca-credit { color: #166534; font-weight: 700; }
+.ca-table td.ca-balance { color: #E60012; font-weight: 800; }
+.ca-table tr.ca-totals td { background: #F9FAFB; font-weight: 800; color: #062747; border-top: 2px solid #062747; }
+
+.ca-delete { color: #9CA3AF; border-color: transparent; background: transparent; }
+.ca-delete:hover { color: #E60012; background: #fff4f4; }
+
+.ca-modal { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.35); }
+.ca-modal-box { width: 100%; max-width: 520px; background: #fff; border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.18); padding: 0; overflow: hidden; }
+.ca-modal-head { display: flex; align-items: center; justify-content: space-between; background: #062747; color: #fff; padding: 14px 18px; }
+.ca-modal-head h3 { margin: 0; font-size: 16px; color: #fff; }
+.ca-modal-head button { color: #fff; border-color: rgba(255,255,255,.3); }
+
+.ca-form { display: flex; flex-direction: column; gap: 12px; padding: 18px 18px 10px; }
+.ca-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 700; color: #062747; }
+.ca-form input, .ca-form select, .ca-form textarea { font-size: 13px; padding: 7px 9px; border: 1px solid #E5E7EB; border-radius: 8px; background: #fff; color: #062747; }
+.ca-form textarea { resize: vertical; min-height: 48px; font-family: inherit; }
+.ca-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.ca-compute { font-size: 12px; font-weight: 800; color: #062747; background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 8px; padding: 8px 10px; margin-top: 2px; }
+.ca-compute strong { color: #062747; }
+
+.ca-modal-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 8px 18px 18px; background: #F9FAFB; }
