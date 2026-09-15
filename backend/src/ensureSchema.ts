@@ -70,10 +70,20 @@ const WORK_STAGE_DEF = "check (work_stage in ('new', 'operation', 'finishing', '
 const WORK_STAGES = ["new", "operation", "finishing", "completed", "cancelled"];
 
 async function guarded(fn: () => Promise<unknown>, log: (msg: string) => void, label: string) {
-  try {
-    await fn();
-  } catch (error) {
-    log(`[schema] ${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+  // Catalog changes (create or replace function, alter type) can race between
+  // concurrently cold-starting serverless instances and abort with
+  // "tuple concurrently updated" — retry a few times before giving up.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await fn();
+      return;
+    } catch (error) {
+      if (attempt === 3) {
+        log(`[schema] ${label} failed: ${error instanceof Error ? error.message : String(error)}`);
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+      }
+    }
   }
 }
 
