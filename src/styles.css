@@ -591,6 +591,131 @@ textarea:focus {
   background: #f8fafc;
 }
 
+/* attachment component */
+.attachment-thumb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  border-radius: 8px;
+  background: #f8fafc;
+  overflow: hidden;
+}
+
+.attachment-thumb.has-image {
+  min-height: 0;
+  background: transparent;
+}
+
+.attachment-thumb .upload-preview {
+  margin: 0;
+  border: none;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+
+.attachment-thumb .upload-preview:hover {
+  opacity: .85;
+}
+
+.attachment-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px;
+}
+
+.attachment-retry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: #b91c1c;
+  font-size: 11px;
+  text-align: center;
+  padding: 8px;
+}
+
+.attachment-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .82);
+  backdrop-filter: blur(4px);
+  padding: 32px;
+  cursor: zoom-out;
+}
+
+.attachment-lightbox img {
+  max-width: 90vw;
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .5);
+  cursor: default;
+}
+
+.attachment-lightbox-close {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, .15);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background .15s;
+}
+
+.attachment-lightbox-close:hover {
+  background: rgba(255, 255, 255, .3);
+}
+
+.upload-preview-hidden {
+  visibility: hidden;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* order list inline thumbnail */
+.orders-list-num {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.orders-list-thumb {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.orders-list-thumb .attachment-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.orders-list-thumb .upload-preview {
+  max-height: 36px;
+  width: 36px;
+  object-fit: cover;
+  margin: 0;
+  border: none;
+}
+
 .form-actions {
   display: flex;
   gap: 10px;

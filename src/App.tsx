@@ -17,6 +17,7 @@ import {
   FilePlus,
   FileText,
   Image,
+  ImageOff,
   KeyRound,
   Landmark,
   LayoutGrid,
@@ -30,6 +31,7 @@ import {
   Plus,
   Printer,
   Receipt,
+  RefreshCw,
   Search,
   Send,
   ShoppingBag,
@@ -1533,6 +1535,58 @@ function useOrders(session: Session | null) {
     }
   }
 
+  const migratedRef = useRef(false);
+
+  useEffect(() => {
+    if (!session || migratedRef.current) return;
+    migratedRef.current = true;
+    let localOrders: Order[] = [];
+    try {
+      localOrders = JSON.parse(localStorage.getItem(storageKey) || "[]") as Order[];
+    } catch {
+      // Corrupt legacy cache; nothing to migrate.
+    }
+    const needsMigration = localOrders.filter((order) =>
+      (order.operationItems || []).some((item) => item.logoImage.startsWith("data:") || item.workOrderImage.startsWith("data:"))
+    );
+    if (!needsMigration.length) return;
+    (async () => {
+      for (const order of needsMigration) {
+        try {
+          const migratedItems = await Promise.all((order.operationItems || []).map(async (item) => {
+            const next = { ...item };
+            if (next.logoImage.startsWith("data:")) {
+              const form = new FormData();
+              form.append("file", new File([dataUrlToBlob(next.logoImage)], next.logoFileName || "logo.jpg", { type: "image/jpeg" }));
+              const result = await backendJson<{ url: string }>("/api/uploads", { method: "POST", body: form });
+              next.logoImage = result.url;
+              next.logoImageSource = "upload";
+            }
+            if (next.workOrderImage.startsWith("data:")) {
+              const form = new FormData();
+              form.append("file", new File([dataUrlToBlob(next.workOrderImage)], next.workOrderFileName || "work-order.jpg", { type: "image/jpeg" }));
+              const result = await backendJson<{ url: string }>("/api/uploads", { method: "POST", body: form });
+              next.workOrderImage = result.url;
+              next.workOrderImageSource = "upload";
+            }
+            return next;
+          }));
+          const uploaded = { ...order, operationItems: migratedItems };
+          const body = JSON.stringify(orderToApi(uploaded));
+          const exists = orders.some((o) => o.id === order.id);
+          if (exists) {
+            await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body }).catch(() => backendJson("/api/orders", { method: "POST", body }));
+          } else {
+            await backendJson("/api/orders", { method: "POST", body });
+          }
+        } catch (error) {
+          console.warn("[Zunion] Legacy photo migration failed for order", order.id, error);
+        }
+      }
+      void refreshOrders();
+    })();
+  }, [session?.username, session?.email]);
+
   useEffect(() => {
     if (!session) return;
     refreshOrders();
@@ -2586,14 +2640,14 @@ function OrderDetailsDrawer({ open, onClose, order, customers, setOrders, sessio
             <div className="od-files-grid">
               {logoImages.map((img, i) => (
                 <div key={`l${i}`} className="od-file-card">
-                  <div className="od-file-preview"><img src={img.src} alt={img.name} /></div>
+                  <div className="od-file-preview"><AttachmentImage src={img.src} alt={img.name} /></div>
                   <div className="od-file-info"><span className="od-file-name">{img.name}</span><span className="od-file-type">لوجو - {img.method}</span></div>
                   <a href={img.src} download={img.name} className="cd-action-btn" style={{ justifyContent: "center" }}><Truck size={12} /> تحميل</a>
                 </div>
               ))}
               {workImages.map((img, i) => (
                 <div key={`w${i}`} className="od-file-card">
-                  <div className="od-file-preview"><img src={img.src} alt={img.name} /></div>
+                  <div className="od-file-preview"><AttachmentImage src={img.src} alt={img.name} /></div>
                   <div className="od-file-info"><span className="od-file-name">{img.name}</span><span className="od-file-type">أمر شغل - {img.method}</span></div>
                   <a href={img.src} download={img.name} className="cd-action-btn" style={{ justifyContent: "center" }}><Truck size={12} /> تحميل</a>
                 </div>
@@ -3421,11 +3475,13 @@ function OrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { or
   const clientName = valueText(order.client_name || order.customer_name || order.customer_name_snapshot);
   const clientCode = String(order.client_code || "");
   const handleClick = onCustomerClick && clientName !== "--" ? () => onCustomerClick(clientCode, clientName) : undefined;
+  const orderItems = Array.isArray(order.operationItems) ? (order.operationItems as OperationItem[]) : [];
+  const thumbSrc = orderItems.find((i) => i.workOrderImage || i.logoImage)?.workOrderImage || orderItems.find((i) => i.logoImage)?.logoImage || "";
   return (
     <tr className={highlight ? "ws-row-highlight" : undefined} data-order-row-id={order.id}>
       <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
-      <td>{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}</td>
+      <td className="orders-list-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}{thumbSrc && <span className="orders-list-thumb"><AttachmentImage src={thumbSrc} alt="صورة الأوردر" /></span>}</td>
       <td>{handleClick ? <button type="button" className="cd-client-link" onClick={handleClick}>{clientName}</button> : clientName}</td>
       <td>{orderDisplayType(order)}</td>
       <td>{orderDisplayLogo(order)}</td>
@@ -4375,6 +4431,50 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function AttachmentImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => { setStatus("loading"); }, [src, attempt]);
+  const isInline = src.startsWith("data:") || src.startsWith("blob:");
+  const retry = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    setAttempt((current) => current + 1);
+  };
+  return (
+    <>
+      <div className={`attachment-thumb${className ? ` ${className}` : ""}${status === "loaded" ? " has-image" : ""}`}>
+        {status === "loading" && <div className="attachment-loading"><Loader2 size={16} className="spin" /><span>جارٍ التحميل…</span></div>}
+        {status === "error" && (
+          <div className="attachment-retry">
+            <ImageOff size={16} />
+            <span>تعذر تحميل الصورة</span>
+            <button type="button" className="ghost-btn compact" onClick={retry}><RefreshCw size={12} /> إعادة المحاولة</button>
+          </div>
+        )}
+        {status !== "error" && (
+          <img
+            key={`${src}-${attempt}`}
+            src={src}
+            alt={alt}
+            loading="lazy"
+            className={`upload-preview${status === "loading" ? " upload-preview-hidden" : ""}`}
+            onClick={() => { if (status === "loaded") setPreviewOpen(true); }}
+            onLoad={() => { if (!isInline) setStatus("loaded"); else setStatus("loaded"); }}
+            onError={() => setStatus("error")}
+          />
+        )}
+      </div>
+      {previewOpen && status === "loaded" && (
+        <div className="attachment-lightbox" onClick={() => setPreviewOpen(false)} role="dialog" aria-label={`معاينة ${alt}`}>
+          <button className="attachment-lightbox-close" onClick={() => setPreviewOpen(false)} aria-label="إغلاق المعاينة"><X size={20} /></button>
+          <img src={src} alt={alt} onClick={(event) => event.stopPropagation()} />
+        </div>
+      )}
+    </>
+  );
+}
+
 function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, error, disabled, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -4408,7 +4508,7 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       </div>
       {value && (
         <div className="image-preview-box">
-          <a href={value} target="_blank" aria-label={`معاينة ${label}`}><img className="upload-preview" src={value} alt={`معاينة ${label}`} /></a>
+          <AttachmentImage src={value} alt={`معاينة ${label}`} />
         </div>
       )}
       <div className="image-file-meta">

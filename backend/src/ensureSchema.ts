@@ -167,6 +167,23 @@ async function syncOrdersTriggers(log: (msg: string) => void) {
   );
 }
 
+async function syncPhotosTable(log: (msg: string) => void) {
+  await guarded(
+    () => query(`create table if not exists photos (
+      id uuid primary key default gen_random_uuid(),
+      original_name text not null default '',
+      stored_name text not null default '',
+      mime_type text not null default 'image/jpeg',
+      size integer not null default 0,
+      data bytea,
+      uploaded_by uuid references users(id) on delete set null,
+      created_at timestamptz not null default now()
+    )`),
+    log,
+    "photos table drift",
+  );
+}
+
 /**
  * Repairs schema drift on an existing database. Runs on every boot after the
  * full bootstrap: it cheaply diffs the orders table/catalog and adds whatever
@@ -179,6 +196,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncWorkStageConstraint(log);
   await syncOrderStatusEnum(log);
   await syncOrdersTriggers(log);
+  await syncPhotosTable(log);
 }
 
 /**

@@ -267,6 +267,17 @@ create table if not exists order_files (
   created_at timestamptz not null default now()
 );
 
+create table if not exists photos (
+  id uuid primary key default gen_random_uuid(),
+  original_name text not null default '',
+  stored_name text not null default '',
+  mime_type text not null default 'image/jpeg',
+  size integer not null default 0,
+  data bytea,
+  uploaded_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists machine_assignments (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null,

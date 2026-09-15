@@ -1254,16 +1254,39 @@ app.post("/api/uploads", requireAuth, upload.single("file"), async (req, res) =>
   if (!file) return res.status(400).json({ message: "File required" });
   const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
   const storedName = `${file.filename}${ext}`;
-  fs.renameSync(file.path, path.join(config.uploadDir, storedName));
+  const bytes = fs.readFileSync(file.path);
+  try { fs.unlinkSync(file.path); } catch { /* temp cleanup best-effort */ }
+  const result = await query<{ id: string }>(
+    `insert into photos (original_name, stored_name, mime_type, size, data, uploaded_by) values ($1,$2,$3,$4,$5,$6) returning id`,
+    [sanitizeFileName(file.originalname), storedName, file.mimetype, file.size, bytes, req.user!.id],
+  );
+  const id = result.rows[0].id;
   res.status(201).json({
-    url: `/api/files/${encodeURIComponent(storedName)}`,
+    url: `/api/photos/${id}`,
+    id,
     name: sanitizeFileName(file.originalname),
     mimeType: file.mimetype,
     size: file.size,
   });
 });
 
-app.get("/api/files/:name", (req, res) => {
+app.get("/api/photos/:id", requireAuth, async (req, res) => {
+  const id = param(req.params.id);
+  try {
+    const { rows } = await query<{ data: Buffer; mime_type: string; size: number }>(
+      "select data, mime_type, size from photos where id = $1", [id],
+    );
+    if (!rows[0]?.data) return res.status(404).json({ message: "Photo not found" });
+    res.setHeader("Content-Type", rows[0].mime_type || "image/jpeg");
+    res.setHeader("Content-Length", rows[0].size);
+    res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+    res.send(rows[0].data);
+  } catch {
+    return res.status(404).json({ message: "Photo not found" });
+  }
+});
+
+app.get("/api/files/:name", requireAuth, (req, res) => {
   const name = param(req.params.name);
   const safe = path.basename(name);
   const filePath = path.join(config.uploadDir, safe);
