@@ -6340,12 +6340,11 @@ tr.ws-row-highlight td {
 
 /* ============================================================================
    Sidebar + header redesign (flat vertical menu, dark navy)
+   Desktop layout: fixed right sidebar + content offset via margin/width
    ========================================================================== */
 @media (min-width: 1025px) {
-  .app { grid-template-columns: 220px minmax(0, 1fr) !important; }
   .app { --sidebar-width: 220px; }
-  .sidebar { grid-column: 1; grid-row: 1; }
-  .content { grid-column: 2; grid-row: 1; width: auto !important; max-width: none !important; margin-right: 0 !important; }
+  .content { width: calc(100% - var(--sidebar-width)) !important; max-width: calc(100% - var(--sidebar-width)) !important; margin-right: var(--sidebar-width) !important; margin-left: 0 !important; }
 }
 
 .sidebar { background: #08243D !important; }
