@@ -31,29 +31,33 @@ export type CustomerTransactionRow = {
 };
 
 export async function listTransactions(
-  customerId: string,
+  customerId: string | null,
   filters: { from?: string; to?: string; logo?: string; entryType?: string; q?: string; limit?: number; offset?: number },
 ): Promise<{ transactions: CustomerTransactionRow[]; total: number; totalDebit: number; totalCredit: number; openingDebit: number; openingCredit: number }> {
-  const params: unknown[] = [customerId];
-  const conditions: string[] = ["t.customer_id=$1"];
+  const params: unknown[] = [];
+  const conditions: string[] = [];
 
+  if (customerId) { params.push(customerId); conditions.push(`t.customer_id=$${params.length}`); }
   if (filters.from) { params.push(filters.from); conditions.push(`t.txn_date >= $${params.length}`); }
   if (filters.to) { params.push(filters.to); conditions.push(`t.txn_date <= $${params.length}`); }
   if (filters.logo) { params.push(filters.logo); conditions.push(`t.logo = $${params.length}`); }
   if (filters.entryType) { params.push(filters.entryType); conditions.push(`t.entry_type = $${params.length}`); }
   if (filters.q) { params.push(`%${filters.q}%`); conditions.push(`(t.description ilike $${params.length})`); }
 
-  const where = conditions.join(" and ");
+  const where = conditions.length ? conditions.join(" and ") : "true";
 
   // Opening balance: sum of earlier transactions when a period start is set
   let openingDebit = 0;
   let openingCredit = 0;
   if (filters.from) {
+    const openingParams: unknown[] = [filters.from];
+    const openingConditions: string[] = [`t.txn_date < $${openingParams.length}`];
+    if (customerId) { openingParams.push(customerId); openingConditions.push(`t.customer_id=$${openingParams.length}`); }
     const { rows } = await query<{ debit: string; credit: string }>(
       `select coalesce(sum(debit),0) as debit, coalesce(sum(credit),0) as credit
        from customer_account_transactions t
-       where t.customer_id=$1 and t.txn_date < $2`,
-      [customerId, filters.from],
+       where ${openingConditions.join(" and ")}`,
+      openingParams,
     );
     openingDebit = Number(rows[0]?.debit ?? 0);
     openingCredit = Number(rows[0]?.credit ?? 0);

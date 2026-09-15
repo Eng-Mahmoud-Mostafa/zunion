@@ -1389,6 +1389,19 @@ app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper"
   res.json({ orders: rows });
 });
 
+app.get("/api/customer-accounts/transactions", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const result = await listTransactions(null, {
+    from: String(req.query.from ?? "") || undefined,
+    to: String(req.query.to ?? "") || undefined,
+    logo: String(req.query.logo ?? "") || undefined,
+    entryType: String(req.query.entry_type ?? "") || undefined,
+    q: String(req.query.q ?? "") || undefined,
+    limit: Number(String(req.query.limit ?? "200") || 200),
+    offset: Number(String(req.query.offset ?? "0") || 0),
+  });
+  res.json(result);
+});
+
 app.get("/api/customer-accounts/:id", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const customerId = param(req.params.id);
   const customer = await query("select * from customers where id=$1", [customerId]);

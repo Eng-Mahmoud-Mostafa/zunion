@@ -146,12 +146,13 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   const logoOptions = useMemo(() => {
     const seen = new Set<string>();
     const values: string[] = [];
-    for (const order of customerOrders) {
+    const source = selectedCustomer ? customerOrders : orders;
+    for (const order of source) {
       const value = String(order.logo_place || order.logo_status || "").trim();
       if (value && !seen.has(value)) { seen.add(value); values.push(value); }
     }
     return values;
-  }, [customerOrders]);
+  }, [customerOrders, orders, selectedCustomer]);
 
   const sortedCustomers = useMemo(
     () => [...customers].sort((a, b) => a.client_name.localeCompare(b.client_name, "ar")),
@@ -159,10 +160,6 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   );
 
   useEffect(() => {
-    if (!customerId) {
-      setData(null);
-      return;
-    }
     let active = true;
     setLoading(true);
     setError("");
@@ -173,7 +170,10 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     if (entryType) query.set("entry_type", entryType);
     if (q.trim()) query.set("q", q.trim());
     const suffix = query.toString() ? `?${query.toString()}` : "";
-    backendJson<StatementResponse>(`/api/customer-accounts/${encodeURIComponent(customerId)}/transactions${suffix}`)
+    const endpoint = customerId
+      ? `/api/customer-accounts/${encodeURIComponent(customerId)}/transactions${suffix}`
+      : `/api/customer-accounts/transactions${suffix}`;
+    backendJson<StatementResponse>(endpoint)
       .then((result) => { if (active) setData(result); })
       .catch((err) => { if (active) { setData(null); setError(err instanceof Error ? err.message : "تعذر تحميل الكشف."); } })
       .finally(() => { if (active) setLoading(false); });
@@ -196,6 +196,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   const totalQuantity = useMemo(() => rows.reduce((sum, row) => sum + (row.entry_type === "charge" ? Number(row.quantity || 0) : 0), 0), [rows]);
 
   function resetFilters() {
+    setCustomerId("");
     setFrom("");
     setTo("");
     setLogo("");
@@ -218,7 +219,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
         .st-report .totals td{background:#fff4f5;font-weight:800;color:#062747 !important;border-top:2px solid #062747}
       </style>
       <div class="st-report">
-        <h2>كشف حساب ${printableCell(selectedCustomer?.client_name ?? "")}</h2>
+        <h2>كشف حساب ${printableCell(selectedCustomer?.client_name ?? "جميع العملاء")}</h2>
         <div class="st-meta">${printableCell(selectedCustomer?.client_code ? `كود العميل: ${selectedCustomer.client_code}` : "")}${selectedCustomer?.phone ? ` - التليفون: ${selectedCustomer.phone}` : ""}${from || to ? `<br>الفترة: ${printableCell(from ? formatDateArabic(from + "T00:00:00") : "البداية")} إلى ${printableCell(to ? formatDateArabic(to + "T00:00:00") : "الآن")}` : ""}</div>
         <table>
           <thead><tr><th>التاريخ</th><th>رقم الأوردر</th><th>البيان</th><th>اللوجو</th><th>العدد</th><th>السعر</th><th>مدين</th><th>دائن</th><th>رصيد نهائي</th></tr></thead>
@@ -248,7 +249,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     if (!window.confirm(`حذف العملية رقم ${txn.order_number || txn.id}؟`)) return;
     setBusy(true);
     try {
-      await backendJson(`/api/customer-accounts/transactions/${encodeURIComponent(txn.id)}?customer_id=${encodeURIComponent(customerId)}`, { method: "DELETE" });
+      await backendJson(`/api/customer-accounts/transactions/${encodeURIComponent(txn.id)}?customer_id=${encodeURIComponent(txn.customer_id)}`, { method: "DELETE" });
       setMessage("تم حذف العملية.");
       setSearchTick((tick) => tick + 1);
     } catch (err) {
@@ -268,7 +269,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
       <div className="ca-customer-row">
         <label className="ca-customer-button">العميل حساب
           <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setSearchTick((tick) => tick + 1); }}>
-            <option value="" disabled hidden>اختر العميل</option>
+            <option value="">الكل / جميع العملاء</option>
             {sortedCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
           </select>
         </label>
@@ -285,26 +286,11 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
         </div>
       </div>
 
-      {!customerId && !loading && (
-        <section className="panel">
-          <h3>كشف حساب العميل</h3>
-          <p className="muted">اختر عميلاً لعرض العمليات وكشف حسابه مع الأرصدة المالية.</p>
-        </section>
-      )}
-
-      {customerId && !selectedCustomer && !loading && (
-        <section className="panel">
-          <h3>العميل غير موجود</h3>
-          <p className="muted">تعذر العثور على بيانات العميل المحدد.</p>
-        </section>
-      )}
-
-      {customerId && selectedCustomer && (
+      {loading && !data && <p className="muted">جاري تحميل الكشف...</p>}
+      {!data && !loading && error && <ErrorText message={error} />}
+      {!data && !loading && !error && <p className="muted">لا توجد بيانات.</p>}
+      {data && (<>
         <div className="ca-body">
-          {loading && !data && <p className="muted">جاري تحميل الكشف...</p>}
-          {!data && !loading && error && <ErrorText message={error} />}
-          {!data && !loading && !error && <p className="muted">لا توجد بيانات.</p>}
-          {data && (<>
           <div className="ca-cards">
             <div className="ca-card ca-card-debit"><div className="ca-card-copy"><span>مدين (شغل)</span><strong>{accountMoney(totalDebit)}</strong></div><div className="ca-card-icon"><Briefcase size={24} /></div></div>
             <div className="ca-card ca-card-credit"><div className="ca-card-copy"><span>دائن (دفعات)</span><strong>{accountMoney(totalCredit)}</strong></div><div className="ca-card-icon"><Banknote size={24} /></div></div>
@@ -332,7 +318,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
           )}
 
           <div className="ca-actions">
-            <button type="button" className="ca-btn ca-btn-add" onClick={() => setModal(true)}><Plus size={18} /> إضافة عملية</button>
+            <button type="button" className="ca-btn ca-btn-add" onClick={() => { if (!selectedCustomer) { setMessage("اختر عميلاً أولاً لإضافة عملية"); return; } setModal(true); }}><Plus size={18} /> إضافة عملية</button>
             <button type="button" className="ca-btn ca-btn-search" onClick={() => setSearchTick((tick) => tick + 1)}><Search size={16} /> بحث</button>
             <button type="button" className="ca-btn ca-btn-print" onClick={printStatement}><Printer size={16} /> طباعة</button>
           </div>
@@ -374,10 +360,8 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
               </table>
             </div>
           </div>
-          </>)}
         </div>
-      )}
-
+        </>)}
       {modal && selectedCustomer && <TransactionModal customer={selectedCustomer} orders={customerOrders} logos={logoOptions} onClose={closeModal} onSaved={() => { setModal(false); setMessage(""); setSearchTick((tick) => tick + 1); }} />}
     </div>
   );
