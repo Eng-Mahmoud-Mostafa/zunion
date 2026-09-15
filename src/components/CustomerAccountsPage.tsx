@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Banknote, Briefcase, Plus, Printer, RotateCcw, Search, Trash2, Wallet } from "lucide-react";
+import { Banknote, Briefcase, Calendar, Plus, Printer, RotateCcw, Search, Trash2, Wallet } from "lucide-react";
 import { formatDateArabic, normalizeDigitsToEnglish } from "../utils/formatters";
 
 type AccountCustomer = {
@@ -70,10 +70,17 @@ function round2(value: number) {
 
 function accountMoney(value: unknown) {
   const n = Number(value ?? 0);
-  return normalizeDigitsToEnglish(new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(n) ? n : 0));
+  const rounded = Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
+  return normalizeDigitsToEnglish(formatPlainNumber(rounded));
+}
+
+function formatPlainNumber(value: number) {
+  const text = String(value);
+  if (text.includes(".")) {
+    const stripped = text.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+    return stripped;
+  }
+  return text;
 }
 
 function backToApiDate(value: string) {
@@ -258,6 +265,15 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
 
   return (
     <div className="stack ca-screen">
+      <div className="ca-customer-row">
+        <label className="ca-customer-button">العميل حساب
+          <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setSearchTick((tick) => tick + 1); }}>
+            <option value="" disabled hidden>اختر العميل</option>
+            {sortedCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
+          </select>
+        </label>
+      </div>
+
       <div className="ca-title-row">
         <div>
           <h2>العمليات</h2>
@@ -267,12 +283,6 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
             <span className="ca-crumb-current">العمليات</span>
           </div>
         </div>
-        <label className="ca-customer-picker">العميل
-          <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setSearchTick((tick) => tick + 1); }}>
-            <option value="" disabled hidden>اختر العميل</option>
-            {sortedCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
-          </select>
-        </label>
       </div>
 
       {!customerId && !loading && (
@@ -296,22 +306,22 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
           {!data && !loading && !error && <p className="muted">لا توجد بيانات.</p>}
           {data && (<>
           <div className="ca-cards">
-            <div className="ca-card ca-card-debit"><div className="ca-card-icon"><Briefcase size={24} /></div><div className="ca-card-copy"><span>مدين (شغل)</span><strong>{accountMoney(totalDebit)}</strong></div></div>
-            <div className="ca-card ca-card-credit"><div className="ca-card-icon"><Banknote size={24} /></div><div className="ca-card-copy"><span>دائن (دفعات)</span><strong>{accountMoney(totalCredit)}</strong></div></div>
-            <div className="ca-card ca-card-balance"><div className="ca-card-icon"><Wallet size={24} /></div><div className="ca-card-copy"><span>رصيد نهائي</span><strong>{accountMoney(finalBalance)}</strong></div></div>
+            <div className="ca-card ca-card-debit"><div className="ca-card-copy"><span>مدين (شغل)</span><strong>{accountMoney(totalDebit)}</strong></div><div className="ca-card-icon"><Briefcase size={24} /></div></div>
+            <div className="ca-card ca-card-credit"><div className="ca-card-copy"><span>دائن (دفعات)</span><strong>{accountMoney(totalCredit)}</strong></div><div className="ca-card-icon"><Banknote size={24} /></div></div>
+            <div className="ca-card ca-card-balance"><div className="ca-card-copy"><span>رصيد نهائي</span><strong>{accountMoney(finalBalance)}</strong></div><div className="ca-card-icon"><Wallet size={24} /></div></div>
           </div>
 
           {error && <ErrorText message={error} />}
           {message && <p className="ca-message">{message}</p>}
 
           <div className="ca-filters">
-            <div className="ca-filter"><span>من تاريخ</span><input type="date" value={normalizeDigitsToEnglish(from)} onChange={(event) => setFrom(normalizeDigitsToEnglish(event.target.value))} /></div>
-            <div className="ca-filter"><span>إلى تاريخ</span><input type="date" value={normalizeDigitsToEnglish(to)} onChange={(event) => setTo(normalizeDigitsToEnglish(event.target.value))} /></div>
+            <div className="ca-filter"><span>من تاريخ</span><div className="ca-date-wrap"><Calendar size={15} /><input type="date" value={normalizeDigitsToEnglish(from)} onChange={(event) => setFrom(normalizeDigitsToEnglish(event.target.value))} /></div></div>
+            <div className="ca-filter"><span>إلى تاريخ</span><div className="ca-date-wrap"><Calendar size={15} /><input type="date" value={normalizeDigitsToEnglish(to)} onChange={(event) => setTo(normalizeDigitsToEnglish(event.target.value))} /></div></div>
             <div className="ca-filter"><span>بيان</span><select value={logo} onChange={(event) => setLogo(event.target.value)}><option value="">الكل</option>{logoOptions.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
-            <div className="ca-filter"><span>بحث في البيان</span><input value={normalizeDigitsToEnglish(q)} onChange={(event) => setQ(normalizeDigitsToEnglish(event.target.value))} placeholder="إبحث في البيان" /></div>
+            <div className="ca-filter"><span>بحث في البيان</span><div className="ca-date-wrap"><Search size={15} /><input value={normalizeDigitsToEnglish(q)} onChange={(event) => setQ(normalizeDigitsToEnglish(event.target.value))} placeholder="إبحث في البيان" /></div></div>
             <div className="ca-actions">
-              <button type="button" className="ca-btn ca-btn-ghost" onClick={resetFilters}><RotateCcw size={16} /> مسح الفلاتر</button>
-              <button type="button" className="ca-btn ca-btn-ghost" onClick={() => setAdvanced((value) => !value)}>بحث متقدم</button>
+              <button type="button" className="ca-btn ca-btn-search" onClick={() => setAdvanced((value) => !value)}><Search size={16} /> بحث متقدم</button>
+              <button type="button" className="ca-btn ca-btn-print" onClick={resetFilters}><RotateCcw size={16} /> مسح الفلاتر</button>
             </div>
           </div>
 
@@ -343,8 +353,8 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
                       <td>{row.logo || "—"}</td>
                       <td className="num">{row.entry_type === "charge" ? formatNumberLocal(row.quantity) : "—"}</td>
                       <td className="num">{row.entry_type === "charge" ? accountMoney(row.price) : "—"}</td>
-                      <td className="num ca-debit">{row.debit ? accountMoney(row.debit) : "—"}</td>
-                      <td className="num ca-credit">{row.credit ? accountMoney(row.credit) : "—"}</td>
+                      <td className="num ca-debit">{accountMoney(row.debit)}</td>
+                      <td className="num ca-credit">{row.entry_type === "payment" ? accountMoney(row.credit) : "—"}</td>
                       <td className="num ca-balance">{accountMoney(row.balance)}</td>
                       <td className="ca-actions-cell">{session.role === "Master" && <button type="button" className="ghost-btn compact ca-delete" onClick={() => deleteTransaction(row)} disabled={busy}><Trash2 size={14} /></button>}</td>
                     </tr>
@@ -378,7 +388,8 @@ function ErrorText({ message }: { message: string }) {
 }
 
 function formatNumberLocal(value: unknown) {
-  return normalizeDigitsToEnglish(new Intl.NumberFormat("en-US").format(Number(value ?? 0) || 0));
+  const n = Number(value ?? 0) || 0;
+  return normalizeDigitsToEnglish(Math.round(n * 100) / 100);
 }
 
 function TransactionModal({ customer, orders, logos, onClose, onSaved }: {

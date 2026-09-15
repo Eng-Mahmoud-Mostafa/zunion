@@ -6230,7 +6230,12 @@ tr.ws-row-highlight td {
    Modern ERP design language: dark navy #08243D, red #E30613, page bg #F5F6F8,
    borders #E5E7EB, main text #111827, secondary #6B7280.
    ========================================================================== */
-.ca-screen { display: flex; flex-direction: column; gap: 20px; }
+.ca-screen { display: flex; flex-direction: column; gap: 14px; }
+
+.ca-customer-row { display: flex; justify-content: flex-start; }
+.ca-customer-button { display: inline-flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; box-shadow: 0 2px 8px rgba(17, 24, 39, .06); color: #111827; padding: 12px 16px; font-size: 15px; font-weight: 800; cursor: pointer; }
+.ca-customer-button select { min-width: 240px; height: 38px; padding: 0 10px; border: 1px solid #E5E7EB; border-radius: 8px; background: #fff; color: #111827; font-weight: 700; font-size: 14px; cursor: pointer; }
+.ca-customer-button select:focus { outline: none; border-color: #08243D; box-shadow: 0 0 0 3px rgba(8, 36, 61, .1); }
 
 .ca-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .ca-title-row h2 { margin: 0; color: #08243D; font-size: 26px; font-weight: 900; }
@@ -6238,15 +6243,10 @@ tr.ws-row-highlight td {
 .ca-breakcrumbs .ca-crumb-sep { color: #9CA3AF; }
 .ca-breakcrumbs .ca-crumb-current { color: #3B82F6; font-weight: 800; }
 
-.ca-customer-picker { display: flex; align-items: center; gap: 10px; }
-.ca-customer-picker label { font-size: 13px; font-weight: 800; color: #111827; }
-.ca-customer-picker select { min-width: 260px; height: 42px; padding: 0 12px; border: 1px solid #E5E7EB; border-radius: 10px; background: #fff; color: #111827; font-weight: 700; font-size: 13px; }
-.ca-customer-picker select:focus { outline: none; border-color: #08243D; box-shadow: 0 0 0 3px rgba(8, 36, 61, .1); }
-
-.ca-body { display: flex; flex-direction: column; gap: 18px; }
+.ca-body { display: flex; flex-direction: column; gap: 14px; }
 
 .ca-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-.ca-card { display: flex; flex-direction: row; align-items: center; gap: 14px; border-radius: 12px; padding: 20px 22px; min-height: 108px; position: relative; }
+.ca-card { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 14px; border-radius: 12px; padding: 18px 22px; min-height: 98px; position: relative; }
 .ca-card .ca-card-icon { width: 48px; height: 48px; flex: 0 0 auto; border-radius: 10px; display: grid; place-items: center; }
 .ca-card .ca-card-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ca-card .ca-card-copy span { font-size: 13px; font-weight: 700; opacity: .9; }
@@ -6267,12 +6267,15 @@ tr.ws-row-highlight td {
 .ca-card-balance strong { color: #fff; }
 .ca-card-balance .ca-card-copy span { opacity: .82; }
 
-.ca-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 16px 18px; background: #fff; border: 1px solid #E5E7EB; border-radius: 12px; }
+.ca-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; padding: 14px 16px; background: #fff; border: 1px solid #E5E7EB; border-radius: 12px; }
 .ca-filter { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 700; color: #111827; min-width: 0; }
 .ca-filter > span { color: #6B7280; }
-.ca-filter input, .ca-filter select { height: 40px; font-size: 13px; padding: 0 10px; border: 1px solid #E5E7EB; border-radius: 9px; background: #fff; color: #111827; font-weight: 600; }
-.ca-filter input { padding: 0 34px 0 10px; background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z'/%3E%3Ccircle cx='12' cy='10' r='3'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
-.ca-filter input:focus, .ca-filter select:focus { outline: none; border-color: #08243D; box-shadow: 0 0 0 3px rgba(8, 36, 61, .08); }
+.ca-filter select { height: 40px; font-size: 13px; padding: 0 10px; border: 1px solid #E5E7EB; border-radius: 9px; background: #fff; color: #111827; font-weight: 600; }
+.ca-filter select:focus { outline: none; border-color: #08243D; box-shadow: 0 0 0 3px rgba(8, 36, 61, .08); }
+.ca-date-wrap { display: flex; align-items: center; gap: 7px; height: 40px; padding: 0 10px; border: 1px solid #E5E7EB; border-radius: 9px; background: #fff; color: #6B7280; }
+.ca-date-wrap:focus-within { border-color: #08243D; box-shadow: 0 0 0 3px rgba(8, 36, 61, .08); }
+.ca-date-wrap input { border: 0; outline: none; background: transparent; height: 100%; font-size: 13px; font-weight: 600; color: #111827; padding: 0; min-height: 0; }
+.ca-date-wrap svg { flex: 0 0 auto; }
 
 .ca-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .ca-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 40px; padding: 0 18px; border-radius: 9px; font-size: 13px; font-weight: 800; cursor: pointer; border: 1px solid transparent; transition: background .15s, box-shadow .15s; white-space: nowrap; }
