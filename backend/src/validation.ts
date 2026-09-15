@@ -75,6 +75,8 @@ export const orderSchema = z.object({
     method: z.string().default(""),
     workOrder: z.boolean().optional().default(false),
     logo: z.boolean().optional().default(false),
+    workOrderUrl: z.string().optional().default(""),
+    logoUrl: z.string().optional().default(""),
   })).optional().default([]),
 }).superRefine((order, ctx) => {
   const isDraft = order.draft === true;

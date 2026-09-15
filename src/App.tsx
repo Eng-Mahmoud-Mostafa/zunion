@@ -643,10 +643,34 @@ function loadAudit(): AuditEntry[] {
   try {
     return JSON.parse(localStorage.getItem(auditKey) || "[]") as AuditEntry[];
   } catch {
-    localStorage.removeItem(auditKey);
+    try {
+      localStorage.removeItem(auditKey);
+    } catch {
+      // Ignore storage access errors.
+    }
     return [];
   }
 }
+
+function compactAuditValue(value: unknown, depth = 0): unknown {
+  if (value === null || typeof value !== "object") {
+    return typeof value === "string" && (value.startsWith("data:") || value.startsWith("blob:")) ? "" : value;
+  }
+  if (depth > 4) return value;
+  if (Array.isArray(value)) return value.slice(0, 30).map((item) => compactAuditValue(item, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string" && (entry.startsWith("data:") || entry.startsWith("blob:"))) {
+      out[key] = "";
+      continue;
+    }
+    out[key] = compactAuditValue(entry, depth + 1);
+  }
+  return out;
+}
+
+const maxAuditEntries = 200;
+const maxAuditBytes = 500 * 1024;
 
 function addAudit(session: Session | null, action: string, entityType: string, entityId?: string, oldValue?: unknown, newValue?: unknown) {
   const entry: AuditEntry = {
@@ -656,12 +680,57 @@ function addAudit(session: Session | null, action: string, entityType: string, e
     action,
     entity_type: entityType,
     entity_id: entityId,
-    old_value: oldValue,
-    new_value: newValue,
+    old_value: oldValue === undefined ? undefined : compactAuditValue(oldValue),
+    new_value: newValue === undefined ? undefined : compactAuditValue(newValue),
     created_at: new Date().toISOString(),
   };
-  localStorage.setItem(auditKey, JSON.stringify([entry, ...loadAudit()].slice(0, 500)));
+  const next = [entry, ...loadAudit()].slice(0, maxAuditEntries);
+  try {
+    localStorage.setItem(auditKey, JSON.stringify(next));
+  } catch {
+    // Quota exceeded: drop oldest entries until it fits; never throw.
+    try {
+      const trimmed = next.slice(0, Math.max(1, Math.floor(next.length / 2)));
+      while (trimmed.length > 1 && JSON.stringify(trimmed).length > maxAuditBytes) trimmed.pop();
+      localStorage.setItem(auditKey, JSON.stringify(trimmed));
+    } catch {
+      try {
+        const minimal = [entry];
+        while (minimal.length > 1 && JSON.stringify(minimal).length > maxAuditBytes) minimal.pop();
+        localStorage.setItem(auditKey, JSON.stringify(minimal));
+      } catch {
+        try {
+          localStorage.removeItem(auditKey);
+        } catch {
+          // Storage completely unavailable; audit is best-effort only.
+        }
+      }
+    }
+  }
 }
+
+function migrateLegacyStorage() {
+  // Compact the audit cache (the source of the localStorage quota error) so any
+  // previously stored base64 image payloads are dropped from history entries.
+  try {
+    const audit = loadAudit().map((entry) => ({
+      ...entry,
+      old_value: entry.old_value === undefined ? undefined : compactAuditValue(entry.old_value),
+      new_value: entry.new_value === undefined ? undefined : compactAuditValue(entry.new_value),
+    }));
+    if (audit.length) {
+      localStorage.setItem(auditKey, JSON.stringify(audit.slice(0, maxAuditEntries)));
+    }
+  } catch {
+    try {
+      localStorage.removeItem(auditKey);
+    } catch {
+      // Ignore.
+    }
+  }
+}
+
+migrateLegacyStorage();
 
 type RecentOrderEntry = { order_number: string; client_name: string; created_at: string };
 type RecentCustomerEntry = { code: string; name: string; created_at: string };
@@ -679,7 +748,11 @@ function addRecentSearch(query: string) {
   const clean = query.trim();
   if (!clean) return;
   const next = [clean, ...loadRecentSearches().filter((item) => item.toLowerCase() !== clean.toLowerCase())].slice(0, 8);
-  localStorage.setItem(recentSearchesKey, JSON.stringify(next));
+  try {
+    localStorage.setItem(recentSearchesKey, JSON.stringify(next));
+  } catch {
+    // Best-effort.
+  }
 }
 function loadRecentOrders(): RecentOrderEntry[] {
   try {
@@ -690,7 +763,11 @@ function loadRecentOrders(): RecentOrderEntry[] {
 }
 function addRecentOrder(entry: RecentOrderEntry) {
   const next = [entry, ...loadRecentOrders().filter((item) => item.order_number !== entry.order_number)].slice(0, 6);
-  localStorage.setItem(recentOrdersKey, JSON.stringify(next));
+  try {
+    localStorage.setItem(recentOrdersKey, JSON.stringify(next));
+  } catch {
+    // Best-effort.
+  }
 }
 function loadRecentCustomers(): RecentCustomerEntry[] {
   try {
@@ -701,7 +778,11 @@ function loadRecentCustomers(): RecentCustomerEntry[] {
 }
 function addRecentCustomer(entry: RecentCustomerEntry) {
   const next = [entry, ...loadRecentCustomers().filter((item) => item.code !== entry.code)].slice(0, 6);
-  localStorage.setItem(recentCustomersKey, JSON.stringify(next));
+  try {
+    localStorage.setItem(recentCustomersKey, JSON.stringify(next));
+  } catch {
+    // Best-effort.
+  }
 }
 function loadPinnedItems(): PinnedItem[] {
   try {
@@ -712,7 +793,11 @@ function loadPinnedItems(): PinnedItem[] {
   }
 }
 function savePinnedItems(items: PinnedItem[]) {
-  localStorage.setItem(pinnedItemsKey, JSON.stringify(items.slice(0, 20)));
+  try {
+    localStorage.setItem(pinnedItemsKey, JSON.stringify(items.slice(0, 20)));
+  } catch {
+    // Best-effort.
+  }
 }
 function togglePinnedItem(item: Omit<PinnedItem, "created_at">): boolean {
   const current = loadPinnedItems();
@@ -777,6 +862,35 @@ function fileToDataUrl(file: File) {
     reader.onerror = () => reject(new Error("حدث خطأ أثناء لصق الصورة"));
     reader.readAsDataURL(file);
   });
+}
+
+const maxImageDimension = 1280;
+const maxImageBytes = 2 * 1024 * 1024;
+const maxImageBytesMessage = "حجم الصورة كبير جداً. الحد الأقصى 2 ميجابايت بعد الضغط.";
+
+async function compressImageFile(file: Blob, name: string): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxImageDimension / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("حدث خطأ أثناء ضغط الصورة");
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const quality = file.size > maxImageBytes ? 0.75 : 0.9;
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((result) => (result ? resolve(result) : reject(new Error("حدث خطأ أثناء ضغط الصورة"))), "image/jpeg", quality);
+  });
+  return new File([blob], name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(",");
+  const mime = /data:(.*?)(;|$)/.exec(header)?.[1] || "image/jpeg";
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mime });
 }
 
 function normalizeInputDigits(event: React.FormEvent<HTMLElement>) {
@@ -1254,6 +1368,23 @@ function orderFromApi(row: Record<string, unknown>): Order {
     notes: String(row.notes ?? ""),
     created_at: String(row.created_at ?? new Date().toISOString()),
     updated_at: String(row.updated_at ?? row.created_at ?? new Date().toISOString()),
+    operationItems: (() => {
+      const attachments = Array.isArray(row.operation_attachments) ? row.operation_attachments : (() => {
+        try {
+          const parsed = JSON.parse(String(row.operation_attachments ?? "[]")) as unknown[];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+      return (attachments as { method?: unknown; workOrder?: unknown; logo?: unknown; workOrderUrl?: unknown; logoUrl?: unknown }[])
+        .filter((item) => item && (String(item.method ?? "").trim() || item.workOrder === true || item.logo === true))
+        .map((item) => ({
+          method: String(item.method ?? "").trim(),
+          logoImage: String(item.logoUrl ?? ""),
+          workOrderImage: String(item.workOrderUrl ?? ""),
+        } as OperationItem));
+    })(),
   });
   return order;
 }
@@ -1293,7 +1424,13 @@ function orderToApi(order: Order) {
     draft: calculated.draft === true,
     operation_attachments: (calculated.operationItems || [])
       .filter((item) => item.method.trim() || item.logoImage || item.workOrderImage)
-      .map((item) => ({ method: item.method.trim(), workOrder: Boolean(item.workOrderImage), logo: Boolean(item.logoImage) })),
+      .map((item) => ({
+        method: item.method.trim(),
+        workOrder: Boolean(item.workOrderImage),
+        logo: Boolean(item.logoImage),
+        workOrderUrl: item.workOrderImage && !item.workOrderImage.startsWith("data:") ? item.workOrderImage : "",
+        logoUrl: item.logoImage && !item.logoImage.startsWith("data:") ? item.logoImage : "",
+      })),
   };
 }
 
@@ -1372,9 +1509,17 @@ function useOrders(session: Session | null) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify(orders.map(orderForStorage)));
+      localStorage.setItem(storageKey, JSON.stringify(orders.map(orderForStorage).slice(0, 300)));
     } catch {
-      localStorage.removeItem(storageKey);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(orders.map(orderForStorage).slice(0, 100)));
+      } catch {
+        try {
+          localStorage.removeItem(storageKey);
+        } catch {
+          // Storage unavailable.
+        }
+      }
     }
   }, [orders]);
 
@@ -1442,7 +1587,15 @@ function useStoredList<T>(key: string, fallback: T[]) {
     }
   });
   useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(items));
+    try {
+      localStorage.setItem(key, JSON.stringify(items.slice(0, 300)));
+    } catch {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // Storage unavailable.
+      }
+    }
   }, [items, key]);
   return { items, setItems };
 }
@@ -3646,7 +3799,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       return;
     }
     if (!clipboardImageTypes.includes(file.type)) {
-      setImageMessage(index, key, "نوع الصورة غير مدعوم");
+      setImageMessage(index, key, "نوع الصورة غير مدعوم. اختر صورة PNG أو JPG أو WebP");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -3654,7 +3807,17 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       return;
     }
     try {
-      const dataUrl = await fileToDataUrl(file);
+      let target: Blob = file;
+      try {
+        target = await compressImageFile(file, file.name);
+      } catch {
+        // Fall back to the original file if compression is unsupported.
+      }
+      if (target.size > maxImageBytes) {
+        setImageMessage(index, key, maxImageBytesMessage);
+        return;
+      }
+      const dataUrl = await fileToDataUrl(target as File);
       updateOperationItem(index, {
         [key]: dataUrl,
         [key === "logoImage" ? "logoFileName" : "workOrderFileName"]: file.name,
@@ -6583,19 +6746,60 @@ function ZunionApp() {
     if (nextView !== "editOrder") setEditingOrderNumber(null);
   }
 
+  async function uploadOrderImages(order: Order): Promise<Order> {
+    const items = (order.operationItems || []).filter((item) => item.method.trim() || item.logoImage || item.workOrderImage);
+    if (!items.length) return order;
+    const nextItems = await Promise.all(items.map(async (item) => {
+      if (!item.logoImage.startsWith("data:") && !item.workOrderImage.startsWith("data:")) return item;
+      const uploaded = { ...item };
+      if (uploaded.logoImage.startsWith("data:")) {
+        const result = await backendJson<{ url: string }>("/api/uploads", {
+          method: "POST",
+          body: (() => {
+            const form = new FormData();
+            form.append("file", new File([dataUrlToBlob(uploaded.logoImage)], uploaded.logoFileName || "logo.jpg", { type: "image/jpeg" }));
+            return form;
+          })(),
+        });
+        uploaded.logoImage = result.url;
+        uploaded.logoImageSource = "upload";
+      }
+      if (uploaded.workOrderImage.startsWith("data:")) {
+        const result = await backendJson<{ url: string }>("/api/uploads", {
+          method: "POST",
+          body: (() => {
+            const form = new FormData();
+            form.append("file", new File([dataUrlToBlob(uploaded.workOrderImage)], uploaded.workOrderFileName || "work-order.jpg", { type: "image/jpeg" }));
+            return form;
+          })(),
+        });
+        uploaded.workOrderImage = result.url;
+        uploaded.workOrderImageSource = "upload";
+      }
+      return uploaded;
+    }));
+    return { ...order, operationItems: nextItems };
+  }
+
   async function persistOrder(order: Order): Promise<Order> {
     const exists = orders.some((o) => o.id === order.id);
-    const body = JSON.stringify(orderToApi(order));
+    let orderWithRefs: Order;
+    try {
+      orderWithRefs = await uploadOrderImages(order);
+    } catch {
+      throw new Error("تعذر رفع صورة الأوردر. تحقق من الاتصال وأعد المحاولة.");
+    }
+    const body = JSON.stringify(orderToApi(orderWithRefs));
     if (exists) {
       try {
         await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body });
-        return order;
+        return orderWithRefs;
       } catch {
         // Fall back to idempotent create (handles orders that never reached the backend).
       }
     }
     const result = await backendJson<{ id: string }>("/api/orders", { method: "POST", body });
-    return { ...order, id: result.id };
+    return { ...orderWithRefs, id: result.id };
   }
 
   async function saveNew(order: Order) {

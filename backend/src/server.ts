@@ -1249,6 +1249,28 @@ app.get("/api/orders/:id/files/:fileId", requireAuth, async (req, res) => {
   res.download(path.join(config.uploadDir, rows[0].path), rows[0].original_name);
 });
 
+app.post("/api/uploads", requireAuth, upload.single("file"), async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ message: "File required" });
+  const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+  const storedName = `${file.filename}${ext}`;
+  fs.renameSync(file.path, path.join(config.uploadDir, storedName));
+  res.status(201).json({
+    url: `/api/files/${encodeURIComponent(storedName)}`,
+    name: sanitizeFileName(file.originalname),
+    mimeType: file.mimetype,
+    size: file.size,
+  });
+});
+
+app.get("/api/files/:name", (req, res) => {
+  const name = param(req.params.name);
+  const safe = path.basename(name);
+  const filePath = path.join(config.uploadDir, safe);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File not found" });
+  res.sendFile(filePath);
+});
+
 app.get("/api/customers", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const search = String(req.query.search ?? "");
   const params = search ? [`%${search}%`] : [];
