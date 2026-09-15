@@ -1703,6 +1703,17 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   res.status(500).json({ message: config.nodeEnv === "production" ? "Internal server error" : message });
 });
 
-app.listen(config.port, () => console.log(`Zunion API listening on ${config.port}`));
-
-ensureSchema().then(() => ensureSeededUsers({ forcePassword: false })).catch(() => undefined);
+async function start() {
+  try {
+    await ensureSchema();
+  } catch (error) {
+    console.error("Schema bootstrap failed; starting anyway.", error);
+  }
+  try {
+    await ensureSeededUsers({ forcePassword: false });
+  } catch (error) {
+    console.error("User seeding failed; starting anyway.", error);
+  }
+  app.listen(config.port, () => console.log(`Zunion API listening on ${config.port}`));
+}
+void start();
