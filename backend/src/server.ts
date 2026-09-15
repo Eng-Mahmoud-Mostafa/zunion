@@ -73,49 +73,6 @@ app.get("/api/health", async (_req, res) => {
   });
 });
 
-// TEMP: one-time data migration for customer accounts. Remove after running on live DB.
-app.post("/api/_migrate/customer-accounts", async (req, res) => {
-  const { migrateToken } = config;
-  if (!migrateToken) return res.status(404).json({ message: "Not found" });
-  const provided = String(req.headers["x-migrate-token"] ?? "");
-  if (provided !== migrateToken) return res.status(401).json({ message: "Unauthorized" });
-  try {
-    const { rowCount: created } = await query(`
-      create table if not exists customer_accounts (
-        id uuid primary key default gen_random_uuid(),
-        customer_id uuid not null unique,
-        opening_balance numeric not null default 0,
-        created_at timestamptz not null default now(),
-        updated_at timestamptz not null default now()
-      );
-      create table if not exists customer_account_transactions (
-        id uuid primary key default gen_random_uuid(),
-        account_id uuid not null,
-        customer_id uuid not null,
-        txn_date date not null,
-        entry_type text not null,
-        order_id uuid,
-        description text not null default '',
-        logo text not null default '',
-        quantity numeric not null default 0,
-        price numeric not null default 0,
-        debit numeric not null default 0,
-        credit numeric not null default 0,
-        client_key text,
-        created_by uuid references users(id) on delete set null,
-        created_at timestamptz not null default now()
-      );
-      create unique index if not exists customer_account_transactions_client_key_idx on customer_account_transactions (client_key) where client_key is not null;
-      create unique index if not exists customer_account_transactions_order_uniq on customer_account_transactions (order_id) where order_id is not null;
-      insert into customer_accounts (customer_id)
-      select c.id from customers c
-      where not exists (select 1 from customer_accounts a where a.customer_id = c.id);`);
-    res.status(200).json({ applied: true, accountsCreated: created ?? 0 });
-  } catch (error) {
-    res.status(500).json({ message: error instanceof Error ? error.message : "migration failed" });
-  }
-});
-
 const passwordCodeRate = new Map<string, number[]>();
 const resetAttemptRate = new Map<string, number[]>();
 const upload = multer({
