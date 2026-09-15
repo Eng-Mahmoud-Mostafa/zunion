@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Printer, RotateCcw, Search, Trash2 } from "lucide-react";
+import { Banknote, Briefcase, Plus, Printer, RotateCcw, Search, Trash2, Wallet } from "lucide-react";
 import { formatDateArabic, normalizeDigitsToEnglish } from "../utils/formatters";
 
 type AccountCustomer = {
@@ -186,6 +186,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   const totalCredit = Number(data?.totalCredit ?? 0);
   const openingBalance = Number(data?.openingDebit ?? 0) - Number(data?.openingCredit ?? 0);
   const finalBalance = rows.length ? rows[rows.length - 1].balance : openingBalance;
+  const totalQuantity = useMemo(() => rows.reduce((sum, row) => sum + (row.entry_type === "charge" ? Number(row.quantity || 0) : 0), 0), [rows]);
 
   function resetFilters() {
     setFrom("");
@@ -257,88 +258,115 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
 
   return (
     <div className="stack ca-screen">
-      <section className="panel">
-        <div className="panel-head">
-          <h2>حسابات العملاء</h2>
-          <label className="ca-customer-pick">العميل
-            <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setSearchTick((tick) => tick + 1); }}>
-              <option value="" disabled hidden>اختر العميل</option>
-              {sortedCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
-            </select>
-          </label>
-        </div>
-
-        {!customerId && !loading && (
-          <p className="muted">اختر عميلاً لعرض كشف حسابه.</p>
-        )}
-
-        {customerId && selectedCustomer && (
-          <div className="ca-body">
-            <div className="ca-cards">
-              <div className="ca-card ca-card-debit"><span>مدين (شغل)</span><strong>{accountMoney(totalDebit)}</strong></div>
-              <div className="ca-card ca-card-credit"><span>دائن (دفعات)</span><strong>{accountMoney(totalCredit)}</strong></div>
-              <div className="ca-card ca-card-balance"><span>رصيد نهائي</span><strong>{accountMoney(finalBalance)}</strong></div>
-            </div>
-
-            <div className="ca-filters">
-              <label>من تاريخ<input type="date" value={normalizeDigitsToEnglish(from)} onChange={(event) => setFrom(normalizeDigitsToEnglish(event.target.value))} /></label>
-              <label>إلى تاريخ<input type="date" value={normalizeDigitsToEnglish(to)} onChange={(event) => setTo(normalizeDigitsToEnglish(event.target.value))} /></label>
-              <label>اللوجو<select value={logo} onChange={(event) => setLogo(event.target.value)}><option value="">الكل</option>{logoOptions.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-              <label>بيان<input value={normalizeDigitsToEnglish(q)} onChange={(event) => setQ(normalizeDigitsToEnglish(event.target.value))} placeholder="بحث في البيان" /></label>
-              <button type="button" className="ghost-btn compact" onClick={() => setAdvanced((value) => !value)}>بحث متقدم</button>
-              <button type="button" className="ghost-btn compact" onClick={resetFilters}>مسح الفلاتر</button>
-              <button type="button" className="ca-btn ca-btn-search" onClick={() => setSearchTick((tick) => tick + 1)}><Search size={16} /> بحث</button>
-              <button type="button" className="ca-btn ca-btn-add" onClick={() => setModal(true)}><Plus size={16} /> إضافة عملية</button>
-              <button type="button" className="ca-btn ca-btn-print" onClick={printStatement}><Printer size={16} /> طباعة</button>
-            </div>
-
-            {advanced && (
-              <div className="ca-filters ca-advanced">
-                <label>نوع العملية<select value={entryType} onChange={(event) => setEntryType(event.target.value)}><option value="">الكل</option><option value="charge">شغل</option><option value="payment">دفعة</option></select></label>
-              </div>
-            )}
-
-            {message && <p className="ca-message">{message}</p>}
-            {error && <ErrorText message={error} />}
-
-            {loading ? <p className="muted">جاري تحميل الكشف...</p> : (
-              <div className="table-wrap ca-table-wrap">
-                <table className="ca-table">
-                  <thead>
-                    <tr>{["التاريخ", "رقم الأوردر", "البيان", "اللوجو", "العدد", "السعر", "مدين (شغل)", "دائن (دفعات)", "رصيد نهائي", ""].map((head) => <th key={head}>{head}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {rows.length === 0 && <tr><td colSpan={10}>لا توجد عمليات.</td></tr>}
-                    {rows.map((row) => (
-                      <tr key={row.id}>
-                        <td>{accountDay(row)}</td>
-                        <td>{row.order_number || "—"}</td>
-                        <td>{row.description || "—"}</td>
-                        <td>{row.logo || "—"}</td>
-                        <td className="num">{row.entry_type === "charge" ? formatNumberLocal(row.quantity) : "—"}</td>
-                        <td className="num">{row.entry_type === "charge" ? accountMoney(row.price) : "—"}</td>
-                        <td className="num ca-debit">{row.debit ? accountMoney(row.debit) : "—"}</td>
-                        <td className="num ca-credit">{row.credit ? accountMoney(row.credit) : "—"}</td>
-                        <td className="num ca-balance">{accountMoney(row.balance)}</td>
-                        <td className="actions">{session.role === "Master" && <button type="button" className="ghost-btn compact ca-delete" onClick={() => deleteTransaction(row)} disabled={busy}><Trash2 size={14} /></button>}</td>
-                      </tr>
-                    ))}
-                    {rows.length > 0 && (
-                      <tr className="ca-totals">
-                        <td colSpan={6}>الإجمالي</td>
-                        <td className="num">{accountMoney(totalDebit)}</td>
-                        <td className="num">{accountMoney(totalCredit)}</td>
-                        <td className="num">{accountMoney(finalBalance)}</td>
-                        <td />
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
+      <div className="ca-title-row">
+        <div>
+          <h2>العمليات</h2>
+          <div className="ca-breakcrumbs">
+            <span>الرئيسية</span>
+            <span className="ca-crumb-sep"><span>{"<"}</span></span>
+            <span className="ca-crumb-current">العمليات</span>
           </div>
-        )}
-      </section>
+        </div>
+        <label className="ca-customer-picker">العميل
+          <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setSearchTick((tick) => tick + 1); }}>
+            <option value="" disabled hidden>اختر العميل</option>
+            {sortedCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {!customerId && !loading && (
+        <section className="panel">
+          <h3>كشف حساب العميل</h3>
+          <p className="muted">اختر عميلاً لعرض العمليات وكشف حسابه مع الأرصدة المالية.</p>
+        </section>
+      )}
+
+      {customerId && !selectedCustomer && !loading && (
+        <section className="panel">
+          <h3>العميل غير موجود</h3>
+          <p className="muted">تعذر العثور على بيانات العميل المحدد.</p>
+        </section>
+      )}
+
+      {customerId && selectedCustomer && (
+        <div className="ca-body">
+          {loading && !data && <p className="muted">جاري تحميل الكشف...</p>}
+          {!data && !loading && error && <ErrorText message={error} />}
+          {!data && !loading && !error && <p className="muted">لا توجد بيانات.</p>}
+          {data && (<>
+          <div className="ca-cards">
+            <div className="ca-card ca-card-debit"><div className="ca-card-icon"><Briefcase size={24} /></div><div className="ca-card-copy"><span>مدين (شغل)</span><strong>{accountMoney(totalDebit)}</strong></div></div>
+            <div className="ca-card ca-card-credit"><div className="ca-card-icon"><Banknote size={24} /></div><div className="ca-card-copy"><span>دائن (دفعات)</span><strong>{accountMoney(totalCredit)}</strong></div></div>
+            <div className="ca-card ca-card-balance"><div className="ca-card-icon"><Wallet size={24} /></div><div className="ca-card-copy"><span>رصيد نهائي</span><strong>{accountMoney(finalBalance)}</strong></div></div>
+          </div>
+
+          {error && <ErrorText message={error} />}
+          {message && <p className="ca-message">{message}</p>}
+
+          <div className="ca-filters">
+            <div className="ca-filter"><span>من تاريخ</span><input type="date" value={normalizeDigitsToEnglish(from)} onChange={(event) => setFrom(normalizeDigitsToEnglish(event.target.value))} /></div>
+            <div className="ca-filter"><span>إلى تاريخ</span><input type="date" value={normalizeDigitsToEnglish(to)} onChange={(event) => setTo(normalizeDigitsToEnglish(event.target.value))} /></div>
+            <div className="ca-filter"><span>بيان</span><select value={logo} onChange={(event) => setLogo(event.target.value)}><option value="">الكل</option>{logoOptions.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
+            <div className="ca-filter"><span>بحث في البيان</span><input value={normalizeDigitsToEnglish(q)} onChange={(event) => setQ(normalizeDigitsToEnglish(event.target.value))} placeholder="إبحث في البيان" /></div>
+            <div className="ca-actions">
+              <button type="button" className="ca-btn ca-btn-ghost" onClick={resetFilters}><RotateCcw size={16} /> مسح الفلاتر</button>
+              <button type="button" className="ca-btn ca-btn-ghost" onClick={() => setAdvanced((value) => !value)}>بحث متقدم</button>
+            </div>
+          </div>
+
+          {advanced && (
+            <div className="ca-filters ca-advanced">
+              <div className="ca-filter"><span>نوع العملية</span><select value={entryType} onChange={(event) => setEntryType(event.target.value)}><option value="">الكل</option><option value="charge">شغل</option><option value="payment">دفعة</option></select></div>
+            </div>
+          )}
+
+          <div className="ca-actions">
+            <button type="button" className="ca-btn ca-btn-add" onClick={() => setModal(true)}><Plus size={18} /> إضافة عملية</button>
+            <button type="button" className="ca-btn ca-btn-search" onClick={() => setSearchTick((tick) => tick + 1)}><Search size={16} /> بحث</button>
+            <button type="button" className="ca-btn ca-btn-print" onClick={printStatement}><Printer size={16} /> طباعة</button>
+          </div>
+
+          <div className="ca-table-card">
+            <div className="ca-table-wrap">
+              <table className="ca-table">
+                <thead>
+                  <tr>{["التاريخ", "رقم الاوردر", "بيان", "اللوجو", "العدد", "السعر", "مدين (شغل)", "دائن (دفعات)", "رصيد نهائي", ""].map((head) => <th key={head}>{head}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 && <tr><td colSpan={10}>لا توجد عمليات.</td></tr>}
+                  {rows.map((row) => (
+                    <tr key={row.id}>
+                      <td>{accountDay(row)}</td>
+                      <td>{row.order_number || "—"}</td>
+                      <td>{row.description || "—"}</td>
+                      <td>{row.logo || "—"}</td>
+                      <td className="num">{row.entry_type === "charge" ? formatNumberLocal(row.quantity) : "—"}</td>
+                      <td className="num">{row.entry_type === "charge" ? accountMoney(row.price) : "—"}</td>
+                      <td className="num ca-debit">{row.debit ? accountMoney(row.debit) : "—"}</td>
+                      <td className="num ca-credit">{row.credit ? accountMoney(row.credit) : "—"}</td>
+                      <td className="num ca-balance">{accountMoney(row.balance)}</td>
+                      <td className="ca-actions-cell">{session.role === "Master" && <button type="button" className="ghost-btn compact ca-delete" onClick={() => deleteTransaction(row)} disabled={busy}><Trash2 size={14} /></button>}</td>
+                    </tr>
+                  ))}
+                  {rows.length > 0 && (
+                    <tr className="ca-totals">
+                      <td colSpan={4}>الإجمالي</td>
+                      <td className="num">{formatNumberLocal(totalQuantity)}</td>
+                      <td />
+                      <td className="num">{accountMoney(totalDebit)}</td>
+                      <td className="num">{accountMoney(totalCredit)}</td>
+                      <td className="num ca-balance">{accountMoney(finalBalance)}</td>
+                      <td />
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </>)}
+        </div>
+      )}
 
       {modal && selectedCustomer && <TransactionModal customer={selectedCustomer} orders={customerOrders} logos={logoOptions} onClose={closeModal} onSaved={() => { setModal(false); setMessage(""); setSearchTick((tick) => tick + 1); }} />}
     </div>

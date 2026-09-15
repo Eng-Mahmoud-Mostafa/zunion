@@ -6,6 +6,7 @@ import {
   ArrowUpDown,
   BadgeInfo,
   Banknote,
+  Bell,
   Building2,
   Calendar,
   CheckCircle,
@@ -16,12 +17,14 @@ import {
   Copy,
   FilePlus,
   FileText,
+  Home,
   Image,
   ImageOff,
   KeyRound,
   Landmark,
   LayoutGrid,
   Loader2,
+  LogOut,
   Mail,
   MapPin,
   Menu,
@@ -34,6 +37,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Settings,
   ShoppingBag,
   Star,
   Truck,
@@ -6688,54 +6692,27 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   );
 }
 
-type SidebarSubItemConfig = {
+type SidebarItemConfig = {
   id: View;
   label: string;
   visible: boolean;
-  icon?: LucideIcon;
-};
-
-type SidebarSectionConfig = {
-  id: string;
-  label: string;
   icon: LucideIcon;
-  items: SidebarSubItemConfig[];
 };
 
-function SidebarSubItem({ item, active, onSelect }: { item: SidebarSubItemConfig; active: boolean; onSelect: (view: View) => void }) {
+function SidebarItemButton({ item, active, onSelect }: { item: SidebarItemConfig; active: boolean; onSelect: (view: View) => void }) {
   const Icon = item.icon;
   return (
-    <button type="button" className={`sidebar-subitem${active ? " active" : ""}`} onClick={() => onSelect(item.id)}>
-      {Icon && <Icon size={16} />}
+    <button type="button" className={`sidebar-item${active ? " active" : ""}`} onClick={() => onSelect(item.id)}>
+      <Icon size={18} />
       <span>{item.label}</span>
     </button>
   );
 }
 
-function SidebarSection({ section, activeView, open, onToggle, onSelect }: { section: SidebarSectionConfig; activeView: View; open: boolean; onToggle: () => void; onSelect: (view: View) => void }) {
-  const Icon = section.icon;
-  const hasActiveItem = section.items.some((item) => item.id === activeView);
-  return (
-    <div className={`sidebar-section${open ? " open" : ""}${hasActiveItem ? " has-active" : ""}`}>
-      <button type="button" className="sidebar-parent" onClick={onToggle} aria-expanded={open}>
-        <span className="sidebar-parent-copy"><Icon size={22} /><span>{section.label}</span></span>
-        <span className="sidebar-toggle">{open ? "−" : "+"}</span>
-      </button>
-      <div className="sidebar-submenu">
-        <div className="sidebar-submenu-inner">
-          {section.items.map((item) => <SidebarSubItem key={item.id} item={item} active={item.id === activeView} onSelect={onSelect} />)}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSection, onSelect, onLogout, onCloseDrawer, onLogoClick }: {
-  sections: SidebarSectionConfig[];
+function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDrawer, onLogoClick }: {
+  items: SidebarItemConfig[];
   activeView: View;
-  openSection: string;
   drawerOpen: boolean;
-  onToggleSection: (sectionId: string) => void;
   onSelect: (view: View) => void;
   onLogout: () => void;
   onCloseDrawer: () => void;
@@ -6749,18 +6726,16 @@ function Sidebar({ sections, activeView, openSection, drawerOpen, onToggleSectio
           <BrandLogo className="sidebar-logo" />
         </button>
         <nav className="sidebar-menu" aria-label="القائمة الرئيسية">
-          {sections.map((section) => (
-            <SidebarSection
-              key={section.id}
-              section={section}
-              activeView={activeView}
-              open={openSection === section.id}
-              onToggle={() => onToggleSection(section.id)}
+          {items.map((item) => (
+            <SidebarItemButton
+              key={item.id}
+              item={item}
+              active={item.id === activeView}
               onSelect={onSelect}
             />
           ))}
         </nav>
-        <button className="sidebar-logout" type="button" onClick={onLogout}>تسجيل الخروج</button>
+        <button className="sidebar-logout" type="button" onClick={onLogout}><LogOut size={16} /><span>تسجيل الخروج</span></button>
       </aside>
       <button type="button" className="sidebar-overlay" aria-label="إغلاق القائمة" onClick={onCloseDrawer} />
     </>
@@ -6778,7 +6753,6 @@ function ZunionApp() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
   const [sessionReady, setSessionReady] = useState(!useServerAuth);
   const [view, setViewState] = useState<View>(() => viewFromHash());
-  const [openSection, setOpenSection] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [searchGoOrderId, setSearchGoOrderId] = useState<string | null>(null);
@@ -6955,85 +6929,32 @@ function ZunionApp() {
   const isFinishing = currentRole === "Finishing" || currentRole === "Finish";
   const can = (permission: PermissionKey) => hasPermission(session, permission);
   const canPrintCreatedOrder = hasPermission(session, "orders.print") || hasPermission(session, "operation.print");
-  const sidebarSections = useMemo<SidebarSectionConfig[]>(() => {
-    const sections: SidebarSectionConfig[] = [
-      {
-        id: "home",
-        label: "الرئيسية",
-        icon: ClipboardList,
-        items: [
-          { id: "new", label: "أوردر جديد", visible: can("orders.create"), icon: FilePlus },
-          { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
-          { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
-          { id: "search", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
-        ],
-      },
-      {
-        id: "search",
-        label: "بحث",
-        icon: Search,
-        items: [
-          { id: "search", label: "بحث", visible: can("search.use") || can("orders.view"), icon: Search },
-          { id: "customers", label: "العملاء", visible: can("customers.view"), icon: Users },
-        ],
-      },
-      {
-        id: "finance",
-        label: "مصروفات وإيرادات",
-        icon: ArrowUpDown,
-        items: [
-          { id: "finance", label: "مصروفات وإيرادات", visible: can("expenses.view") || can("revenues.view"), icon: WalletCards },
-          { id: "customerAccounts", label: "حسابات العملاء", visible: can("customers.view"), icon: CircleDollarSign },
-          { id: "reports", label: "التقارير", visible: can("reports.view"), icon: BadgeInfo },
-          { id: "import", label: "الاستيراد والتصدير", visible: can("import.export"), icon: ArrowUpDown },
-        ],
-      },
-      {
-        id: "operation",
-        label: "التشغيل",
-        icon: Cog,
-        items: [
-          { id: "worker", label: "التشغيل", visible: can("operation.view"), icon: Cog },
-          { id: "machineDist", label: "توزيع المكن", visible: can("operation.view"), icon: LayoutGrid },
-          { id: "alerts", label: "التنبيهات", visible: can("orders.view"), icon: BadgeInfo },
-        ],
-      },
-      {
-        id: "finishing",
-        label: "التشطيب",
-        icon: Wrench,
-        items: [
-          { id: "finish", label: "التشطيب", visible: can("finishing.view"), icon: Wrench },
-        ],
-      },
-      {
-        id: "system",
-        label: "الإعدادات",
-        icon: Cog,
-        items: [
-          { id: "audit", label: "سجل العمليات", visible: can("audit.view"), icon: ClipboardList },
-          { id: "settings", label: "الإعدادات", visible: can("settings.view"), icon: Cog },
-        ],
-      },
+  const sidebarItems = useMemo<SidebarItemConfig[]>(() => {
+    const items: SidebarItemConfig[] = [
+      { id: "dashboard", label: "الرئيسية", visible: true, icon: Home },
+      { id: "new", label: "اوردر جديد", visible: can("orders.create"), icon: FilePlus },
+      { id: "addCustomer", label: "إضافة عميل", visible: can("customers.create"), icon: UserPlus },
+      { id: "addProduct", label: "إضافة منتج", visible: can("products.create"), icon: PackagePlus },
+      { id: "search", label: "بحث", visible: can("search.use") || can("orders.view"), icon: Search },
+      { id: "customerAccounts", label: "العمليات", visible: can("customers.view"), icon: CircleDollarSign },
+      { id: "worker", label: "التشغيل", visible: can("operation.view"), icon: Cog },
+      { id: "machineDist", label: "توزيع المكن", visible: can("operation.view"), icon: LayoutGrid },
+      { id: "alerts", label: "التنبيهات", visible: can("orders.view"), icon: Clock },
+      { id: "finish", label: "التشطيبات", visible: can("finishing.view"), icon: Wrench },
+      { id: "customers", label: "العملاء", visible: can("customers.view"), icon: Users },
+      { id: "finance", label: "مصروفات وإيرادات", visible: can("expenses.view") || can("revenues.view"), icon: WalletCards },
+      { id: "reports", label: "التقارير", visible: can("reports.view"), icon: BadgeInfo },
+      { id: "import", label: "الاستيراد والتصدير", visible: can("import.export"), icon: ArrowUpDown },
+      { id: "audit", label: "سجل العمليات", visible: can("audit.view"), icon: ClipboardList },
+      { id: "settings", label: "الإعدادات", visible: can("settings.view"), icon: Settings },
+      { id: "orders", label: "متابعة أوردرات", visible: can("orders.view"), icon: ClipboardList },
     ];
-    return sections
-      .map((section) => ({ ...section, items: section.items.filter((item) => item.visible) }))
-      .filter((section) => section.items.length > 0);
+    return items.filter((item) => item.visible);
   }, [session]);
-
-  useEffect(() => {
-    const activeSection = sidebarSections.find((section) => section.items.some((item) => item.id === view));
-    if (activeSection) setOpenSection(activeSection.id);
-    else if (view === "dashboard") setOpenSection("home");
-  }, [sidebarSections, view]);
 
   function selectSidebarView(nextView: View) {
     setView(nextView);
     setDrawerOpen(false);
-  }
-
-  function toggleSidebarSection(sectionId: string) {
-    setOpenSection((current) => current === sectionId ? "" : sectionId);
   }
 
   function logout() {
@@ -7060,7 +6981,6 @@ function ZunionApp() {
       window.alert("حساب الإدارة متاح لحساب Master فقط.");
       return;
     }
-    setOpenSection("system");
     setDrawerOpen(false);
     setView("settings");
   }
@@ -7086,11 +7006,9 @@ function ZunionApp() {
   return (
     <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
       <Sidebar
-        sections={sidebarSections}
+        items={sidebarItems}
         activeView={view === "editOrder" ? "search" : view}
-        openSection={openSection}
         drawerOpen={drawerOpen}
-        onToggleSection={toggleSidebarSection}
         onSelect={selectSidebarView}
         onLogout={logout}
         onCloseDrawer={() => setDrawerOpen(false)}
@@ -7099,9 +7017,15 @@ function ZunionApp() {
       <main className="content">
         <header className="topbar">
           <button type="button" className="hamburger-btn" aria-label="فتح القائمة" onClick={() => setDrawerOpen(true)}><Menu size={24} /></button>
+          <div className="topbar-user">
+            <div className="topbar-avatar"><User size={20} /></div>
+            <div className="topbar-user-copy">
+              <strong>مرحبا، {session.fullName || session.username || <EmailText email={session.email} className="account-email" />}</strong>
+              <span>{session.role}</span>
+            </div>
+          </div>
           <div className="topbar-title">
             <h1>نظام Zunion لإدارة الأوردرات</h1>
-            <p>{session.fullName || session.username ? `${session.fullName || session.username} - ${session.role}` : <><EmailText email={session.email} className="account-email" /> - {session.role}</>}</p>
           </div>
           <button type="button" className="logo-secret-button top-logo-button" aria-label="شعار Zunion" onClick={handleLogoSecretClick}>
             <BrandLogo className="top-logo" />
@@ -7115,6 +7039,7 @@ function ZunionApp() {
             onProductClick={(product) => setProductDrawer(product)}
             onUserClick={(user) => setUserDrawer(user)}
           />
+          <button type="button" className="topbar-bell" aria-label="التنبيهات" onClick={() => selectSidebarView("alerts")}><Bell size={20} /><span className="topbar-notification-dot" /></button>
         </header>
         <section className="page">
           {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}
