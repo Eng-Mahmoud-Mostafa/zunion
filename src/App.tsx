@@ -1262,6 +1262,7 @@ function orderToApi(order: Order) {
   const calculated = calculate(order);
   const operationMethods = (calculated.operationMethods || []).map((item) => item.trim()).filter(Boolean);
   return {
+    ...(calculated.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(calculated.id) ? { id: calculated.id } : {}),
     source_party: calculated.source_person,
     customer_name_snapshot: calculated.client_name,
     customer_code_snapshot: calculated.client_code,
@@ -3383,10 +3384,11 @@ function AlertItem({ alert }: { alert: Alert }) {
   );
 }
 
-function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void; onSaveDraft?: (order: Order) => void; onSendToProduction?: (order: Order) => void; readOnly?: boolean; onPrint?: (order: Order) => void }) {
+function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void | Promise<void>; onSaveDraft?: (order: Order) => void | Promise<void>; onSendToProduction?: (order: Order) => void | Promise<void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), order_number: orderNumber || String(Date.now()).slice(-6) });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
   const [productHighlight, setProductHighlight] = useState(-1);
@@ -3753,8 +3755,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       operationMethods: methods,
       operationItems: normalizedOperationItems.filter((item) => item.method || item.logoImage || item.workOrderImage),
       draft: false,
-      workStage: forceOperation ? "operation" : (initial ? form.workStage : "operation"),
-      workflow_stage: forceOperation ? "التشغيل" : (initial ? stageLabel(form.workStage) as WorkflowStage : "التشغيل"),
+      workStage: forceOperation ? "operation" : (initial ? form.workStage : "new"),
+      workflow_stage: forceOperation ? "التشغيل" : (initial ? stageLabel(form.workStage) as WorkflowStage : "أوردر جديد"),
       order_status: forceOperation ? "في التشغيل" : (initial ? form.order_status : "جديد"),
       operation_status: initial ? form.operation_status : "not_started",
       finishing_status: initial ? form.finishing_status : "not_started",
@@ -3763,22 +3765,29 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     });
   }
 
-  function saveValidated(forceOperation: boolean, done: (order: Order) => void) {
-    return (event: React.FormEvent) => {
+  function saveValidated(forceOperation: boolean, done: (order: Order) => void | Promise<void>) {
+    return async (event: React.FormEvent) => {
       event.preventDefault();
       if (saving) return;
       const order = buildValidatedOrder(forceOperation);
       if (!order) return;
       setSaving(true);
-      done(order);
-      window.setTimeout(() => setSaving(false), 300);
+      setSaveError("");
+      try {
+        await done(order);
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "تعذر حفظ الأوردر. حاول مرة أخرى.");
+        setSaving(false);
+        return;
+      }
+      setSaving(false);
     };
   }
 
   const submit = saveValidated(false, onSave);
   const sendToOperation = saveValidated(true, onSendToProduction ?? onSave);
 
-  function saveDraftTemp() {
+  async function saveDraftTemp() {
     if (saving) return;
     const now = new Date().toISOString();
     const selectedName = selectedProduct?.name || form.productName || form.order_type;
@@ -3801,8 +3810,15 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       updated_at: now,
     });
     setSaving(true);
-    onSaveDraft?.(order);
-    window.setTimeout(() => setSaving(false), 300);
+    setSaveError("");
+    try {
+      await onSaveDraft?.(order);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "تعذر حفظ المسودة. حاول مرة أخرى.");
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
   }
   const canSubmit = Boolean(
     form.source_person.trim() &&
@@ -4033,6 +4049,10 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         <ErrorText message={errors.operationMethods} />
       </div>
 
+      <div className="nf-save-error">
+        <ErrorText message={saveError} />
+      </div>
+
       <div className="nf-actionbar">
         {readOnly ? (
           <>
@@ -4041,7 +4061,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
           </>
         ) : (
           <>
-            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : isEdit ? "تحديث الأوردر" : "إنشاء الأوردر"} <Send size={16} /></button>
+            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : isEdit ? "تحديث الأوردر" : "إرسال أوردر"} <Send size={16} /></button>
             {onSaveDraft && <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraftTemp} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>}
             {onSendToProduction && <button type="button" className="ghost-btn nf-btn nf-btn-to-op" onClick={sendToOperation} disabled={saving}><Truck size={16} /> اذهب للتشغيل</button>}
             {onPrint && <button type="button" className="ghost-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة الأوردر</button>}
@@ -4716,7 +4736,7 @@ function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Or
   );
 }
 
-function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onGoToFinish, goToOrderId, onGoToOrderHandled }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onGoToFinish?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
+function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -4796,7 +4816,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   }, [queue, orders, remoteOps, machineOverrides, workerOverrides, statusOverrides, problemOverrides, machineFilter, spreadSort, cellSaving, workerEditId, problemEditId, problemDraft]);
 
   useEffect(() => {
-    if (!queue || !goToOrderId) return;
+    if (!goToOrderId) return;
     onGoToOrderHandled?.();
     const list = queue === "finish"
       ? orders.filter((order) => order.workStage === "finishing" || (order.workStage === "operation" && order.operation_status === "تم"))
@@ -4811,7 +4831,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       setGotoNotice("");
     } else {
       setHighlightOrderId(null);
-      setGotoNotice("الأوردر لم يصل إلى مرحلة التشطيب بعد.");
+      setGotoNotice(queue === "finish" ? "الأوردر لم يصل إلى مرحلة التشطيب بعد." : "الأوردر غير موجود في القائمة الحالية.");
     }
   }, [goToOrderId, queue, orders, session.role]);
 
@@ -5033,6 +5053,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
         .then(() => {
           setStatusOverrides((current) => ({ ...current, [id]: { ...current[id], [field]: desired } }));
           setOrders((current) => current.map((order) => order.id === id ? applyBackendStatus(order, nextStatus) : order));
+          if (nextStatus === "WORKER_DONE") onFinished?.(id);
           setCellSaving((current) => withoutKey(current, key));
         })
         .catch((error) => {
@@ -5057,7 +5078,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
       { key: "machine", label: "المكنه المقترحه", cls: "ws-hd ws-hd-machine", onClick: true },
       { key: "operation", label: "التشغيل", cls: "ws-hd ws-hd-op", colSpan: 4 },
-      ...(queue === "worker" ? [{ key: "goto", label: "اذهب للتشطيب", cls: "ws-hd ws-hd-goto", rowSpan: 2 }] : []),
     ];
 
     return (
@@ -5069,8 +5089,8 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
               <tr>
                 {spreadHeaderRow1.map((col) => (
                   <th key={col.key} className={col.cls} rowSpan={col.rowSpan} colSpan={col.colSpan}
-                      onClick={col.key !== "operation" && col.key !== "goto" ? () => cycleSort(col.key) : undefined}>
-                    {col.label}{col.key !== "operation" && col.key !== "goto" ? sortIndicator(col.key) : ""}
+                      onClick={col.key !== "operation" ? () => cycleSort(col.key) : undefined}>
+                    {col.label}{col.key !== "operation" ? sortIndicator(col.key) : ""}
                   </th>
                 ))}
               </tr>
@@ -5088,9 +5108,9 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
               </tr>
             </thead>
             <tbody>
-              {visibleRows.length === 0 && <EmptyRow colSpan={12} />}
+              {visibleRows.length === 0 && <EmptyRow colSpan={11} />}
               {visibleRows.map((row) => (
-                <tr key={row.id}>
+                <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-num"><span className="ws-num-text">{row.orderNumber}</span></td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td>{row.party}</td>
@@ -5150,20 +5170,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                     </button>
                     {cellFeedback(row.id, "finished")}
                   </td>
-                  {queue === "worker" && (
-                    <td className="ws-goto">
-                      <button
-                        type="button"
-                        className="ws-goto-btn"
-                        disabled={!row.finished}
-                        title={row.finished ? "اذهب للتشطيب" : "أكمل التشغيل أولاً"}
-                        onClick={() => onGoToFinish?.(row.id)}
-                      >
-                        اذهب للتشطيب
-                      </button>
-                      {!row.finished && <span className="ws-goto-hint">أكمل التشغيل أولاً</span>}
-                    </td>
-                  )}
                 </tr>
               ))}
             </tbody>
@@ -5377,8 +5383,8 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
   );
 }
 
-function SearchPage({ orders, setOrders, session, onCustomerClick, onOrderClick }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void }) {
-  return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />;
+function SearchPage({ orders, setOrders, session, onCustomerClick, onOrderClick, goToOrderId, onGoToOrderHandled }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
+  return <OrdersPage orders={orders} setOrders={setOrders} session={session} goToOrderId={goToOrderId} onGoToOrderHandled={onGoToOrderHandled} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />;
 }
 
 function FinancePage({ session }: { session: Session }) {
@@ -6512,6 +6518,8 @@ function ZunionApp() {
   const [openSection, setOpenSection] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const [searchGoOrderId, setSearchGoOrderId] = useState<string | null>(null);
+  const [workerGoOrderId, setWorkerGoOrderId] = useState<string | null>(null);
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
   const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
@@ -6575,41 +6583,63 @@ function ZunionApp() {
     if (nextView !== "editOrder") setEditingOrderNumber(null);
   }
 
-  function saveNew(order: Order) {
-    setOrders((current) => [order, ...current]);
-    addAudit(session, "ORDER_CREATED", "orders", order.id, undefined, order);
-    setCreatedOrder(order);
-    setView("worker");
+  async function persistOrder(order: Order): Promise<Order> {
+    const exists = orders.some((o) => o.id === order.id);
+    const body = JSON.stringify(orderToApi(order));
+    if (exists) {
+      try {
+        await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body });
+        return order;
+      } catch {
+        // Fall back to idempotent create (handles orders that never reached the backend).
+      }
+    }
+    const result = await backendJson<{ id: string }>("/api/orders", { method: "POST", body });
+    return { ...order, id: result.id };
   }
 
-  function saveEdited(order: Order) {
+  async function saveNew(order: Order) {
+    const saved = await persistOrder(order);
+    setOrders((current) => [saved, ...current.filter((o) => o.id !== saved.id)]);
+    addAudit(session, "ORDER_CREATED", "orders", saved.id, undefined, saved);
+    setCreatedOrder(saved);
+    setSearchGoOrderId(saved.id);
+    setView("search");
+  }
+
+  async function saveEdited(order: Order) {
     if ((session?.role ?? "Master") !== "Master") return;
     const previous = orders.find(o => o.id === order.id);
-    setOrders(current => current.map(o => o.id === order.id ? order : o));
-    addAudit(session, "ORDER_EDITED", "orders", order.id, previous, order);
+    const saved = await persistOrder(order);
+    setOrders(current => current.map(o => o.id === saved.id ? saved : o));
+    addAudit(session, "ORDER_EDITED", "orders", saved.id, previous, saved);
+    setEditingOrderNumber(null);
+    setSearchGoOrderId(saved.id);
+    setView("search");
+  }
+
+  async function saveDraftOrder(order: Order) {
+    const previous = orders.find((o) => o.id === order.id);
+    const saved = await persistOrder(order);
+    setOrders((current) => {
+      const prev = current.find((o) => o.id === saved.id);
+      return prev ? current.map((o) => o.id === saved.id ? saved : o) : [saved, ...current];
+    });
+    addAudit(session, "ORDER_DRAFTED", "orders", saved.id, previous, saved);
     setEditingOrderNumber(null);
     setView("search");
   }
 
-  function saveDraftOrder(order: Order) {
+  async function sendOrderToOperation(order: Order) {
+    const previous = orders.find((o) => o.id === order.id);
+    const saved = await persistOrder(order);
     setOrders((current) => {
-      const previous = current.find((o) => o.id === order.id);
-      const next = previous ? current.map((o) => o.id === order.id ? order : o) : [order, ...current];
-      addAudit(session, "ORDER_DRAFTED", "orders", order.id, previous, order);
-      return next;
+      const prev = current.find((o) => o.id === saved.id);
+      return prev ? current.map((o) => o.id === saved.id ? saved : o) : [saved, ...current];
     });
+    addAudit(session, "ORDER_SENT_TO_OPERATION", "orders", saved.id, previous, saved);
     setEditingOrderNumber(null);
-    setView("search");
-  }
-
-  function sendOrderToOperation(order: Order) {
-    setOrders((current) => {
-      const previous = current.find((o) => o.id === order.id);
-      const next = previous ? current.map((o) => o.id === order.id ? order : o) : [order, ...current];
-      addAudit(session, "ORDER_SENT_TO_OPERATION", "orders", order.id, previous, order);
-      return next;
-    });
-    setEditingOrderNumber(null);
+    setWorkerGoOrderId(saved.id);
     setView("worker");
   }
 
@@ -6788,7 +6818,7 @@ function ZunionApp() {
           {createdOrder && (
             <section className="panel created-order-panel">
               <div>
-                <h2>تم إنشاء الأوردر وإرساله إلى التشغيل بنجاح</h2>
+                <h2>تم إنشاء الأوردر وحفظه بنجاح</h2>
                 <p className="muted">رقم الأوردر: <span className="data-value">{createdOrder.order_number}</span></p>
               </div>
               {canPrintCreatedOrder && (
@@ -6811,8 +6841,8 @@ function ZunionApp() {
           {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
-          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-{view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onGoToFinish={(id) => { setFinishGoOrderId(id); setView("finish"); }} />}
+          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+{view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}

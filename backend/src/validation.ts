@@ -42,6 +42,7 @@ export const productSchema = z.object({
 }));
 
 export const orderSchema = z.object({
+  id: z.string().uuid().optional(),
   source_party: z.string().default(""),
   customer_name_snapshot: z.string().default(""),
   customer_code_snapshot: z.string().optional().default(""),

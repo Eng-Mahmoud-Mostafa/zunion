@@ -4094,6 +4094,10 @@ input[type="date"] {
   margin-top: 2px;
 }
 
+.nf-save-error {
+  margin: 10px 0 2px;
+}
+
 .nf-actionbar {
   position: sticky;
   bottom: 16px;

@@ -998,15 +998,16 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
       old_balance: order.old_account,
     });
     await ensureCustomerAccount(customerId, client);
+    const clientId = order.id ?? null;
     const result = await client.query<{ id: string }>(
       `insert into orders (
-        order_number, customer_id, source_party, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
+        id, order_number, customer_id, source_party, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
         delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, machine_name, worker_name, operation_methods, operation_attachments,
         quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
         damaged_pieces, production_notes, finishing_notes, details, draft, created_by, updated_by
-      ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$32) returning id`,
+      ) values (coalesce($1, gen_random_uuid()),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$33) on conflict (id) do nothing returning id`,
       [
-        nextOrderNumber(), customerId, order.source_party, order.customer_name_snapshot, order.customer_code_snapshot,
+        clientId, nextOrderNumber(), customerId, order.source_party, order.customer_name_snapshot, order.customer_code_snapshot,
         order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
         order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? "", order.machineName ?? "",
         order.worker_name ?? "", JSON.stringify(order.operationMethods),
@@ -1016,10 +1017,14 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
         order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id,
       ],
     );
-    return result.rows[0];
+    if (result.rows[0]) return { id: result.rows[0].id, created: true };
+    if (!clientId) throw new Error("تعذر إنشاء الأوردر");
+    const existing = await client.query<{ id: string }>("select id from orders where id = $1", [clientId]);
+    if (!existing.rows[0]) throw new Error("تعذر إنشاء الأوردر");
+    return { id: existing.rows[0].id, created: false };
   });
   await audit(req.user!, "ORDER_CREATED", "orders", inserted.id, undefined, order);
-  res.status(201).json(inserted);
+  res.status(inserted.created ? 201 : 200).json(inserted);
 });
 
 app.get("/api/orders/:id", requireAuth, async (req, res) => {
