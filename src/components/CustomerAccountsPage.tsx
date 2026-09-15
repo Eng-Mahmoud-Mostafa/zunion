@@ -27,6 +27,7 @@ type AccountTransaction = {
   account_id: string;
   customer_id: string;
   txn_date: string;
+  txn_date_text?: string;
   entry_type: "charge" | "payment";
   order_id: string | null;
   order_number: string | null;
@@ -56,6 +57,12 @@ type Props = {
   orders: AccountOrder[];
   session: AccountSession;
 };
+
+function accountDay(row: Pick<AccountTransaction, "txn_date" | "txn_date_text">) {
+  const text = String(row.txn_date_text || row.txn_date || "");
+  const day = text.slice(0, 10);
+  return day ? formatDateArabic(`${day}T00:00:00`) : "—";
+}
 
 function round2(value: number) {
   return Math.round(value * 100) / 100;
@@ -208,7 +215,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
         <table>
           <thead><tr><th>التاريخ</th><th>رقم الأوردر</th><th>البيان</th><th>اللوجو</th><th>العدد</th><th>السعر</th><th>مدين</th><th>دائن</th><th>رصيد نهائي</th></tr></thead>
           <tbody>
-            ${rows.map((row) => `<tr><td>${printableCell(formatDateArabic(row.txn_date + "T00:00:00"))}</td><td>${printableCell(row.order_number || "—")}</td><td>${printableCell(row.description || "—")}</td><td>${printableCell(row.logo || "—")}</td><td class="num">${printableCell(row.entry_type === "charge" ? row.quantity : "—")}</td><td class="num">${printableCell(row.entry_type === "charge" ? row.price : "—")}</td><td class="num">${accountMoney(row.debit)}</td><td class="num">${accountMoney(row.credit)}</td><td class="num">${accountMoney(row.balance)}</td></tr>`).join("")}
+            ${rows.map((row) => `<tr><td>${printableCell(accountDay(row))}</td><td>${printableCell(row.order_number || "—")}</td><td>${printableCell(row.description || "—")}</td><td>${printableCell(row.logo || "—")}</td><td class="num">${printableCell(row.entry_type === "charge" ? row.quantity : "—")}</td><td class="num">${printableCell(row.entry_type === "charge" ? row.price : "—")}</td><td class="num">${accountMoney(row.debit)}</td><td class="num">${accountMoney(row.credit)}</td><td class="num">${accountMoney(row.balance)}</td></tr>`).join("")}
             <tr class="totals"><td colspan="6">الإجمالي</td><td class="num">${accountMoney(totalDebit)}</td><td class="num">${accountMoney(totalCredit)}</td><td class="num">${accountMoney(balanceRow)}</td></tr>
           </tbody>
         </table>
@@ -304,7 +311,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
                     {rows.length === 0 && <tr><td colSpan={10}>لا توجد عمليات.</td></tr>}
                     {rows.map((row) => (
                       <tr key={row.id}>
-                        <td>{formatDateArabic(row.txn_date + "T00:00:00")}</td>
+                        <td>{accountDay(row)}</td>
                         <td>{row.order_number || "—"}</td>
                         <td>{row.description || "—"}</td>
                         <td>{row.logo || "—"}</td>

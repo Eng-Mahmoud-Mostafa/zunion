@@ -16,6 +16,7 @@ export type CustomerTransactionRow = {
   account_id: string;
   customer_id: string;
   txn_date: string;
+  txn_date_text: string;
   entry_type: string;
   order_id: string | null;
   order_number: string | null;
@@ -68,7 +69,7 @@ export async function listTransactions(
   const offset = filters.offset ?? 0;
 
   const { rows } = await query<CustomerTransactionRow>(
-    `select t.*, o.order_number as order_number
+    `select t.*, to_char(t.txn_date, 'YYYY-MM-DD') as txn_date_text, o.order_number as order_number
      from customer_account_transactions t
      left join orders o on o.id = t.order_id
      where ${where}
