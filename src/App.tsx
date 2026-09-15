@@ -6935,14 +6935,20 @@ function ZunionApp() {
       { id: "dashboard", label: "الرئيسية", visible: true, icon: Home },
       { id: "new", label: "اوردر جديد", visible: true, icon: FilePlus },
       { id: "addCustomer", label: "إضافة عميل", visible: true, icon: UserPlus },
+      { id: "addProduct", label: "إضافة منتج", visible: true, icon: PackagePlus },
       { id: "search", label: "بحث", visible: true, icon: Search },
       { id: "customerAccounts", label: "العمليات", visible: true, icon: Clock },
       { id: "worker", label: "التشغيل", visible: true, icon: Cog },
+      { id: "machineDist", label: "توزيع المكن", visible: true, icon: LayoutGrid },
+      { id: "alerts", label: "التنبيهات", visible: true, icon: Bell },
       { id: "finish", label: "التشطيبات", visible: true, icon: Wrench },
       { id: "customers", label: "العملاء", visible: true, icon: Users },
+      { id: "finance", label: "مصروفات وإيرادات", visible: true, icon: WalletCards },
       { id: "reports", label: "التقارير", visible: true, icon: BarChart3 },
+      { id: "import", label: "الاستيراد والتصدير", visible: true, icon: ArrowUpDown },
       { id: "audit", label: "سجل العمليات", visible: true, icon: History },
       { id: "settings", label: "الإعدادات", visible: true, icon: Settings },
+      { id: "orders", label: "متابعة أوردرات", visible: true, icon: ClipboardList },
     ];
     return items.filter((item) => item.visible);
   }, [session]);
