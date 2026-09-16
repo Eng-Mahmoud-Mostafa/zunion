@@ -5679,7 +5679,7 @@ input[type="date"] {
 }
 
 .ws-hd-date {
-  color: #FFFFFF !important;
+  color: #000000 !important;
   background: #FF0000;
 }
 
@@ -5703,7 +5703,7 @@ input[type="date"] {
   width: 100%;
   border: 1px solid #555555;
   background: #FF0000;
-  color: #FFFFFF;
+  color: #000000;
   font-weight: bold;
   font-size: 14px;
   padding: 4px 6px;
@@ -5748,7 +5748,7 @@ input[type="date"] {
 
 .ws-table tbody .ws-date {
   background: #FF0000;
-  color: #FFFFFF;
+  color: #000000;
   font-size: 16px;
   font-weight: bold;
 }
@@ -5809,7 +5809,7 @@ input[type="date"] {
 
 .ws-table tbody .ws-machine select {
   background: #FF0000;
-  color: #FFFFFF;
+  color: #000000;
   font-weight: bold;
 }
 
