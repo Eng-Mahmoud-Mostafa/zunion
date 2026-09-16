@@ -5679,8 +5679,8 @@ input[type="date"] {
 }
 
 .ws-hd-date {
-  color: #769547 !important;
-  background: #EFEFEF;
+  color: #FFFFFF !important;
+  background: #FF0000;
 }
 
 .ws-hd-qty,
@@ -5694,20 +5694,27 @@ input[type="date"] {
 }
 
 .ws-machine-filter {
-  background: #FFFF00 !important;
-  color: #FF0000 !important;
+  background: #FF0000 !important;
+  color: #FFFFFF !important;
 }
 
 .ws-machine-filter select,
 .ws-machine select {
   width: 100%;
   border: 1px solid #555555;
-  background: #FFFF00;
-  color: #FF0000;
+  background: #FF0000;
+  color: #FFFFFF;
   font-weight: bold;
   font-size: 14px;
   padding: 4px 6px;
   cursor: pointer;
+}
+
+.ws-machine-filter select option,
+.ws-machine select option,
+.ws-worker select option {
+  background: #FFFFFF;
+  color: #000000;
 }
 
 .ws-worker-hd {
@@ -5715,17 +5722,17 @@ input[type="date"] {
 }
 
 .ws-hd.ws-worker {
-  background: #FFFF00;
-  color: #FF0000;
+  background: #FF0000;
+  color: #FFFFFF;
 }
 
 .ws-hd.ws-hd-end {
-  background: #FFFF00;
-  color: #000000;
+  background: #FF0000;
+  color: #FFFFFF;
 }
 
 .ws-table tbody .ws-num {
-  background: #FFFF00;
+  background: transparent;
   color: #000000;
   font-weight: bold;
 }
@@ -5737,6 +5744,13 @@ input[type="date"] {
   text-decoration: none;
   cursor: default;
   pointer-events: none;
+}
+
+.ws-table tbody .ws-date {
+  background: #FF0000;
+  color: #FFFFFF;
+  font-size: 16px;
+  font-weight: bold;
 }
 
 .ws-table tbody .ws-goto {
@@ -5788,14 +5802,14 @@ input[type="date"] {
 }
 
 .ws-table tbody .ws-machine {
-  background: #FFFF00;
+  background: #FF0000;
   padding: 2px 6px;
   position: relative;
 }
 
 .ws-table tbody .ws-machine select {
-  background: #FFFF00;
-  color: #FF0000;
+  background: #FF0000;
+  color: #FFFFFF;
   font-weight: bold;
 }
 
@@ -5814,8 +5828,8 @@ input[type="date"] {
   width: 100%;
   min-width: 84px;
   border: 1px solid #555555;
-  background: #FFFF00;
-  color: #000000;
+  background: #FF0000;
+  color: #FFFFFF;
   font-weight: bold;
   font-size: 14px;
   padding: 3px 4px;

@@ -5195,17 +5195,17 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     const stageMatch = (stageValue: string, statusValue: string) => {
       const stage = stageValue.trim();
       const status = statusValue.trim();
-      return stage === "operation" || ["SENT_TO_WORKER", "WORKER_STARTED", "WORKER_DONE"].includes(status);
+      return stage === "operation" || ["SENT_TO_WORKER", "WORKER_STARTED"].includes(status);
     };
     const localRows = orders.filter((order) => {
       const stage = String(order.workStage ?? "").trim();
       const status = String(order.order_status ?? "").trim();
-      return stageMatch(stage, status) || (stage === "finishing" && order.operation_status === "تم");
+      return stageMatch(stage, status);
     });
     const dbRows = (remoteOps?.orders ?? []).filter((row) => {
       const stage = String(row.work_stage ?? row.workStage ?? "").trim();
       const status = String(row.status ?? "").trim();
-      return stageMatch(stage, status) || (stage === "finishing" && status === "WORKER_DONE");
+      return stageMatch(stage, status);
     });
     const baseRows: WorkerSpreadRow[] = localRows.length > 0
       ? localRows.map(workerRowFromOrder)
@@ -5412,10 +5412,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                     {cellFeedback(row.id, "worker")}
                   </td>
                   <td className={`ws-cell-action${row.started ? " ws-tam-on" : ""}`}>
-                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, row.started ? "SENT_TO_WORKER" : "WORKER_STARTED", "started")}>
-                      {row.started ? "تم" : "ابدأ"}
-                    </button>
-                    {cellFeedback(row.id, "started")}
+                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, row.started ? "SENT_TO_WORKER" : "WORKER_STARTED", "started")}>تم</button>
                   </td>
                   <td className="ws-problem">
                     {problemEditId === row.id ? (
@@ -5433,11 +5430,8 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                     )}
                     {cellFeedback(row.id, "problem")}
                   </td>
-                  <td className={`ws-cell-action${row.finished ? " ws-tam-on" : ""}`}>
-                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, row.finished ? "WORKER_STARTED" : "WORKER_DONE", "finished")}>
-                      {row.finished ? "تم" : "إنهاء"}
-                    </button>
-                    {cellFeedback(row.id, "finished")}
+                  <td className="ws-cell-action">
+                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, "WORKER_DONE", "finished")}>تم</button>
                   </td>
                 </tr>
               ))}
