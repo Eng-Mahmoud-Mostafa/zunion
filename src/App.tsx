@@ -1346,7 +1346,7 @@ function orderFromApi(row: Record<string, unknown>): Order {
     total: Number(row.total ?? 0),
     paid: Number(row.paid ?? 0),
     old_balance: Number(row.old_account ?? row.old_balance ?? 0),
-    order_type: String(row.product_name_snapshot ?? row.type ?? row.service_type ?? ""),
+    order_type: String(row.type ?? ""),
     productId: String(row.product_id ?? ""),
     productName: String(row.product_name_snapshot ?? row.type ?? row.service_type ?? ""),
     paymentMethod: String(row.payment_method ?? "cash"),
@@ -1431,9 +1431,9 @@ function orderToApi(order: Order) {
     customer_code_snapshot: calculated.client_code,
     phone_snapshot: calculated.phone,
     delivery_date: calculated.delivery_date || null,
-    type: calculated.order_type || calculated.productName || "",
+    type: calculated.order_type || "",
     productId: calculated.productId || undefined,
-    productName: calculated.productName || calculated.order_type || "",
+    productName: calculated.productName || "",
     paymentMethod: calculated.paymentMethod || "cash",
     customPaymentMethod: calculated.customPaymentMethod || "",
     materialsStatus: normalizeMaterialsStatus(calculated.materialsStatus) || "available",
@@ -3662,7 +3662,7 @@ function AlertItem({ alert }: { alert: Alert }) {
 }
 
 function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void | Promise<void>; onSaveDraft?: (order: Order) => void | Promise<void>; onSendToProduction?: (order: Order) => void | Promise<void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
-  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), order_number: orderNumber || String(Date.now()).slice(-6) });
+  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), order_number: orderNumber || String(Date.now()).slice(-6), delivery_date: isoOffset(0) });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -3817,7 +3817,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     if (!product) {
       set("productId", "");
       set("productName", "");
-      set("order_type", "");
       return;
     }
     setForm((current) => {
@@ -3831,7 +3830,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         ...current,
         productId: product.id,
         productName: product.name,
-        order_type: product.name,
         quantity: current.quantity && current.quantity !== 1 ? current.quantity : product.defaultQuantity || 1,
         price: current.price,
         logo_place: current.logo_place || product.logoPlacement || "",
@@ -3847,7 +3845,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     setProductSearch(value);
     setProductHighlight(-1);
     setProductDropdownOpen(true);
-    setForm((current) => calculate({ ...current, productId: "", productName: value, order_type: value, updated_at: new Date().toISOString() }));
+    setForm((current) => calculate({ ...current, productId: "", productName: value, updated_at: new Date().toISOString() }));
   }
 
   function handleProductInputFocus() {
@@ -4013,7 +4011,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     if (!form.order_number.trim()) nextErrors.order_number = "رقم الأوردر مطلوب";
     if (!form.client_name.trim()) nextErrors.client_name = "اسم العميل مطلوب";
     if (!form.source_person.trim()) nextErrors.source_person = "الطرف مطلوب";
-    if (!form.productId && !form.productName && !form.order_type) nextErrors.productId = "يجب اختيار نوع المنتج";
     if (Number(form.quantity || 0) < 1) nextErrors.quantity = "العدد يجب أن يكون 1 على الأقل";
     if (Number(form.price || 0) < 0) nextErrors.price = "السعر لا يمكن أن يكون بالسالب";
     if (paid < 0) nextErrors.paid = "المدفوع لا يمكن أن يكون بالسالب";
@@ -4031,12 +4028,12 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     }
     setErrors({});
     const now = new Date().toISOString();
-    const selectedName = selectedProduct?.name || form.productName || form.order_type;
+    const selectedName = selectedProduct?.name || form.productName;
     return calculate({
       ...computed,
       productId: form.productId,
       productName: selectedName,
-      order_type: selectedName,
+      order_type: form.order_type,
       materialsStatus: normalizeMaterialsStatus(form.materialsStatus),
       client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
       operationMethods: methods,
@@ -4077,12 +4074,12 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   async function saveDraftTemp() {
     if (saving) return;
     const now = new Date().toISOString();
-    const selectedName = selectedProduct?.name || form.productName || form.order_type;
+    const selectedName = selectedProduct?.name || form.productName;
     const order = calculate({
       ...computed,
       productId: form.productId,
       productName: selectedName,
-      order_type: selectedName,
+      order_type: form.order_type,
       materialsStatus: normalizeMaterialsStatus(form.materialsStatus),
       client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
       operationMethods: operationItems.map((item) => item.method.trim()).filter(Boolean),
@@ -4222,6 +4219,15 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
             </div>
 
             <div className="nf-row nf-row-products">
+              <label className="nf-field">
+                <span>انواع اوردرات</span>
+                <select value={form.order_type} onChange={(event) => set("order_type", event.target.value)} disabled={readOnly}>
+                  <option value="">اختر نوع الأوردر</option>
+                  <option value="تطريز">تطريز</option>
+                  <option value="خياطه">خياطه</option>
+                  <option value="طباعه">طباعه</option>
+                </select>
+              </label>
               <label className={`nf-field${errors.productId ? " nf-field-invalid" : ""}`}>
                 <span>نوع المنتج</span>
                 <div className="nf-product-combobox" ref={productBoxRef}>
