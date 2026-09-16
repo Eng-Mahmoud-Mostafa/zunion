@@ -182,6 +182,8 @@ create table if not exists orders (
   worker_name text not null default '',
   operation_methods jsonb not null default '[]'::jsonb,
   operation_attachments jsonb not null default '[]'::jsonb,
+  operation_workers jsonb not null default '[]'::jsonb,
+  operation_supervisors jsonb not null default '[]'::jsonb,
   quantity integer not null default 1,
   price numeric not null default 0,
   total numeric not null default 0,
@@ -223,6 +225,8 @@ end
 where materials_status in ('موجود', 'متوفرة', 'غير موجود', 'غير متوفرة');
 alter table orders add column if not exists operation_methods jsonb not null default '[]'::jsonb;
 alter table orders add column if not exists operation_attachments jsonb not null default '[]'::jsonb;
+alter table orders add column if not exists operation_workers jsonb not null default '[]'::jsonb;
+alter table orders add column if not exists operation_supervisors jsonb not null default '[]'::jsonb;
 alter table orders add column if not exists machine_name text not null default '';
 alter table orders add column if not exists worker_name text not null default '';
 alter table orders drop constraint if exists orders_work_stage_check;

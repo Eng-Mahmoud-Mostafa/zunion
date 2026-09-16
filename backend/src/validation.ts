@@ -124,6 +124,11 @@ export const workerSchema = z.object({
   worker_name: z.string().max(200).default(""),
 });
 
+export const staffSchema = z.object({
+  worker_names: z.array(z.string().max(200)).default([]),
+  supervisor_names: z.array(z.string().max(200)).default([]),
+});
+
 export const problemSchema = z.object({
   production_notes: z.string().max(2000).default(""),
 });

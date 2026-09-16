@@ -186,6 +186,8 @@ type Order = {
   materialsStatus?: string;
   machineName?: string;
   worker_name?: string;
+  operationWorkers?: string[];
+  operationSupervisors?: string[];
   operationMethods?: string[];
   operationItems?: OperationItem[];
   operationAttachments?: { method: string; workOrder: boolean; logo: boolean }[];
@@ -1352,6 +1354,28 @@ function orderFromApi(row: Record<string, unknown>): Order {
     materialsStatus: normalizeMaterialsStatus(row.materials_status),
     machineName: String(row.machine_name ?? ""),
     worker_name: String(row.worker_name ?? ""),
+    operationWorkers: (() => {
+      const workers = Array.isArray(row.operation_workers) ? row.operation_workers : (() => {
+        try {
+          const parsed = JSON.parse(String(row.operation_workers ?? "[]")) as unknown[];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+      return workers.map(String).filter((name) => name.trim().length > 0);
+    })(),
+    operationSupervisors: (() => {
+      const supervisors = Array.isArray(row.operation_supervisors) ? row.operation_supervisors : (() => {
+        try {
+          const parsed = JSON.parse(String(row.operation_supervisors ?? "[]")) as unknown[];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+      return supervisors.map(String).filter((name) => name.trim().length > 0);
+    })(),
     operationMethods: Array.isArray(row.operation_methods) ? row.operation_methods.map(String) : (() => {
       try {
         const parsed = JSON.parse(String(row.operation_methods ?? "[]")) as unknown[];
@@ -4598,6 +4622,18 @@ function workerNameOptions(): string[] {
   }
 }
 
+function supervisorNameOptions(): string[] {
+  try {
+    const names = loadManagedUsers()
+      .filter((user) => user.role === "Supervisor" && user.status === "active")
+      .map((user) => (user.fullName || user.username).trim())
+      .filter((name) => name.length > 0);
+    return Array.from(new Set(names));
+  } catch {
+    return [];
+  }
+}
+
 function applyBackendStatus(order: Order, status: string): Order {
   const operation = status === "SENT_TO_WORKER" || status === "WORKER_STARTED";
   const done = status === "WORKER_DONE";
@@ -5023,6 +5059,11 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [workerOverrides, setWorkerOverrides] = useState<Record<string, string>>({});
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Partial<Record<"started" | "finished", boolean>>>>({});
   const [problemOverrides, setProblemOverrides] = useState<Record<string, string>>({});
+  const [staffOpenId, setStaffOpenId] = useState<string | null>(null);
+  const [staffWorkers, setStaffWorkers] = useState<string[]>([]);
+  const [staffSupervisors, setStaffSupervisors] = useState<string[]>([]);
+  const [staffSaving, setStaffSaving] = useState(false);
+  const [staffError, setStaffError] = useState("");
   const [highlightOrderId, setHighlightOrderId] = useState<string | null>(null);
   const [gotoNotice, setGotoNotice] = useState("");
   const wsWrapRef = useRef<HTMLDivElement | null>(null);
@@ -5188,6 +5229,32 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     addAudit(session, "ORDER_DELETED", "orders", id);
   }
 
+  function openStaffPanel(order: Order) {
+    setStaffWorkers(order.operationWorkers ?? []);
+    setStaffSupervisors(order.operationSupervisors ?? []);
+    setStaffError("");
+    setStaffOpenId(order.id);
+  }
+
+  function saveStaffPanel(id: string) {
+    const key = `${id}:staff`;
+    setStaffSaving(true);
+    setStaffError("");
+    backendJson(`/api/orders/${encodeURIComponent(id)}/staff`, {
+      method: "PATCH",
+      body: JSON.stringify({ worker_names: staffWorkers, supervisor_names: staffSupervisors }),
+    })
+      .then(() => {
+        setCellSaving((current) => withoutKey(current, key));
+        setOrders((current) => current.map((order) => order.id === id ? { ...order, operationWorkers: staffWorkers, operationSupervisors: staffSupervisors } : order));
+        setStaffOpenId(null);
+      })
+      .catch((error) => {
+        setStaffSaving(false);
+        setStaffError(error instanceof Error ? error.message : "تعذر حفظ الأسماء");
+      });
+  }
+
   function renderWorkerSpread() {
     if (remoteLoading && !remoteOps) return <LoadingPanel />;
     if (remoteError && !remoteOps && orders.length === 0) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
@@ -5236,6 +5303,10 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
         if (av !== "" && bv !== "" && !Number.isNaN(an) && !Number.isNaN(bn)) return (an - bn) * sign;
         return av.localeCompare(bv, "ar") * sign;
       });
+    }
+
+    function staffOrderForRow(id: string): Order | null {
+      return localRows.find((order) => order.id === id) || orders.find((order) => order.id === id) || null;
     }
 
     function cycleSort(key: string) {
@@ -5338,6 +5409,77 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       return null;
     }
 
+    function toggleWorkerName(name: string) {
+      setStaffWorkers((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
+    }
+
+    function toggleSupervisorName(name: string) {
+      setStaffSupervisors((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
+    }
+
+    function renderStaffPanel() {
+      if (!staffOpenId) return null;
+      const current = staffOrderForRow(staffOpenId);
+      if (!current) return null;
+      const allWorkers = Array.from(new Set([...workerNameOptions(), ...(current.operationWorkers ?? [])])).filter((name) => name.trim().length > 0);
+      const allSupervisors = Array.from(new Set([...supervisorNameOptions(), ...(current.operationSupervisors ?? [])])).filter((name) => name.trim().length > 0);
+      return (
+        <div className="ws-staff-overlay" onClick={(event) => { if (event.target === event.currentTarget) setStaffOpenId(null); }}>
+          <div className="ws-staff-panel">
+            <div className="ws-staff-panel-head">
+              <h3>تفاصيل الأوردر رقم {current.order_number}</h3>
+              <button type="button" className="ws-staff-close" aria-label="إغلاق" onClick={() => setStaffOpenId(null)}>×</button>
+            </div>
+            <div className="ws-staff-meta">
+              <span><strong>العميل:</strong> {current.client_name}</span>
+              <span><strong>الطرف:</strong> {current.source_person}</span>
+              <span><strong>النوع:</strong> {current.order_type || current.productName || ""}</span>
+              <span><strong>العدد:</strong> {current.quantity}</span>
+              <span><strong>تاريخ التسليم:</strong> {formatDisplayDate(current.delivery_date)}</span>
+              <span><strong>الماكينة:</strong> {current.machineName || "—"}</span>
+            </div>
+            {staffError && <div className="ws-staff-error">{staffError}</div>}
+            <div className="ws-staff-section ws-staff-workers">
+              <h4>أسماء العمال</h4>
+              {allWorkers.length === 0 ? (
+                <p className="ws-staff-empty">لا يوجد عمال متاحون</p>
+              ) : (
+                <div className="ws-staff-options">
+                  {allWorkers.map((name) => (
+                    <label key={name} className={`ws-staff-option${staffWorkers.includes(name) ? " ws-staff-checked" : ""}`}>
+                      <input type="checkbox" checked={staffWorkers.includes(name)} onChange={() => toggleWorkerName(name)} />
+                      <span>{name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="ws-staff-section ws-staff-supervisors">
+              <h4>أسماء المشرفين</h4>
+              {allSupervisors.length === 0 ? (
+                <p className="ws-staff-empty">لا يوجد مشرفون متاحون</p>
+              ) : (
+                <div className="ws-staff-options">
+                  {allSupervisors.map((name) => (
+                    <label key={name} className={`ws-staff-option${staffSupervisors.includes(name) ? " ws-staff-checked" : ""}`}>
+                      <input type="checkbox" checked={staffSupervisors.includes(name)} onChange={() => toggleSupervisorName(name)} />
+                      <span>{name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="ws-staff-panel-actions">
+              <button type="button" className="ws-btn-save" disabled={staffSaving} onClick={() => saveStaffPanel(staffOpenId)}>
+                {staffSaving ? "جارِ الحفظ…" : "حفظ"}
+              </button>
+              <button type="button" className="ws-btn-cancel" onClick={() => setStaffOpenId(null)}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
       { key: "orderNumber", label: "رقم اوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
@@ -5380,7 +5522,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
               {visibleRows.length === 0 && <EmptyRow colSpan={11} />}
               {visibleRows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
-                  <td className="ws-num"><span className="ws-num-text">{row.orderNumber}</span></td>
+                  <td className="ws-num"><button type="button" className="ws-num-text" onClick={() => { const order = staffOrderForRow(row.id); if (order) openStaffPanel(order); }}>{row.orderNumber}</button></td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td>{row.party}</td>
                   <td>{row.client}</td>
@@ -5438,6 +5580,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
             </tbody>
           </table>
         </div>
+        {renderStaffPanel()}
       </div>
     );
   }

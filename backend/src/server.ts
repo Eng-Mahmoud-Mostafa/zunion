@@ -11,7 +11,7 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, statusSchema, workerSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, staffSchema, statusSchema, workerSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions } from "./customerAccounts.js";
@@ -1107,6 +1107,18 @@ app.patch("/api/orders/:id/worker", requireAuth, requireRole("Master", "Helper",
   if (!oldOrder) return res.status(404).json({ message: "Order not found" });
   await query(`update orders set worker_name=$1, updated_by=$2 where id=$3`, [parsed.data.worker_name, req.user!.id, id]);
   await audit(req.user!, "WORKER_ASSIGNED", "orders", id, { worker_name: oldOrder.worker_name ?? "" }, parsed.data);
+  res.json({ ok: true });
+});
+
+app.patch("/api/orders/:id/staff", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = staffSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid staff", issues: parsed.error.issues });
+  const oldOrder = await loadOrder(id);
+  if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  const oldStaff = { workers: parseJsonArray(oldOrder.operation_workers).map(String), supervisors: parseJsonArray(oldOrder.operation_supervisors).map(String) };
+  await query(`update orders set operation_workers=$1, operation_supervisors=$2, updated_by=$3 where id=$4`, [JSON.stringify(parsed.data.worker_names), JSON.stringify(parsed.data.supervisor_names), req.user!.id, id]);
+  await audit(req.user!, "STAFF_ASSIGNED", "orders", id, oldStaff, parsed.data);
   res.json({ ok: true });
 });
 
