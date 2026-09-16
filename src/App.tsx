@@ -2260,6 +2260,19 @@ const ordersListHeaders = [
   "رسالة العميل",
 ] as const;
 
+const finishListHeaders = [
+  "اكتب بواسطة",
+  "رقم الاوردر",
+  "تاريخ التسليم",
+  "اسم العميل",
+  "النوع",
+  "اللوجو",
+  "العدد",
+  "اسم العامل",
+  "حاله التشطيب",
+  "شغل جاهز",
+] as const;
+
 function valueText(value: unknown, fallback = "—") {
   const text = normalizeDigitsToEnglish(value).trim();
   return text || fallback;
@@ -3520,6 +3533,31 @@ function OrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { or
       <td><span className={listBadgeClass(finishingStatus)}>{finishingStatus}</span></td>
       <td><span className={listBadgeClass(readyStatus)}>{readyStatus}</span></td>
       <td>{valueText(order.client_message || order.message_text)}</td>
+    </tr>
+  );
+}
+
+function FinishOrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; highlight?: boolean }) {
+  const finishingStatus = orderFinishingStatusText(order);
+  const readyStatus = orderReadyStatus(order);
+  const createdBy = orderCreatedBy(order);
+  const clientName = valueText(order.client_name || order.customer_name || order.customer_name_snapshot);
+  const clientCode = String(order.client_code || "");
+  const handleClick = onCustomerClick && clientName !== "--" ? () => onCustomerClick(clientCode, clientName) : undefined;
+  const orderItems = Array.isArray(order.operationItems) ? (order.operationItems as OperationItem[]) : [];
+  const thumbSrc = orderItems.find((i) => i.workOrderImage || i.logoImage)?.workOrderImage || orderItems.find((i) => i.logoImage)?.logoImage || "";
+  return (
+    <tr className={highlight ? "ws-row-highlight" : undefined} data-order-row-id={order.id}>
+      <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
+      <td className="orders-list-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}{thumbSrc && <span className="orders-list-thumb"><AttachmentImage src={thumbSrc} alt="صورة الأوردر" /></span>}</td>
+      <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
+      <td>{handleClick ? <button type="button" className="cd-client-link" onClick={handleClick}>{clientName}</button> : clientName}</td>
+      <td>{orderDisplayType(order)}</td>
+      <td>{orderDisplayLogo(order)}</td>
+      <td>{orderDisplayQuantity(order)}</td>
+      <td>{valueText(order.worker_name)}</td>
+      <td><span className={listBadgeClass(finishingStatus)}>{finishingStatus}</span></td>
+      <td><span className={listBadgeClass(readyStatus)}>{readyStatus}</span></td>
     </tr>
   );
 }
@@ -5074,8 +5112,8 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     return next;
   }
 
-  function renderOrdersListHeaders() {
-    return ordersListHeaders.map((head) => (
+  function renderOrdersListHeaders(headers: readonly string[] = ordersListHeaders) {
+    return headers.map((head) => (
       <th key={head}>
         {head === "تاريخ التسليم" ? (
           <button
@@ -5177,9 +5215,9 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
           <StatCard title="جاهز للإرسال" value={formatNumber(remoteOps.readyToSend)} />
           <StatCard title="تسليم اليوم" value={formatNumber(remoteOps.deliveryToday)} />
         </section>
-        <section className="table-wrap accounts-table orders-list-table-wrap"><table className="orders-list-table"><thead><tr>{renderOrdersListHeaders()}</tr></thead><tbody>
-          {visibleRemote.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
-          {visibleRemote.map((order) => <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
+        <section className="table-wrap accounts-table orders-list-table-wrap"><table className="orders-list-table"><thead><tr>{renderOrdersListHeaders(queue === "finish" ? finishListHeaders : undefined)}</tr></thead><tbody>
+          {visibleRemote.length === 0 && <EmptyRow colSpan={queue === "finish" ? finishListHeaders.length : ordersListHeaders.length} />}
+          {visibleRemote.map((order) => queue === "finish" ? <FinishOrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} /> : <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
         </tbody></table></section>
         <div className="pagination"><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}>السابق</button><span>{page} / {pagesRemote}</span><button disabled={page === pagesRemote} onClick={() => setPage((value) => value + 1)}>التالي</button></div>
       </div>
@@ -5592,11 +5630,13 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       <section className="table-wrap orders-list-table-wrap">
         <table className="orders-list-table">
           <thead>
-            <tr>{renderOrdersListHeaders()}</tr>
+            <tr>{renderOrdersListHeaders(queue === "finish" ? finishListHeaders : undefined)}</tr>
           </thead>
           <tbody>
-            {visible.length === 0 && <EmptyRow colSpan={ordersListHeaders.length} />}
-            {visible.map((order) => <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
+            {visible.length === 0 && <EmptyRow colSpan={queue === "finish" ? finishListHeaders.length : ordersListHeaders.length} />}
+            {visible.map((order) => queue === "finish"
+              ? <FinishOrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />
+              : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
           </tbody>
         </table>
       </section>
