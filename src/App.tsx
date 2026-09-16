@@ -30,6 +30,7 @@ import {
   Mail,
   MapPin,
   Menu,
+  Minus,
   PackagePlus,
   Paintbrush,
   Phone,
@@ -6866,6 +6867,7 @@ type SidebarItemConfig = {
   label: string;
   visible: boolean;
   icon: LucideIcon;
+  children?: SidebarItemConfig[];
 };
 
 function SidebarItemButton({ item, active, onSelect }: { item: SidebarItemConfig; active: boolean; onSelect: (view: View) => void }) {
@@ -6873,7 +6875,7 @@ function SidebarItemButton({ item, active, onSelect }: { item: SidebarItemConfig
   return (
     <button type="button" className={`sidebar-item${active ? " active" : ""}`} onClick={() => onSelect(item.id)}>
       <span>{item.label}</span>
-      <Icon size={18} />
+      <Icon size={22} />
     </button>
   );
 }
@@ -6887,6 +6889,16 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
   onCloseDrawer: () => void;
   onLogoClick: () => void;
 }) {
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
+  const toggleSection = (id: string) => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const hasActiveChild = (item: SidebarItemConfig): boolean => {
+    return item.children?.some((child) => child.id === activeView) ?? false;
+  };
+
   return (
     <>
       <aside className={`sidebar${drawerOpen ? " drawer-open" : ""}`}>
@@ -6895,16 +6907,41 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
           <BrandLogo className="sidebar-logo" />
         </button>
         <nav className="sidebar-menu" aria-label="القائمة الرئيسية">
-          {items.map((item) => (
-            <SidebarItemButton
-              key={item.id}
-              item={item}
-              active={item.id === activeView}
-              onSelect={onSelect}
-            />
-          ))}
+          {items.map((item) => {
+            if (item.children && item.children.length > 0) {
+              const isOpen = !!openSections[item.id] || (openSections[item.id] === undefined && hasActiveChild(item));
+              const isActive = hasActiveChild(item) || item.id === activeView;
+              const ToggleIcon = isOpen ? Minus : Plus;
+              return (
+                <div key={item.id} className={`sidebar-section${isOpen ? " open" : ""}${isActive ? " has-active" : ""}`}>
+                  <button type="button" className={`sidebar-parent${isActive ? " active" : ""}`} onClick={() => toggleSection(item.id)}>
+                    <span className="sidebar-parent-copy">
+                      <item.icon size={22} />
+                      <span>{item.label}</span>
+                    </span>
+                    <span className="sidebar-toggle"><ToggleIcon size={18} /></span>
+                  </button>
+                  {isOpen && (
+                    <div className="sidebar-submenu">
+                      <div className="sidebar-submenu-inner">
+                        {item.children.map((child, index) => (
+                          <button key={`${item.id}-${index}`} type="button" className={`sidebar-subitem${child.id === activeView ? " active" : ""}`} onClick={() => onSelect(child.id)}>
+                            <child.icon size={18} />
+                            <span>{child.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <SidebarItemButton key={item.id} item={item} active={item.id === activeView} onSelect={onSelect} />
+            );
+          })}
         </nav>
-        <button className="sidebar-logout" type="button" onClick={onLogout}><span>تسجيل الخروج</span><LogOut size={16} /></button>
+        <button className="sidebar-logout" type="button" onClick={onLogout}><span>تسجيل الخروج</span><LogOut size={18} /></button>
       </aside>
       <button type="button" className="sidebar-overlay" aria-label="إغلاق القائمة" onClick={onCloseDrawer} />
     </>
@@ -7098,18 +7135,27 @@ function ZunionApp() {
   const isFinishing = currentRole === "Finishing" || currentRole === "Finish";
   const canPrintCreatedOrder = hasPermission(session, "orders.print") || hasPermission(session, "operation.print");
   const sidebarItems = useMemo<SidebarItemConfig[]>(() => {
-    const items: SidebarItemConfig[] = [
-      { id: "dashboard", label: "الرئيسية", visible: true, icon: Home },
-      { id: "new", label: "اوردر جديد", visible: true, icon: FilePlus },
-      { id: "addCustomer", label: "إضافة عميل", visible: true, icon: UserPlus },
-      { id: "addProduct", label: "إضافة منتج", visible: true, icon: PackagePlus },
-      { id: "search", label: "بحث", visible: true, icon: Search },
-      { id: "customerAccounts", label: "العمليات", visible: true, icon: Clock },
+    const all: SidebarItemConfig[] = [
+      {
+        id: "dashboard", label: "الرئيسية", visible: true, icon: Home,
+        children: [
+          { id: "new", label: "اوردر جديد", visible: true, icon: FilePlus },
+          { id: "addCustomer", label: "إضافة عميل", visible: true, icon: UserPlus },
+          { id: "addProduct", label: "إضافة منتج", visible: true, icon: PackagePlus },
+          { id: "search", label: "بحث", visible: true, icon: Search },
+        ],
+      },
+      {
+        id: "customers", label: "العملاء", visible: true, icon: Users,
+        children: [
+          { id: "customers", label: "جميع العملاء", visible: true, icon: Users },
+          { id: "customers", label: "بحث خاص بالعملاء", visible: true, icon: Search },
+          { id: "customerAccounts", label: "إضافة دفعة", visible: true, icon: Banknote },
+        ],
+      },
       { id: "worker", label: "التشغيل", visible: true, icon: Cog },
+      { id: "finish", label: "التشطيب", visible: true, icon: Wrench },
       { id: "machineDist", label: "توزيع المكن", visible: true, icon: LayoutGrid },
-      { id: "alerts", label: "التنبيهات", visible: true, icon: Bell },
-      { id: "finish", label: "التشطيبات", visible: true, icon: Wrench },
-      { id: "customers", label: "العملاء", visible: true, icon: Users },
       { id: "finance", label: "مصروفات وإيرادات", visible: true, icon: WalletCards },
       { id: "reports", label: "التقارير", visible: true, icon: BarChart3 },
       { id: "import", label: "الاستيراد والتصدير", visible: true, icon: ArrowUpDown },
@@ -7117,7 +7163,13 @@ function ZunionApp() {
       { id: "settings", label: "الإعدادات", visible: true, icon: Settings },
       { id: "orders", label: "متابعة أوردرات", visible: true, icon: ClipboardList },
     ];
-    return items.filter((item) => item.visible);
+    return all
+      .filter((item) => item.visible)
+      .map((item) =>
+        item.children
+          ? { ...item, children: item.children.filter((c) => c.visible) }
+          : item
+      );
   }, [session]);
 
   function selectSidebarView(nextView: View) {
