@@ -1,4 +1,4 @@
-import { Component, Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import * as XLSX from "xlsx";
 import {
@@ -5696,8 +5696,17 @@ function ImportExport({ orders, setOrders, session }: { orders: Order[]; setOrde
 
 function CustomerAccounts({ orders, customers: savedCustomers, session, setOrders }: { orders: Order[]; customers: Customer[]; session: Session; setOrders: React.Dispatch<React.SetStateAction<Order[]>> }) {
   const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState("");
+  const [partyFilter, setPartyFilter] = useState("");
+  const [debtorOnly, setDebtorOnly] = useState(false);
   const canPrintCustomers = hasPermission(session, "customers.print");
+
+  const partyOptions = useMemo(() => {
+    const sources = new Set<string>();
+    for (const c of savedCustomers) { if (c.source_person) sources.add(c.source_person); }
+    for (const o of orders) { if (o.source_person) sources.add(o.source_person); }
+    return Array.from(sources);
+  }, [orders, savedCustomers]);
+
   const customers = useMemo(() => {
     const grouped = new Map<string, { name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }>();
     for (const customer of savedCustomers) {
@@ -5713,30 +5722,12 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
       current.orders.push(order);
       grouped.set(key, current);
     }
-    return Array.from(grouped.values()).filter((customer) => `${customer.name} ${customer.code} ${customer.phone} ${customer.email} ${customer.address}`.toLowerCase().includes(search.toLowerCase()));
-  }, [orders, savedCustomers, search]);
-
-  function updateOldBalance(code: string, value: number) {
-    const before = orders.filter((order) => order.client_code === code);
-    setOrders((current) => current.map((order) => order.client_code === code ? calculate({ ...order, old_balance: value, updated_at: new Date().toISOString() }) : order));
-    addAudit(session, "CUSTOMER_BALANCE_UPDATED", "customers", code, before, { old_balance: value });
-  }
-
-  function printCustomer(customer: { name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }) {
-    printDocument(`طباعة بيانات العميل ${customer.name}`, printableRecord([
-      ["اسم العميل", customer.name],
-      ["كود العميل", customer.code],
-      ["رقم التليفون", customer.phone],
-      ["البريد الإلكتروني", customer.email],
-      ["العنوان", customer.address],
-      ["الطرف", customer.source],
-      ["حساب قديم", customer.old],
-      ["إجمالي الأوردرات", customer.totalOrders],
-      ["إجمالي المدفوع", customer.paid],
-      ["المتبقي", customer.remaining],
-      ["صافي الحساب", customer.net],
-    ]), session);
-  }
+    return Array.from(grouped.values()).filter((customer) => {
+      if (partyFilter && customer.source !== partyFilter) return false;
+      if (debtorOnly && customer.net <= 0) return false;
+      return `${customer.name} ${customer.code} ${customer.phone} ${customer.email} ${customer.address}`.toLowerCase().includes(search.toLowerCase());
+    });
+  }, [orders, savedCustomers, search, partyFilter, debtorOnly]);
 
   function printAllCustomers() {
     printDocument("طباعة كل العملاء", printableTable(["اسم العميل", "الكود", "الهاتف", "البريد الإلكتروني", "العنوان", "الطرف", "إجمالي الأوردرات", "المتبقي"], customers.map((customer) => [customer.name, customer.code, customer.phone, customer.email, customer.address, customer.source, customer.totalOrders, customer.remaining])), session, "landscape");
@@ -5752,31 +5743,24 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
         <h2>حسابات العملاء</h2>
         <div className="inline-actions">
           {canPrintCustomers && <button className="ghost-btn compact" type="button" onClick={printAllCustomers}>طباعة الكل</button>}
+          <select value={partyFilter} onChange={(e) => setPartyFilter(e.target.value)}>
+            <option value="">الكل</option>
+            {partyOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <button className="ghost-btn compact" type="button" style={debtorOnly ? { background: "var(--zunion-red, #d90416)", color: "#fff", borderColor: "var(--zunion-red, #d90416)" } : undefined} onClick={() => setDebtorOnly((v) => !v)}>مدان</button>
           <input placeholder="بحث باسم العميل / الكود / الهاتف / البريد / العنوان" value={search} onChange={(event) => setSearch(event.target.value)} />
         </div>
       </div>
       <div className="table-wrap accounts-table">
         <table>
-          <thead><tr>{["اسم العميل", "الكود", "الهاتف", "البريد الإلكتروني", "العنوان", "الطرف", "حساب قديم", "إجمالي الأوردرات", "إجمالي المدفوع", "المتبقي", "صافي الحساب", "الإجراءات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <thead><tr>{["الطرف", "اسم العميل", "الكود"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
           <tbody>
             {customers.map((customer) => (
-              <Fragment key={customer.code || customer.phone || customer.name}>
-                <tr key={customer.code || customer.phone}>
-                  <td>{customer.name}</td>
-                  <td>{customer.code}</td>
-                  <td>{customer.phone}</td>
-                  <td className="email-cell"><EmailText email={customer.email} /></td>
-                  <td>{customer.address || "-"}</td>
-                  <td>{customer.source}</td>
-                  <td>{session.role === "Master" ? <input type="number" value={customer.old} onChange={(event) => updateOldBalance(customer.code, Number(event.target.value))} /> : customer.old}</td>
-                  <td>{customer.totalOrders}</td>
-                  <td>{customer.paid}</td>
-                  <td>{customer.remaining}</td>
-                  <td>{customer.net}</td>
-                  <td className="actions"><button className="ghost-btn compact" onClick={() => setExpanded(expanded === customer.code ? "" : customer.code)}>عرض</button>{canPrintCustomers && <button className="ghost-btn compact" type="button" onClick={() => printCustomer(customer)}>طباعة</button>}</td>
-                </tr>
-                {expanded === customer.code && <tr><td colSpan={12}><div className="history-list">{customer.orders.map((order) => <span key={order.id}>#{order.order_number} - {order.order_type} - {orderStatusLabel(order)}</span>)}</div></td></tr>}
-              </Fragment>
+              <tr key={customer.code || customer.phone || customer.name}>
+                <td>{customer.source || "-"}</td>
+                <td>{customer.name}</td>
+                <td>{customer.code}</td>
+              </tr>
             ))}
           </tbody>
         </table>
