@@ -6969,3 +6969,234 @@ tr.ws-row-highlight td {
     min-width: 0;
   }
 }
+
+/* ================================================================
+   Order search panel (opens over the order form, no navigation)
+   ================================================================ */
+.osm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  background: rgba(9, 14, 22, .55);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.osm-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(580px, 94vw);
+  max-height: 82vh;
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 24px 70px rgba(6, 20, 38, .35);
+  overflow: hidden;
+}
+
+.osm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #E8EAEE;
+}
+
+.osm-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.osm-title svg {
+  color: #ED1525;
+  stroke: #ED1525;
+}
+
+.osm-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  background: #fff;
+  color: #6B7280;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.osm-close:hover {
+  background: #F9FAFB;
+  color: #ED1525;
+}
+
+.osm-field {
+  display: flex;
+  gap: 12px;
+  padding: 16px 18px 8px;
+}
+
+.osm-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 52px;
+  padding: 0 14px;
+  border: 1px solid #D7DBE0;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+  outline: none;
+}
+
+.osm-field input:focus {
+  border-color: #ED1525;
+  box-shadow: 0 0 0 3px rgba(237, 21, 37, .12);
+}
+
+.osm-field .osm-go {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  width: 104px;
+  height: 52px;
+  background: #ED1525;
+  color: #FFFFFF;
+  border: 1px solid #ED1525;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.osm-field .osm-go svg,
+.osm-field .osm-go * {
+  color: #FFFFFF;
+  stroke: #FFFFFF;
+}
+
+.osm-field .osm-go:hover {
+  background: #d11421;
+  border-color: #d11421;
+}
+
+.osm-field .osm-go:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.osm-count {
+  padding: 8px 18px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #6B7280;
+}
+
+.osm-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 34px 18px;
+  color: #6B7280;
+  font-size: 14px;
+  font-weight: 700;
+  min-height: 96px;
+}
+
+.osm-state.osm-error {
+  color: #d11421;
+}
+
+.osm-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(237, 21, 37, .25);
+  border-top-color: #ED1525;
+  border-radius: 50%;
+  animation: osm-spin .7s linear infinite;
+}
+
+@keyframes osm-spin {
+  to { transform: rotate(360deg); }
+}
+
+.osm-results {
+  margin: 8px 18px 16px;
+  overflow-y: auto;
+  max-height: 52vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.osm-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 128px 94px;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 14px;
+  border: 1px solid #E8EAEE;
+  border-radius: 12px;
+  background: #fff;
+  text-align: right;
+  cursor: pointer;
+  transition: background .14s ease, border-color .14s ease;
+}
+
+.osm-row:hover,
+.osm-row.osm-row-active {
+  background: #fdf3f3;
+  border-color: rgba(237, 21, 37, .45);
+}
+
+.osm-row-no {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 900;
+  direction: ltr;
+  unicode-bidi: embed;
+  text-align: left;
+}
+
+.osm-row-name {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.osm-row-date {
+  color: #6B7280;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.osm-row-status {
+  color: #ED1525;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+}
+
+@media (max-width: 560px) {
+  .osm-row {
+    grid-template-columns: 78px minmax(0, 1fr) 78px;
+  }
+
+  .osm-row-date {
+    display: none;
+  }
+
+  .osm-field .osm-go {
+    width: 88px;
+  }
+}

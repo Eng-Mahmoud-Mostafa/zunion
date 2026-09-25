@@ -3691,11 +3691,123 @@ function AlertItem({ alert }: { alert: Alert }) {
   );
 }
 
-function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSearch, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSearch?: () => void; onSave: (order: Order) => void | Promise<void>; onSaveDraft?: (order: Order) => void | Promise<void>; onSendToProduction?: (order: Order) => void | Promise<void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
+function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onClose: () => void; onSelectOrder: (order: Order) => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Order[]>([]);
+  const [total, setTotal] = useState(0);
+  const [searched, setSearched] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const seqRef = useRef(0);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setResults([]);
+    setTotal(0);
+    setSearched(false);
+    setLoading(false);
+    setError("");
+    setSelectedIndex(-1);
+    const timer = window.setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 60);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
+  function runSearch() {
+    const q = query.trim();
+    if (!q || loading) return;
+    const seq = ++seqRef.current;
+    setLoading(true);
+    setError("");
+    setSelectedIndex(-1);
+    setSearched(false);
+    backendJson<SearchApiResponse>(`/api/search?q=${encodeURIComponent(q)}`)
+      .then((result) => {
+        if (seq !== seqRef.current) return;
+        const orders = (result.orders || []).map(orderFromApi);
+        setResults(orders);
+        setTotal(Number(result.ordersTotal ?? orders.length));
+        setSearched(true);
+      })
+      .catch(() => { if (seq === seqRef.current) setError("تعذر إجراء البحث. حاول مرة أخرى."); })
+      .finally(() => { if (seq === seqRef.current) setLoading(false); });
+  }
+
+  function onSearchKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runSearch();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setSelectedIndex((index) => (results.length ? (index + 1) % results.length : -1));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setSelectedIndex((index) => (results.length ? (index - 1 + results.length) % results.length : -1));
+    }
+  }
+
+  useEffect(() => {
+    if (open && selectedIndex >= 0 && listRef.current && listRef.current.children[selectedIndex]) {
+      (listRef.current.children[selectedIndex] as HTMLElement).scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex, open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="osm-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="osm-panel" role="dialog" aria-modal="true" aria-label="بحث الأوردرات">
+        <header className="osm-head">
+          <div className="osm-title"><Search size={18} /><span>بحث الأوردرات</span></div>
+          <button type="button" className="osm-close" aria-label="إغلاق البحث" onClick={onClose}><X size={18} /></button>
+        </header>
+        <div className="osm-field">
+          <input ref={inputRef} value={query} autoFocus={open} onChange={(event) => { setQuery(event.target.value); setSearched(false); setResults([]); setSelectedIndex(-1); }} onKeyDown={onSearchKeyDown} placeholder="ابحث برقم الأوردر / اسم العميل / كود العميل" />
+          <button type="button" className="osm-go" onClick={runSearch} disabled={loading || !query.trim()}><Search size={16} /> بحث</button>
+        </div>
+        {searched && <div className="osm-count">عدد النتائج: {total}</div>}
+        {loading && <div className="osm-state"><span className="osm-spinner" /> جارٍ البحث...</div>}
+        {!loading && error && <div className="osm-state osm-error">{error}</div>}
+        {!loading && !error && searched && results.length === 0 && <div className="osm-state">لا توجد نتائج مطابقة</div>}
+        {!loading && !error && results.length > 0 && (
+          <div className="osm-results" ref={listRef}>
+            {results.map((order, index) => (
+              <button type="button" key={order.id} className={`osm-row${selectedIndex === index ? " osm-row-active" : ""}`} onMouseEnter={() => setSelectedIndex(index)} onClick={() => onSelectOrder(order)}>
+                <span className="osm-row-no">{order.order_number}</span>
+                <span className="osm-row-name">{order.client_name || "—"}</span>
+                <span className="osm-row-date">{formatDateArabic(order.created_at)}</span>
+                <span className="osm-row-status">{orderStatusLabel(order)}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<void>; onSaveDraft?: (order: Order) => void | Promise<void>; onSendToProduction?: (order: Order) => void | Promise<void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: partyOptions[0], order_number: orderNumber || String(Date.now()).slice(-6), delivery_date: isoOffset(0), created_at: new Date().toISOString() });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [draftNotice, setDraftNotice] = useState("");
   useEffect(() => {
     if (!draftNotice) return;
@@ -4200,10 +4312,11 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
   const isEdit = !!initial;
 
   return (
+    <>
     <form ref={formRef} className={`order-form order-form-modern${readOnly ? " nf-readonly" : ""}`} onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
-      {!readOnly && onSearch && (
+      {!readOnly && onOpenOrder && (
         <div className="order-form-toolbar">
-          <button type="button" className="order-form-search-btn" onClick={onSearch}><Search size={20} /><span className="order-form-search-label">بحث</span></button>
+          <button type="button" className="order-form-search-btn" onClick={() => setSearchOpen(true)}><Search size={20} /><span className="order-form-search-label">بحث</span></button>
         </div>
       )}
       <div className="nf-grid">
@@ -4422,6 +4535,8 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         ))}
       </section>
     </form>
+    <OrderSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} onSelectOrder={onOpenOrder || (() => setSearchOpen(false))} />
+    </>
   );
 }
 
@@ -7128,6 +7243,15 @@ function ZunionApp() {
     setSearchGoOrderId(saved.id);
   }
 
+  function openOrderFromSearch(order: Order) {
+    setOrders((current) => {
+      if (current.some((existing) => existing.id === order.id)) return current;
+      return [order, ...current];
+    });
+    setEditingOrderNumber(order.order_number);
+    setView("editOrder");
+  }
+
   async function sendOrderToOperation(order: Order) {
     const previous = orders.find((o) => o.id === order.id);
     const saved = await persistOrder(order);
@@ -7282,8 +7406,8 @@ function ZunionApp() {
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onSearch={() => setView("search")} onPrint={(order) => printOrderFromForm(order, orders)} />}
-          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onSearch={() => { setEditingOrderNumber(null); setView("search"); }} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
