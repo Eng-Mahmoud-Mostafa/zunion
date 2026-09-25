@@ -7108,7 +7108,7 @@ function ZunionApp() {
           { id: "new", label: "اوردر جديد", visible: true, icon: FilePlus },
           { id: "addCustomer", label: "إضافة عميل", visible: true, icon: UserPlus },
           { id: "addProduct", label: "إضافة منتج", visible: true, icon: PackagePlus },
-          { id: "search", label: "بحث", visible: true, icon: Search },
+          { id: "orders", label: "متابعة أوردرات", visible: true, icon: ClipboardList },
         ],
       },
       {
@@ -7127,7 +7127,6 @@ function ZunionApp() {
       { id: "import", label: "الاستيراد والتصدير", visible: true, icon: ArrowUpDown },
       { id: "audit", label: "سجل العمليات", visible: true, icon: History },
       { id: "settings", label: "الإعدادات", visible: true, icon: Settings },
-      { id: "orders", label: "متابعة أوردرات", visible: true, icon: ClipboardList },
     ];
     return all
       .filter((item) => item.visible)
@@ -7193,7 +7192,7 @@ function ZunionApp() {
     <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
       <Sidebar
         items={sidebarItems}
-        activeView={view === "editOrder" ? "search" : view}
+        activeView={view === "editOrder" || view === "search" ? "orders" : view}
         drawerOpen={drawerOpen}
         onSelect={selectSidebarView}
         onLogout={logout}
