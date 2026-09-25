@@ -1,10 +1,9 @@
 import type { PoolClient } from "pg";
 import { query } from "./db.js";
 
-export function nextOrderNumber() {
-  const now = new Date();
-  const yy = String(now.getFullYear()).slice(-2);
-  return `${yy}-${now.getMonth() + 1}-${now.getDate()}-${String(Date.now()).slice(-6)}`;
+export async function nextOrderNumber(client: PoolClient) {
+  const { rows } = await client.query<{ n: string }>("select lpad(nextval('orders_number_seq')::text, 5, '0') as n");
+  return rows[0]?.n ?? "";
 }
 
 export async function ensureCustomer(client: PoolClient, input: {

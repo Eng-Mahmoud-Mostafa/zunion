@@ -545,6 +545,10 @@ and not exists (
   select 1 from order_items where order_items.order_id = orders.id
 );
 
+-- Order display numbers: one shared, never-reset sequence (00001, 00002, ...).
+-- ensureSchema realigns it to the highest stored all-digit order_number at boot.
+create sequence if not exists orders_number_seq minvalue 1 start 1 increment by 1 no cycle;
+
 -- users_profile: Supabase-managed user directory used by the server's REST admin routes.
 -- This lives alongside the pg \`users\` table; both are kept in sync by the backend.
 create table if not exists users_profile (

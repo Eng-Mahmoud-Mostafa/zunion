@@ -187,6 +187,25 @@ async function syncPhotosTable(log: (msg: string) => void) {
 }
 
 /**
+ * Dedicated sequence for the display order number (00001, 00002, ...). Created
+ * once, never reset, and aligned to continue after the highest existing
+ * all-digit number already stored on orders. The unique index on
+ * orders.order_number is the final guard against duplicates.
+ */
+async function syncOrderNumberSequence(log: (msg: string) => void) {
+  await guarded(
+    () =>
+      query(`create sequence if not exists orders_number_seq minvalue 1 start 1 increment by 1 no cycle;
+        select setval('orders_number_seq', greatest(
+          (select coalesce(max((order_number)::bigint), 0) + 1 from orders where order_number ~ '^[0-9]{5,}$'),
+          (select last_value + case when is_called then 1 else 0 end from orders_number_seq)
+        ), false);`),
+    log,
+    "order number sequence",
+  );
+}
+
+/**
  * Repairs schema drift on an existing database. Runs on every boot after the
  * full bootstrap: it cheaply diffs the orders table/catalog and adds whatever
  * is missing, so the backend never writes into a stale schema. All statements
@@ -199,6 +218,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncOrderStatusEnum(log);
   await syncOrdersTriggers(log);
   await syncPhotosTable(log);
+  await syncOrderNumberSequence(log);
 }
 
 /**

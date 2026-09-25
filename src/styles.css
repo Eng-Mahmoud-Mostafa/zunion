@@ -7418,3 +7418,54 @@ tr.ws-row-highlight td {
     padding: 18px;
   }
 }
+
+/* ---------- horizontal materials radios (الخامات) ---------- */
+.nf-card-order .nf-row-products {
+  grid-template-columns: 1fr 1.5fr 0.6fr 0.7fr 0.7fr 2.5fr !important;
+}
+
+.nf-card-order .nf-materials-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.nf-card-order .nf-materials-line .nf-materials-label {
+  color: var(--navy);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.nf-card-order .nf-field-materials-inrow .nf-radio-group {
+  flex-wrap: nowrap;
+  align-items: center;
+  align-content: center;
+  gap: 12px;
+  min-height: 36px;
+}
+
+.nf-card-order .nf-field-materials-inrow .nf-radio {
+  flex: 0 0 auto;
+  gap: 7px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+@media (max-width: 560px) {
+  .nf-card-order .nf-row-products {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important;
+  }
+
+  .nf-card-order .nf-field-materials-inrow {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+.nf-card-order .nf-row-order .nf-field input[readonly] {
+  text-overflow: clip;
+  white-space: nowrap;
+}

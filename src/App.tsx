@@ -605,20 +605,6 @@ function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `order-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function nextOrderNumber(orders: Order[]) {
-  const date = new Date();
-  const prefix = `${String(date.getFullYear()).slice(-2)}-${date.getMonth() + 1}-${date.getDate()}`;
-  const next = orders
-    .map((order) => order.order_number)
-    .filter((number) => number.startsWith(`${prefix}-`))
-    .map((number) => {
-      const parts = number.split("-");
-      return Number(parts[parts.length - 1] || 0);
-    })
-    .reduce((max, number) => Math.max(max, Number.isFinite(number) ? number : 0), 0) + 1;
-  return `${prefix}-${String(next).padStart(6, "0")}`;
-}
-
 function partyPrefix(value: string) {
   const normalized = value.trim();
   if (normalized.includes("أحمد") || normalized.includes("احمد")) return "A";
@@ -3813,8 +3799,8 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
   );
 }
 
-function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<void>; onSaveDraft?: (order: Order) => void | Promise<void>; onSendToProduction?: (order: Order) => void | Promise<void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
-  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: partyOptions[0], order_number: orderNumber || String(Date.now()).slice(-6), delivery_date: isoOffset(0), created_at: new Date().toISOString() });
+function OrderForm({ initial, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
+  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: partyOptions[0], delivery_date: isoOffset(0), created_at: new Date().toISOString() });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -4165,7 +4151,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     const nextErrors: Record<string, string> = {};
     const normalizedOperationItems = operationItems.map((item) => ({ ...item, method: item.method.trim() }));
     const methods = normalizedOperationItems.map((item) => item.method).filter(Boolean);
-    if (!form.order_number.trim()) nextErrors.order_number = "رقم الأوردر مطلوب";
     if (!form.client_name.trim()) nextErrors.client_name = "اسم العميل مطلوب";
     if (Number(form.quantity || 0) < 1) nextErrors.quantity = "العدد يجب أن يكون 1 على الأقل";
     if (Number(form.price || 0) < 0) nextErrors.price = "السعر لا يمكن أن يكون بالسالب";
@@ -4201,7 +4186,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     });
   }
 
-  function saveValidated(forceOperation: boolean, done: (order: Order) => void | Promise<void>) {
+  function saveValidated(forceOperation: boolean, done: (order: Order) => void | Promise<Order | void>) {
     return async (event: React.FormEvent) => {
       event.preventDefault();
       if (saving) return;
@@ -4210,7 +4195,10 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
       setSaving(true);
       setSaveError("");
       try {
-        await done(order);
+        const saved = await done(order);
+        if (saved && saved.order_number) {
+          setForm((current) => calculate({ ...current, id: saved.id, order_number: saved.order_number, order_status: saved.order_status || current.order_status, updated_at: new Date().toISOString() }));
+        }
       } catch (error) {
         setSaveError(error instanceof Error ? error.message : "تعذر حفظ الأوردر. حاول مرة أخرى.");
         setSaving(false);
@@ -4249,7 +4237,10 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     setSaveError("");
     setDraftNotice("");
     try {
-      await onSaveDraft?.(order);
+      const saved = await onSaveDraft?.(order);
+      if (saved && saved.order_number) {
+        setForm((current) => calculate({ ...current, id: saved.id, order_number: saved.order_number, updated_at: new Date().toISOString() }));
+      }
       setDraftNotice("تم حفظ الأوردر كمسودة بنجاح");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "تعذر حفظ المسودة. حاول مرة أخرى.");
@@ -4346,7 +4337,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               </label>
               <label className="nf-field">
                 <span>رقم الأوردر</span>
-                <input value={form.order_number} readOnly />
+                <input value={form.order_number} readOnly placeholder="يُولَّد عند الحفظ" title={form.order_number} />
               </label>
               <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
                 <span>اسم العميل<em className="nf-required">*</em></span>
@@ -4430,22 +4421,24 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <ErrorText message={errors.price} />
               </label>
               <ReadonlyText className="nf-field" label="الإجمالي" value={(form.quantity || form.price) ? formatNumber(computed.total) : ""} />
-              <label className={`nf-field nf-field-materials-inrow${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
-                <span>الخامات<em className="nf-required">*</em></span>
-                <div className="nf-radio-group">
-                  <label className="nf-radio">
-                    <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} disabled={readOnly} />
-                    <span className="nf-radio-mark" aria-hidden="true" />
-                    <span>موجود</span>
-                  </label>
-                  <label className="nf-radio">
-                    <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} disabled={readOnly} />
-                    <span className="nf-radio-mark" aria-hidden="true" />
-                    <span>غير موجود</span>
-                  </label>
+              <div className={`nf-field nf-field-materials-inrow${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
+                <div className="nf-materials-line">
+                  <span className="nf-materials-label">الخامات<em className="nf-required">*</em></span>
+                  <div className="nf-radio-group">
+                    <label className="nf-radio">
+                      <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} disabled={readOnly} />
+                      <span className="nf-radio-mark" aria-hidden="true" />
+                      <span>موجود</span>
+                    </label>
+                    <label className="nf-radio">
+                      <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} disabled={readOnly} />
+                      <span className="nf-radio-mark" aria-hidden="true" />
+                      <span>غير موجود</span>
+                    </label>
+                  </div>
                 </div>
                 <ErrorText message={errors.materialsStatus} />
-              </label>
+              </div>
             </div>
 
           </section>
@@ -7231,21 +7224,22 @@ function ZunionApp() {
         // Fall back to idempotent create (handles orders that never reached the backend).
       }
     }
-    const result = await backendJson<{ id: string }>("/api/orders", { method: "POST", body });
-    return { ...orderWithRefs, id: result.id };
+    const result = await backendJson<{ id: string; order_number?: string }>("/api/orders", { method: "POST", body });
+    return { ...orderWithRefs, id: result.id, order_number: result.order_number || orderWithRefs.order_number };
   }
 
-  async function saveNew(order: Order) {
+  async function saveNew(order: Order): Promise<Order> {
     const saved = await persistOrder(order);
     setOrders((current) => [saved, ...current.filter((o) => o.id !== saved.id)]);
     addAudit(session, "ORDER_CREATED", "orders", saved.id, undefined, saved);
     setCreatedOrder(saved);
     setSearchGoOrderId(saved.id);
     setView("search");
+    return saved;
   }
 
-  async function saveEdited(order: Order) {
-    if ((session?.role ?? "Master") !== "Master") return;
+  async function saveEdited(order: Order): Promise<Order> {
+    if ((session?.role ?? "Master") !== "Master") return order;
     const previous = orders.find(o => o.id === order.id);
     const saved = await persistOrder(order);
     setOrders(current => current.map(o => o.id === saved.id ? saved : o));
@@ -7253,9 +7247,10 @@ function ZunionApp() {
     setEditingOrderNumber(null);
     setSearchGoOrderId(saved.id);
     setView("search");
+    return saved;
   }
 
-  async function saveDraftOrder(order: Order) {
+  async function saveDraftOrder(order: Order): Promise<Order> {
     const previous = orders.find((o) => o.id === order.id);
     const saved = await persistOrder(order);
     setOrders((current) => {
@@ -7264,6 +7259,7 @@ function ZunionApp() {
     });
     addAudit(session, "ORDER_DRAFTED", "orders", saved.id, previous, saved);
     setSearchGoOrderId(saved.id);
+    return saved;
   }
 
   function openOrderFromSearch(order: Order) {
@@ -7275,7 +7271,7 @@ function ZunionApp() {
     setView("editOrder");
   }
 
-  async function sendOrderToOperation(order: Order) {
+  async function sendOrderToOperation(order: Order): Promise<Order> {
     const previous = orders.find((o) => o.id === order.id);
     const saved = await persistOrder(order);
     setOrders((current) => {
@@ -7286,6 +7282,7 @@ function ZunionApp() {
     setEditingOrderNumber(null);
     setWorkerGoOrderId(saved.id);
     setView("worker");
+    return saved;
   }
 
   const currentRole = session?.role ?? "Master";
@@ -7406,8 +7403,8 @@ function ZunionApp() {
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
-          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "new" && <OrderForm customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
