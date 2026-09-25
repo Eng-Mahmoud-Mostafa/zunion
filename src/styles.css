@@ -6824,49 +6824,62 @@ tr.ws-row-highlight td {
   font-size: 16px;
   font-weight: 800;
   cursor: pointer;
-  transition: background .16s ease, transform .16s ease, box-shadow .16s ease;
+  transition: color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+
+.order-form-search-btn,
+.order-form-search-btn:hover,
+.order-form-search-btn:focus,
+.order-form-search-btn:focus-visible,
+.order-form-search-btn:active {
+  color: #FFFFFF !important;
+}
+
+.order-form-search-btn .order-form-search-label {
+  color: #FFFFFF !important;
+  line-height: 1;
+}
+
+.order-form-search-btn:hover .order-form-search-label,
+.order-form-search-btn:focus .order-form-search-label,
+.order-form-search-btn:focus-visible .order-form-search-label,
+.order-form-search-btn:active .order-form-search-label {
+  color: #FFFFFF !important;
 }
 
 .order-form-search-btn svg,
 .order-form-search-btn * {
-  color: #FFFFFF;
-  stroke: #FFFFFF;
+  color: #FFFFFF !important;
+  stroke: #FFFFFF !important;
+  fill: none !important;
+}
+
+.order-form-search-btn:hover svg,
+.order-form-search-btn:hover *,
+.order-form-search-btn:focus svg,
+.order-form-search-btn:focus *,
+.order-form-search-btn:focus-visible svg,
+.order-form-search-btn:focus-visible *,
+.order-form-search-btn:active svg,
+.order-form-search-btn:active * {
+  color: #FFFFFF !important;
+  stroke: #FFFFFF !important;
+  fill: none !important;
 }
 
 .order-form-search-btn:hover {
   background: #d11421;
   border-color: #d11421;
-  color: #FFFFFF;
   box-shadow: 0 8px 18px rgba(237, 21, 37, .28);
-}
-
-.order-form-search-btn:hover svg,
-.order-form-search-btn:hover * {
-  color: #FFFFFF;
-  stroke: #FFFFFF;
 }
 
 .order-form-search-btn:focus-visible {
   outline: 2px solid #d11421;
   outline-offset: 2px;
-  color: #FFFFFF;
-}
-
-.order-form-search-btn:focus-visible svg,
-.order-form-search-btn:focus-visible * {
-  color: #FFFFFF;
-  stroke: #FFFFFF;
 }
 
 .order-form-search-btn:active {
   transform: translateY(1px);
-  color: #FFFFFF;
-}
-
-.order-form-search-btn:active svg,
-.order-form-search-btn:active * {
-  color: #FFFFFF;
-  stroke: #FFFFFF;
 }
 
 /* draft save success / failure feedback */

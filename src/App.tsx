@@ -4203,7 +4203,7 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     <form ref={formRef} className={`order-form order-form-modern${readOnly ? " nf-readonly" : ""}`} onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
       {!readOnly && onSearch && (
         <div className="order-form-toolbar">
-          <button type="button" className="order-form-search-btn" onClick={onSearch}><Search size={20} /> بحث</button>
+          <button type="button" className="order-form-search-btn" onClick={onSearch}><Search size={20} /><span className="order-form-search-label">بحث</span></button>
         </div>
       )}
       <div className="nf-grid">
