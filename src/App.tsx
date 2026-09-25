@@ -1009,55 +1009,84 @@ function printOrderDocument(order: Order, _session?: Session | null) {
   void printOrderClean(order);
 }
 
-async function printOrderFromForm(order: Order, knownOrders: Order[]) {
-  const alreadySaved = knownOrders.some((existing) => existing.id === order.id);
-  let persistOk = Boolean(order.id) && alreadySaved;
-  if (order.id && !alreadySaved) {
+async function printableImageSource(url: string): Promise<string> {
+  if (!url) return "";
+  if (url.startsWith("data:")) return url;
+  if (url.startsWith("blob:")) {
     try {
-      const body = JSON.stringify(orderToApi(order));
-      await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body })
-        .catch(() => backendJson("/api/orders", { method: "POST", body }));
-      persistOk = true;
-    } catch (error) {
-      console.warn("[Zunion] Order could not be persisted before printing; QR omitted.", error);
+      const blob = await (await fetch(url)).blob();
+      return await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => resolve("");
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return "";
     }
   }
-  await printOrderClean(order, { includeQr: persistOk && Boolean(orderQrUrl(order)) });
+  return url;
 }
 
-async function printOrderClean(order: Order, _options?: { includeQr?: boolean }) {
-  const popup = window.open("", "_blank", "width=1000,height=760");
+async function printOrderFromForm(order: Order, _knownOrders: Order[]) {
+  await printOrderClean(order);
+}
+
+async function printOrderClean(order: Order) {
+  const attachments = (order.operationItems || [])
+    .flatMap((item) => {
+      const out: { src: string; label: string }[] = [];
+      if (item.workOrderImage) out.push({ src: item.workOrderImage, label: "أمر الشغل" });
+      if (item.logoImage) out.push({ src: item.logoImage, label: "أمر اللوجو" });
+      return out;
+    });
+  const imageRows = (await Promise.all(attachments.map(async (att) => ({ ...att, src: await printableImageSource(att.src) })))).filter((row) => row.src);
+  const popup = window.open("", "_blank", "width=1000,height=920");
+  const fields: Array<[string, string]> = [
+    ["رقم الأوردر", order.order_number || "—"],
+    ["تاريخ عمل الأوردر", orderPrintDate(order)],
+    ["الطرف", order.source_person || "—"],
+    ["اسم العميل", order.client_name || "—"],
+    ["كود العميل", order.client_code || "—"],
+    ["نوع الأوردر", order.order_type || "—"],
+    ["نوع المنتج", order.productName || "—"],
+    ["العدد", formatNumber(order.quantity)],
+    ["السعر", order.price ? formatNumber(order.price) : "—"],
+    ["الإجمالي", order.total ? formatNumber(order.total) : "—"],
+    ["الخامات", materialStatusLabel(order.materialsStatus)],
+    ["تاريخ التسليم", order.delivery_date ? formatDateArabic(order.delivery_date) : "—"],
+  ];
   const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>${escapeHtml(`طباعة الأوردر ${order.order_number}`)}</title>
     <style>
-      @page{size:8in 8in;margin:0.2in}
+      @page{size:8.5in 11in;margin:0.25in}
       *{box-sizing:border-box}
-      html,body{margin:0;padding:0;width:8in;height:8in;background:#fff}
+      html,body{margin:0;padding:0;background:#fff}
       body{font-family:Tahoma,Arial,sans-serif;color:#111827;direction:rtl}
-      .print-summary{width:7.6in;max-width:7.6in;min-height:7.6in;margin:0 auto;padding:0.25in;box-sizing:border-box;direction:rtl;text-align:right;display:flex;flex-direction:column}
-      .ps-order-no{font-size:30px;font-weight:900;color:#111827;text-align:center;margin:0 0 0.35in;line-height:1.1}
+      .print-summary{width:8in;max-width:8in;margin:0 auto;padding:0.2in;direction:rtl;text-align:right}
+      .ps-order-no{font-size:28px;font-weight:900;color:#111827;text-align:center;margin:0 0 0.3in;line-height:1.1}
       .ps-order-no small{display:block;font-size:13px;font-weight:700;color:#6b7280;margin-bottom:2px}
       .ps-order-no .num{direction:ltr;unicode-bidi:embed}
-      .ps-grid{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:0.15in 0.3in;margin-bottom:0.35in}
-      .ps-field{background:#f3f6fa;border:1px solid #e5e7eb;border-radius:8px;padding:0.15in 0.18in;break-inside:avoid;page-break-inside:avoid}
+      .ps-grid{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:0.15in 0.3in;margin-bottom:0.3in}
+      .ps-field{background:#f3f6fa;border:1px solid #e5e7eb;border-radius:8px;padding:0.14in 0.18in;break-inside:avoid;page-break-inside:avoid}
       .ps-field small{display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:3px}
-      .ps-field b{font-size:16px;font-weight:800;color:#111827;overflow-wrap:anywhere;word-break:break-word}
-      .ps-details{background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:0.18in;flex:1 1 auto;white-space:pre-wrap;font-size:15px;line-height:1.7;color:#111827;overflow-wrap:anywhere;word-break:break-word;min-height:1.2in}
+      .ps-field b{font-size:15px;font-weight:800;color:#111827;overflow-wrap:anywhere;word-break:break-word}
+      .ps-details{background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:0.16in;white-space:pre-wrap;font-size:15px;line-height:1.7;color:#111827;overflow-wrap:anywhere;word-break:break-word;min-height:0.8in}
       .ps-details-label{font-size:13px;font-weight:800;color:#6b7280;margin-bottom:4px}
-      @media print{body{padding:0}.print-summary{min-height:7.6in}}
+      .ps-images{display:flex;flex-wrap:wrap;gap:0.18in;margin-top:0.25in}
+      .ps-img-field{width:2.4in;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:0.1in;text-align:center;break-inside:avoid;page-break-inside:avoid}
+      .ps-img-field small{display:block;font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px}
+      .ps-img-field img{max-width:100%;max-height:2.4in;border-radius:6px}
     </style></head><body>
     <div class="print-summary">
       <div class="ps-order-no"><small>رقم الأوردر</small><div class="num">${escapeHtml(order.order_number)}</div></div>
       <div class="ps-grid">
-        <div class="ps-field"><small>طرف</small><b>${escapeHtml(order.source_person || "—")}</b></div>
-        <div class="ps-field"><small>اسم العميل</small><b>${escapeHtml(order.client_name || "—")}</b></div>
-        <div class="ps-field"><small>كود العميل</small><b>${escapeHtml(order.client_code || "—")}</b></div>
-        <div class="ps-field"><small>نوع المنتج</small><b>${escapeHtml(order.order_type || order.productName || "—")}</b></div>
-        <div class="ps-field"><small>العدد</small><b>${escapeHtml(formatNumber(order.quantity ?? order.items?.length ?? 0))}</b></div>
+        ${fields.map(([label, value]) => `<div class="ps-field"><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></div>`).join("")}
       </div>
       <div class="ps-details">
         <div class="ps-details-label">التفاصيل</div>
         ${escapeHtml(order.details || "—")}
       </div>
+      ${imageRows.length ? `<div class="ps-images">${imageRows.map((img) => `<div class="ps-img-field"><small>${escapeHtml(img.label)}</small><img src="${escapeHtml(img.src)}" alt="${escapeHtml(img.label)}" /></div>`).join("")}</div>` : ""}
     </div>
     </body></html>`;
   if (!popup) {
@@ -1067,7 +1096,7 @@ async function printOrderClean(order: Order, _options?: { includeQr?: boolean })
   popup.document.write(html);
   popup.document.close();
   popup.focus();
-  setTimeout(() => popup.print(), 250);
+  setTimeout(() => popup.print(), 350);
 }
 
 function orderPrintDate(order: Order) {
@@ -1075,7 +1104,7 @@ function orderPrintDate(order: Order) {
   if (!date) return "—";
   const parsed = new Date(date);
   if (Number.isNaN(parsed.getTime())) return normalizeDigitsToEnglish(date);
-  return formatDateArabic(date);
+  return formatDateTimeCairo(date);
 }
 
 const arabicColumns: Partial<Record<keyof Order, string>> = {
@@ -3662,11 +3691,17 @@ function AlertItem({ alert }: { alert: Alert }) {
   );
 }
 
-function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void | Promise<void>; onSaveDraft?: (order: Order) => void | Promise<void>; onSendToProduction?: (order: Order) => void | Promise<void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
+function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSearch, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSearch?: () => void; onSave: (order: Order) => void | Promise<void>; onSaveDraft?: (order: Order) => void | Promise<void>; onSendToProduction?: (order: Order) => void | Promise<void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: partyOptions[0], order_number: orderNumber || String(Date.now()).slice(-6), delivery_date: isoOffset(0), created_at: new Date().toISOString() });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [draftNotice, setDraftNotice] = useState("");
+  useEffect(() => {
+    if (!draftNotice) return;
+    const timer = setTimeout(() => setDraftNotice(""), 6000);
+    return () => clearTimeout(timer);
+  }, [draftNotice]);
   const [productSearch, setProductSearch] = useState("");
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
   const [productHighlight, setProductHighlight] = useState(-1);
@@ -4089,8 +4124,10 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     });
     setSaving(true);
     setSaveError("");
+    setDraftNotice("");
     try {
       await onSaveDraft?.(order);
+      setDraftNotice("تم حفظ الأوردر كمسودة بنجاح");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "تعذر حفظ المسودة. حاول مرة أخرى.");
       setSaving(false);
@@ -4164,6 +4201,11 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
 
   return (
     <form ref={formRef} className={`order-form order-form-modern${readOnly ? " nf-readonly" : ""}`} onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
+      {!readOnly && onSearch && (
+        <div className="order-form-toolbar">
+          <button type="button" className="order-form-search-btn" onClick={onSearch}><Search size={20} /> بحث</button>
+        </div>
+      )}
       <div className="nf-grid">
         <div className="nf-col nf-col-right">
           <section className="nf-card nf-card-order">
@@ -4313,18 +4355,25 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
         <ErrorText message={saveError} />
       </div>
 
+      <div className="nf-draft-notice">
+        {draftNotice && <small className="field-success">{draftNotice}</small>}
+      </div>
+
       <div className="nf-actionbar">
         {readOnly ? (
           <>
             <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> رجوع</button>
-            {onPrint && <button type="button" className="ghost-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة الأوردر</button>}
+            {onPrint && <button type="button" className="primary-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة</button>}
+          </>
+        ) : onSaveDraft || onSendToProduction ? (
+          <>
+            {onSaveDraft && <button type="button" className="primary-btn nf-btn nf-btn-draft" onClick={saveDraftTemp} disabled={saving}><FilePlus size={16} /> حفظ مؤقت</button>}
+            {onSendToProduction && <button type="button" className="primary-btn nf-btn nf-btn-to-op" onClick={sendToOperation} disabled={saving}><Truck size={16} /> اذهب للتشغيل</button>}
+            {onPrint && <button type="button" className="primary-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة</button>}
           </>
         ) : (
           <>
             <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : isEdit ? "تحديث الأوردر" : "إرسال أوردر"} <Send size={16} /></button>
-            {onSaveDraft && <button type="button" className="ghost-btn nf-btn nf-btn-draft" onClick={saveDraftTemp} disabled={saving}><FilePlus size={16} /> حفظ كمسودة</button>}
-            {onSendToProduction && <button type="button" className="ghost-btn nf-btn nf-btn-to-op" onClick={sendToOperation} disabled={saving}><Truck size={16} /> اذهب للتشغيل</button>}
-            {onPrint && <button type="button" className="ghost-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة الأوردر</button>}
             {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
           </>
         )}
@@ -7076,8 +7125,7 @@ function ZunionApp() {
       return prev ? current.map((o) => o.id === saved.id ? saved : o) : [saved, ...current];
     });
     addAudit(session, "ORDER_DRAFTED", "orders", saved.id, previous, saved);
-    setEditingOrderNumber(null);
-    setView("search");
+    setSearchGoOrderId(saved.id);
   }
 
   async function sendOrderToOperation(order: Order) {
@@ -7202,29 +7250,12 @@ function ZunionApp() {
       <main className="content">
         <header className="topbar">
           <button type="button" className="hamburger-btn" aria-label="فتح القائمة" onClick={() => setDrawerOpen(true)}><Menu size={24} /></button>
-          <div className="topbar-user">
-            <div className="topbar-avatar"><User size={20} /></div>
-            <div className="topbar-user-copy">
-              <strong>مرحبا، {session.fullName || session.username || <EmailText email={session.email} className="account-email" />}</strong>
-              <span>{session.role}</span>
-            </div>
+          <div className="topbar-current">
+            <span className="topbar-current-label">المستخدم الحالي</span>
+            <strong className="topbar-current-name">{session.username || session.fullName || <EmailText email={session.email} className="account-email" />}</strong>
           </div>
-          <div className="topbar-title">
-            <h1>نظام Zunion لإدارة الأوردرات</h1>
-          </div>
-          <button type="button" className="logo-secret-button top-logo-button" aria-label="شعار Zunion" onClick={handleLogoSecretClick}>
-            <BrandLogo className="top-logo" />
-          </button>
-          <GlobalSearchBar
-            orders={orders}
-            customers={customers}
-            products={products}
-            onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }}
-            onCustomerClick={(code, name) => setCustomerDrawer({ code, name })}
-            onProductClick={(product) => setProductDrawer(product)}
-            onUserClick={(user) => setUserDrawer(user)}
-          />
           <button type="button" className="topbar-bell" aria-label="التنبيهات" onClick={() => selectSidebarView("alerts")}><Bell size={20} /><span className="topbar-notification-dot" /></button>
+          <div className="topbar-brand" dir="ltr">zunion system control</div>
         </header>
         <section className="page">
           {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}
@@ -7251,8 +7282,8 @@ function ZunionApp() {
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onPrint={(order) => printOrderFromForm(order, orders)} />}
-          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "new" && <OrderForm orderNumber={nextOrderNumber(orders)} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onSearch={() => setView("search")} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} orderNumber={editingOrder.order_number} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onSearch={() => { setEditingOrderNumber(null); setView("search"); }} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
