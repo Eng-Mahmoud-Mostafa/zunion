@@ -40,3 +40,18 @@ export function formatDateTimeEnglish(date: string | number | Date | null | unde
     hour12: false,
   }).format(parsed));
 }
+
+export function formatDateTimeCairo(date: string | number | Date | null | undefined) {
+  if (!date) return "-";
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return normalizeDigitsToEnglish(date).replace(/NaN/g, "");
+  return normalizeDigitsToEnglish(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Cairo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(parsed));
+}

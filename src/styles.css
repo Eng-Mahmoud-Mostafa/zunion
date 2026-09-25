@@ -3637,6 +3637,13 @@ input[type="date"] {
   padding: 5px 12px !important;
 }
 
+.nf-card-order .nf-row-order input[readonly] {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nf-card-order .nf-materials {
   margin-top: 12px;
   gap: 10px 14px;
@@ -3664,6 +3671,29 @@ input[type="date"] {
 .nf-card-order .nf-radio-mark::after {
   width: 7px;
   height: 7px;
+}
+
+.nf-card-order .nf-field-materials-inrow .nf-radio-group {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 36px;
+  align-content: center;
+}
+
+.nf-card-order .nf-field-materials-inrow .nf-radio {
+  gap: 6px;
+  font-size: 12px;
+}
+
+.nf-card-order .nf-field-materials-inrow .nf-radio-mark {
+  flex-basis: 15px;
+  width: 15px;
+  height: 15px;
+}
+
+.nf-card-order .nf-field-materials-inrow .nf-radio-mark::after {
+  width: 6px;
+  height: 6px;
 }
 
 /* ---------- fields ---------- */

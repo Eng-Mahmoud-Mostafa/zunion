@@ -58,7 +58,7 @@ import {
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
 import CustomerAccountsPage from "./components/CustomerAccountsPage";
-import { formatDateArabic, formatDateTimeEnglish, formatMoney, formatNumber, normalizeDigitsToEnglish } from "./utils/formatters";
+import { formatDateArabic, formatDateTimeCairo, formatDateTimeEnglish, formatMoney, formatNumber, normalizeDigitsToEnglish } from "./utils/formatters";
 import {
   getDashboardStats,
   getMonthlyFinancialStats,
@@ -3663,7 +3663,7 @@ function AlertItem({ alert }: { alert: Alert }) {
 }
 
 function OrderForm({ initial, orderNumber, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; orderNumber?: string; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onSave: (order: Order) => void | Promise<void>; onSaveDraft?: (order: Order) => void | Promise<void>; onSendToProduction?: (order: Order) => void | Promise<void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
-  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), order_number: orderNumber || String(Date.now()).slice(-6), delivery_date: isoOffset(0) });
+  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: partyOptions[0], order_number: orderNumber || String(Date.now()).slice(-6), delivery_date: isoOffset(0), created_at: new Date().toISOString() });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -4007,17 +4007,10 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     const nextErrors: Record<string, string> = {};
     const normalizedOperationItems = operationItems.map((item) => ({ ...item, method: item.method.trim() }));
     const methods = normalizedOperationItems.map((item) => item.method).filter(Boolean);
-    const total = Number(form.quantity || 0) * Number(form.price || 0);
-    const paid = Number(form.paid || 0);
     if (!form.order_number.trim()) nextErrors.order_number = "رقم الأوردر مطلوب";
     if (!form.client_name.trim()) nextErrors.client_name = "اسم العميل مطلوب";
-    if (!form.source_person.trim()) nextErrors.source_person = "الطرف مطلوب";
     if (Number(form.quantity || 0) < 1) nextErrors.quantity = "العدد يجب أن يكون 1 على الأقل";
     if (Number(form.price || 0) < 0) nextErrors.price = "السعر لا يمكن أن يكون بالسالب";
-    if (paid < 0) nextErrors.paid = "المدفوع لا يمكن أن يكون بالسالب";
-    if (paid > total) nextErrors.paid = "المدفوع لا يمكن أن يكون أكبر من الإجمالي";
-    if (!form.paymentMethod) nextErrors.paymentMethod = "طريقة الدفع مطلوبة";
-    if (form.paymentMethod === "other" && !form.customPaymentMethod?.trim()) nextErrors.customPaymentMethod = "اكتب طريقة الدفع";
     if (!normalizeMaterialsStatus(form.materialsStatus)) nextErrors.materialsStatus = "يجب تحديد حالة الخامات";
     if (!form.delivery_date) nextErrors.delivery_date = "تاريخ التسليم مطلوب";
     if (methods.length === 0) nextErrors.operationMethods = "يجب إضافة طريقة تشغيل واحدة على الأقل";
@@ -4106,7 +4099,6 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
     setSaving(false);
   }
   const canSubmit = Boolean(
-    form.source_person.trim() &&
     form.client_name.trim() &&
     form.delivery_date &&
     Number(form.quantity || 0) >= 1 &&
@@ -4179,10 +4171,13 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
               <span className="nf-card-icon"><ClipboardList size={19} /></span>
               <div>
                 <h3>{isEdit ? `تفاصيل الطلب #${form.order_number}` : "أوردر جديد"}</h3>
-                <p>رقم الأوردر والطرف والعميل وموعد التسليم وتفاصيل المنتج والدفع</p>
               </div>
             </header>
             <div className="nf-row nf-row-order">
+              <label className="nf-field">
+                <span>تاريخ عمل الأوردر</span>
+                <input value={formatDateTimeCairo(form.created_at)} readOnly />
+              </label>
               <label className="nf-field">
                 <span>رقم الأوردر</span>
                 <input value={form.order_number} readOnly />
@@ -4269,52 +4264,23 @@ function OrderForm({ initial, orderNumber, customers = [], products = [], canAdd
                 <ErrorText message={errors.price} />
               </label>
               <ReadonlyText className="nf-field" label="الإجمالي" value={(form.quantity || form.price) ? formatNumber(computed.total) : ""} />
-              <label className={`nf-field${errors.paid ? " nf-field-invalid" : ""}`}>
-                <span>دفع</span>
-                <input type="number" min={0} step="0.01" value={form.paid || ""} onChange={(event) => set("paid", Number(event.target.value))} disabled={readOnly} />
-                <ErrorText message={errors.paid} />
-              </label>
-              <ReadonlyText className="nf-field" label="المتبقي" value={(form.quantity || form.price || form.paid) ? formatNumber(computed.remaining) : ""} />
-              <label className={`nf-field${errors.paymentMethod ? " nf-field-invalid" : ""}`}>
-                <span>طريقة الدفع</span>
-                <select value={form.paymentMethod || ""} onChange={(event) => set("paymentMethod", event.target.value)} disabled={readOnly}>
-                  <option value="">اختر طريقة الدفع</option>
-                  {paymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
-                </select>
-                <ErrorText message={errors.paymentMethod} />
-              </label>
-              <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
-                <span>على</span>
-                <select value={onFieldOptions.includes(form.source_person) ? form.source_person : ""} onChange={(event) => {
-                  setForm((current) => calculate({ ...current, source_person: event.target.value, customParty: "", updated_at: new Date().toISOString() }));
-                }} disabled={readOnly}>
-                  <option value="" disabled hidden>اختر</option>
-                  {onFieldOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
-                <ErrorText message={errors.source_person} />
+              <label className={`nf-field nf-field-materials-inrow${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
+                <span>الخامات<em className="nf-required">*</em></span>
+                <div className="nf-radio-group">
+                  <label className="nf-radio">
+                    <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} disabled={readOnly} />
+                    <span className="nf-radio-mark" aria-hidden="true" />
+                    <span>موجود</span>
+                  </label>
+                  <label className="nf-radio">
+                    <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} disabled={readOnly} />
+                    <span className="nf-radio-mark" aria-hidden="true" />
+                    <span>غير موجود</span>
+                  </label>
+                </div>
+                <ErrorText message={errors.materialsStatus} />
               </label>
             </div>
-
-            <div className={`nf-materials${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
-              <span className="nf-materials-label">الخامات<em className="nf-required">*</em></span>
-              <div className="nf-radio-group">
-                <label className="nf-radio">
-                  <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} disabled={readOnly} />
-                  <span className="nf-radio-mark" aria-hidden="true" />
-                  <span>موجود</span>
-                </label>
-                <label className="nf-radio">
-                  <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} disabled={readOnly} />
-                  <span className="nf-radio-mark" aria-hidden="true" />
-                  <span>غير موجود</span>
-                </label>
-              </div>
-              <ErrorText message={errors.materialsStatus} />
-            </div>
-
-            {form.paymentMethod === "other" && <div className="nf-row nf-row-custom-payment">
-              <label className="nf-field"><span>اكتب طريقة الدفع</span><input value={form.customPaymentMethod || ""} onChange={(event) => set("customPaymentMethod", event.target.value)} disabled={readOnly} /><ErrorText message={errors.customPaymentMethod} /></label>
-            </div>}
 
           </section>
 
