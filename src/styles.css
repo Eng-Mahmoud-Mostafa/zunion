@@ -6818,7 +6818,7 @@ tr.ws-row-highlight td {
   height: 60px;
   flex: 0 0 auto;
   background: #ED1525;
-  color: #fff;
+  color: #FFFFFF;
   border: 1px solid #ED1525;
   border-radius: 12px;
   font-size: 16px;
@@ -6827,14 +6827,46 @@ tr.ws-row-highlight td {
   transition: background .16s ease, transform .16s ease, box-shadow .16s ease;
 }
 
+.order-form-search-btn svg,
+.order-form-search-btn * {
+  color: #FFFFFF;
+  stroke: #FFFFFF;
+}
+
 .order-form-search-btn:hover {
   background: #d11421;
   border-color: #d11421;
+  color: #FFFFFF;
   box-shadow: 0 8px 18px rgba(237, 21, 37, .28);
+}
+
+.order-form-search-btn:hover svg,
+.order-form-search-btn:hover * {
+  color: #FFFFFF;
+  stroke: #FFFFFF;
+}
+
+.order-form-search-btn:focus-visible {
+  outline: 2px solid #d11421;
+  outline-offset: 2px;
+  color: #FFFFFF;
+}
+
+.order-form-search-btn:focus-visible svg,
+.order-form-search-btn:focus-visible * {
+  color: #FFFFFF;
+  stroke: #FFFFFF;
 }
 
 .order-form-search-btn:active {
   transform: translateY(1px);
+  color: #FFFFFF;
+}
+
+.order-form-search-btn:active svg,
+.order-form-search-btn:active * {
+  color: #FFFFFF;
+  stroke: #FFFFFF;
 }
 
 /* draft save success / failure feedback */
