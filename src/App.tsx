@@ -24,6 +24,7 @@ import {
   ImageOff,
   KeyRound,
   Landmark,
+  LayoutDashboard,
   LayoutGrid,
   Loader2,
   LogOut,
@@ -6993,7 +6994,7 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
 }
 
 type SidebarItemConfig = {
-  id: View;
+  id: View | string;
   label: string;
   visible: boolean;
   icon: LucideIcon;
@@ -7003,21 +7004,20 @@ type SidebarItemConfig = {
 function SidebarItemButton({ item, active, onSelect }: { item: SidebarItemConfig; active: boolean; onSelect: (view: View) => void }) {
   const Icon = item.icon;
   return (
-    <button type="button" className={`sidebar-item${active ? " active" : ""}`} onClick={() => onSelect(item.id)}>
+    <button type="button" className={`sidebar-item${active ? " active" : ""}`} onClick={() => onSelect(item.id as View)}>
       <span>{item.label}</span>
       <Icon size={22} />
     </button>
   );
 }
 
-function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDrawer, onLogoClick }: {
+function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDrawer }: {
   items: SidebarItemConfig[];
   activeView: View;
   drawerOpen: boolean;
   onSelect: (view: View) => void;
   onLogout: () => void;
   onCloseDrawer: () => void;
-  onLogoClick: () => void;
 }) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
 
@@ -7033,9 +7033,9 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
     <>
       <aside className={`sidebar${drawerOpen ? " drawer-open" : ""}`}>
         <button type="button" className="sidebar-close" aria-label="إغلاق القائمة" onClick={onCloseDrawer}><X size={22} /></button>
-        <button type="button" className="logo-secret-button sidebar-logo-button" aria-label="شعار Zunion - الانتقال إلى الصفحة الرئيسية" title="الصفحة الرئيسية" onClick={onLogoClick}>
+        <div className="sidebar-logo-button">
           <BrandLogo className="sidebar-logo" />
-        </button>
+        </div>
         <nav className="sidebar-menu" aria-label="القائمة الرئيسية">
           {items.map((item) => {
             if (item.children && item.children.length > 0) {
@@ -7055,7 +7055,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
                     <div className="sidebar-submenu">
                       <div className="sidebar-submenu-inner">
                         {item.children.map((child, index) => (
-                          <button key={`${item.id}-${index}`} type="button" className={`sidebar-subitem${child.id === activeView ? " active" : ""}`} onClick={() => onSelect(child.id)}>
+                          <button key={`${item.id}-${index}`} type="button" className={`sidebar-subitem${child.id === activeView ? " active" : ""}`} onClick={() => onSelect(child.id as View)}>
                             <child.icon size={18} />
                             <span>{child.label}</span>
                           </button>
@@ -7099,7 +7099,6 @@ function ZunionApp() {
   const [finishGoOrderId, setFinishGoOrderId] = useState<string | null>(null);
   const [productDrawer, setProductDrawer] = useState<Product | null>(null);
   const [userDrawer, setUserDrawer] = useState<SearchableUser | null>(null);
-  const logoClickRef = useRef({ count: 0, firstClickAt: 0 });
   const { orders, setOrders } = useOrders(session);
   const orderDrawerOrder = useMemo(() => orderDrawerOrderNumber ? orders.find((o) => o.order_number === orderDrawerOrderNumber) || null : null, [orderDrawerOrderNumber, orders]);
   const editingOrder = useMemo(() => editingOrderNumber ? orders.find((o) => o.order_number === editingOrderNumber) || null : null, [editingOrderNumber, orders]);
@@ -7274,8 +7273,9 @@ function ZunionApp() {
   const canPrintCreatedOrder = hasPermission(session, "orders.print") || hasPermission(session, "operation.print");
   const sidebarItems = useMemo<SidebarItemConfig[]>(() => {
     const all: SidebarItemConfig[] = [
+      { id: "dashboard", label: "نظرة عامة", visible: true, icon: LayoutDashboard },
       {
-        id: "dashboard", label: "الرئيسية", visible: true, icon: Home,
+        id: "main", label: "الرئيسية", visible: true, icon: Home,
         children: [
           { id: "new", label: "اوردر جديد", visible: true, icon: FilePlus },
           { id: "addCustomer", label: "إضافة عميل", visible: true, icon: UserPlus },
@@ -7323,29 +7323,6 @@ function ZunionApp() {
     setSession(null);
   }
 
-  function handleLogoSecretClick() {
-    const now = Date.now();
-    const current = logoClickRef.current;
-    if (now - current.firstClickAt > 3000) {
-      current.count = 0;
-      current.firstClickAt = now;
-    }
-    current.count += 1;
-    if (current.count < 5) return;
-    current.count = 0;
-    current.firstClickAt = 0;
-    if (session?.role !== "Master") {
-      window.alert("حساب الإدارة متاح لحساب Master فقط.");
-      return;
-    }
-    setDrawerOpen(false);
-    setView("settings");
-  }
-
-  function handleSidebarLogoClick() {
-    selectSidebarView("dashboard");
-  }
-
   if (useServerAuth && !sessionReady) {
     return (
       <main className="login-page" dir="rtl">
@@ -7369,7 +7346,6 @@ function ZunionApp() {
         onSelect={selectSidebarView}
         onLogout={logout}
         onCloseDrawer={() => setDrawerOpen(false)}
-        onLogoClick={handleSidebarLogoClick}
       />
       <main className="content">
         <header className="topbar">
