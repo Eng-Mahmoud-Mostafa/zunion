@@ -1504,7 +1504,7 @@ app.post("/api/products", requireAuth, requireRole("Master", "Helper", "Operator
       product.logoImage,
     ],
   );
-  await audit(req.user!, "PRODUCT_CREATED", "products", rows[0].id, undefined, product);
+  await audit(req.user!, "PRODUCT_CREATED", "products", rows[0].id, undefined, { ...product, productImage: "", logoImage: "" });
   res.status(201).json(rows[0]);
 });
 
@@ -1530,7 +1530,7 @@ app.put("/api/products/:id", requireAuth, requireRole("Master", "Supervisor"), a
       id,
     ],
   );
-  await audit(req.user!, "PRODUCT_UPDATED", "products", id, undefined, product);
+  await audit(req.user!, "PRODUCT_UPDATED", "products", id, undefined, { ...product, productImage: "", logoImage: "" });
   res.json({ ok: true });
 });
 

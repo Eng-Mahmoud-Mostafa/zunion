@@ -1320,6 +1320,16 @@ function orderForStorage(order: Order): Order {
   };
 }
 
+function productForStorage(product: Product): Product {
+  return {
+    ...product,
+    productImage: "",
+    productImageName: "",
+    logoImage: "",
+    logoImageName: "",
+  };
+}
+
 async function backendJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     credentials: "include",
@@ -1807,7 +1817,7 @@ function useProducts(session: Session | null) {
     setLocalProducts((current) => {
       const previous = current;
       const next = typeof action === "function" ? (action as (value: Product[]) => Product[])(current) : action;
-      fallback.setItems(next);
+      fallback.setItems(next.map(productForStorage));
       if (session) {
         void syncProducts(previous, next).then(refreshProducts).catch((error) => console.warn("[Zunion] Shared products sync failed.", error));
       }
@@ -4621,6 +4631,7 @@ type ImageInputWithClipboardProps = {
   large?: boolean;
   required?: boolean;
   pasteOnly?: boolean;
+  pasteLabel?: string;
   error?: string;
   disabled?: boolean;
   onActivate: () => void;
@@ -4681,7 +4692,7 @@ function AttachmentImage({ src, alt, className }: { src: string; alt: string; cl
   );
 }
 
-function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, error, disabled, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
+function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, pasteLabel, error, disabled, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const classNames = `image-clipboard-field${active ? " active" : ""}${large ? " large" : ""}${dragOver ? " drag-over" : ""}${error ? " has-error" : ""}${disabled ? " nf-readonly-control" : ""}`;
@@ -4708,7 +4719,7 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       <input ref={fileInputRef} type="file" accept={clipboardImageTypes.join(",")} hidden onChange={handleFileChange} disabled={disabled} />
       <div className="image-field-actions">
         {!pasteOnly && !disabled && <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>}
-        {!disabled && <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : "لصق الصورة من الحافظة"}</button>}
+        {!disabled && <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : (pasteLabel || "لصق الصورة من الحافظة")}</button>}
         {!value && !large && <span className="image-empty-state">لم يتم رفع صورة</span>}
         {value && !disabled && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
       </div>
@@ -6844,13 +6855,14 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [productImageStatus, setProductImageStatus] = useState("");
   const [productImageActive, setProductImageActive] = useState(false);
+  const [productImageSource, setProductImageSource] = useState<"upload" | "clipboard" | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
   function setProduct<K extends keyof Product>(key: K, value: Product[K]) {
     setForm((current) => normalizeProduct({ ...current, [key]: value }));
   }
 
-  async function setProductImageFromClipboard(file?: File) {
+  async function setProductImageFromClipboard(file?: File, source: "upload" | "clipboard" = "clipboard") {
     if (!file) return;
     if (!file.size) {
       setProductImageStatus("ملف الصورة فارغ");
@@ -6874,9 +6886,10 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
         productImage: dataUrl,
         productImageName: file.name,
       }));
-      setProductImageStatus("تم لصق الصورة بنجاح");
+      setProductImageSource(source);
+      setProductImageStatus(source === "clipboard" ? "تم لصق الصورة بنجاح" : "تم اختيار الصورة بنجاح");
     } catch {
-      setProductImageStatus("حدث خطأ أثناء لصق الصورة");
+      setProductImageStatus("حدث خطأ أثناء معالجة الصورة");
     }
   }
 
@@ -6892,6 +6905,7 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   function removeProductImage() {
     setForm((current) => normalizeProduct({ ...current, productImage: "", productImageName: "" }));
     setProductImageStatus("");
+    setProductImageSource(undefined);
     setErrors((current) => ({ ...current, productImage: "" }));
   }
 
@@ -6933,6 +6947,7 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
     setForm(emptyProductForm);
     setErrors({});
     setProductImageStatus("");
+    setProductImageSource(undefined);
     setProductImageActive(false);
   }
 
@@ -6955,16 +6970,22 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
       created_at: now,
     });
     setProducts((current) => [product, ...current]);
-    addAudit(session, "PRODUCT_CREATED", "products", product.id, undefined, product);
+    addAudit(session, "PRODUCT_CREATED", "products", product.id, undefined, {
+      ...product,
+      productImage: "",
+      productImageName: "",
+      logoImage: "",
+      logoImageName: "",
+    });
     resetForm();
     window.setTimeout(() => setSaving(false), 300);
   }
 
   return (
-    <div className="stack">
-      <section className="panel">
+    <div className="stack add-product-page">
+      <section className="panel add-product-panel">
         <div className="panel-head"><h2>إضافة منتج</h2></div>
-        <form className="order-form compact-form" onSubmit={save} onPaste={handleProductPaste}>
+        <form className="order-form compact-form add-product-form" onSubmit={save} onPaste={handleProductPaste}>
           <div className="form-grid product-form-grid">
             <label>اسم المنتج<input value={form.name} onChange={(event) => setProduct("name", event.target.value)} /><ErrorText message={errors.name} /></label>
             <label>التفاصيل<input value={form.details} onChange={(event) => setProduct("details", event.target.value)} /></label>
@@ -6974,18 +6995,21 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
                 label="صورة المنتج"
                 value={form.productImage || ""}
                 fileName={form.productImageName}
-                source={form.productImage ? "clipboard" : undefined}
+                source={productImageSource}
                 active={productImageActive}
                 status={productImageStatus}
+                pasteLabel="لصق الصورة"
                 onActivate={() => setProductImageActive(true)}
                 onPaste={pasteProductImage}
                 onRemove={removeProductImage}
+                onFileSelect={(file) => setProductImageFromClipboard(file, "upload")}
+                onDropFile={(file) => setProductImageFromClipboard(file, "upload")}
               />
               <ErrorText message={errors.productImage} />
             </div>
           </div>
-          <div className="form-actions">
-            <button className="primary-btn" type="submit" disabled={saving}>{saving ? "جاري الحفظ..." : "حفظ المنتج"}</button>
+          <div className="form-actions add-product-actions">
+            <button className="primary-btn add-product-save" type="submit" disabled={saving}><span>{saving ? "جاري الحفظ..." : "حفظ المنتج"}</span></button>
           </div>
         </form>
       </section>
