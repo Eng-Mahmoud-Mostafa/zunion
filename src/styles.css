@@ -7224,26 +7224,37 @@ tr.ws-row-highlight td {
    Add Product page — compact single-row form
    ========================================================= */
 .add-product-page {
-  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .add-product-panel {
-  padding: 24px;
-  border: 1px solid #E5E7EB;
-  border-radius: 10px;
+  width: 100%;
+  max-width: 720px;
+  padding: 22px 22px 24px;
+  border: 1px solid rgba(6, 31, 59, .07);
+  border-radius: 18px;
   background: #fff;
-  box-shadow: 0 1px 3px rgba(16, 24, 40, .06);
+  box-shadow: 0 14px 34px rgba(6, 31, 59, .07);
 }
 
 .add-product-panel .panel-head {
-  margin-bottom: 26px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
 }
 
 .add-product-panel .panel-head h2,
 .add-product-panel .panel-head h3 {
-  color: #000;
-  font-size: 22px;
-  font-weight: 800;
+  margin: 0;
+  color: var(--navy);
+  font-size: 18px;
+  font-weight: 900;
 }
 
 .add-product-form {
@@ -7252,10 +7263,10 @@ tr.ws-row-highlight td {
 }
 
 .add-product-form .product-form-grid {
-  grid-template-columns: minmax(0, 27%) minmax(0, 40%) minmax(0, 15%) minmax(0, 18%) !important;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.05fr) minmax(0, 0.7fr) minmax(0, 1.3fr) !important;
+  gap: 10px;
   align-items: start;
-  padding-bottom: 22px;
+  padding-bottom: 20px;
   border-bottom: 1px solid #E5E7EB;
   margin: 0;
 }
