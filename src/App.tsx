@@ -45,7 +45,6 @@ import {
   ShoppingBag,
   Star,
   Truck,
-  Upload,
   User,
   UserPlus,
   Users,
@@ -4285,7 +4284,6 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
             onPaste={() => pasteFromClipboard(index, "workOrderImage")}
             onRemove={() => removeOperationAttachment(index, "workOrderImage")}
             onDropFile={(file) => setOperationAttachment(index, "workOrderImage", file)}
-            onFileSelect={(file) => setOperationAttachment(index, "workOrderImage", file)}
             disabled={readOnly}
           />
           <ImageInputWithClipboard
@@ -4303,7 +4301,6 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
             onPaste={() => pasteFromClipboard(index, "logoImage")}
             onRemove={() => removeOperationAttachment(index, "logoImage")}
             onDropFile={(file) => setOperationAttachment(index, "logoImage", file)}
-            onFileSelect={(file) => setOperationAttachment(index, "logoImage", file)}
             disabled={readOnly}
           />
         </div>
@@ -4631,7 +4628,6 @@ type ImageInputWithClipboardProps = {
   onPaste: () => void;
   onRemove: () => void;
   onDropFile?: (file: File) => void;
-  onFileSelect?: (file: File) => void;
 };
 
 function formatFileSize(size?: number) {
@@ -4685,18 +4681,9 @@ function AttachmentImage({ src, alt, className }: { src: string; alt: string; cl
   );
 }
 
-function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, pasteLabel, error, disabled, onActivate, onPaste, onRemove, onDropFile, onFileSelect }: ImageInputWithClipboardProps) {
+function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, pasteLabel, error, disabled, onActivate, onPaste, onRemove, onDropFile }: ImageInputWithClipboardProps) {
   const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const classNames = `image-clipboard-field${active ? " active" : ""}${large ? " large" : ""}${dragOver ? " drag-over" : ""}${error ? " has-error" : ""}${disabled ? " nf-readonly-control" : ""}`;
-  function pickFile() {
-    fileInputRef.current?.click();
-  }
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (file) onFileSelect?.(file);
-    event.target.value = "";
-  }
   return (
     <div
       className={classNames}
@@ -4709,9 +4696,7 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       onDrop={disabled ? undefined : (event) => { event.preventDefault(); setDragOver(false); const file = event.dataTransfer.files?.[0]; if (file) onDropFile?.(file); }}
     >
       <span className="image-field-label">{label}{required && <em className="nf-required">*</em>}</span>
-      <input ref={fileInputRef} type="file" accept={clipboardImageTypes.join(",")} hidden onChange={handleFileChange} disabled={disabled} />
       <div className="image-field-actions">
-        {!pasteOnly && !disabled && <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>}
         {!disabled && <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : (pasteLabel || "لصق الصورة من الحافظة")}</button>}
         {value && !disabled && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
       </div>
@@ -6994,7 +6979,6 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
                 onActivate={() => setProductImageActive(true)}
                 onPaste={pasteProductImage}
                 onRemove={removeProductImage}
-                onFileSelect={(file) => setProductImageFromClipboard(file, "upload")}
                 onDropFile={(file) => setProductImageFromClipboard(file, "upload")}
               />
               <ErrorText message={errors.productImage} />
