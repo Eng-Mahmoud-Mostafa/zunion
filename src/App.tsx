@@ -4713,7 +4713,6 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       <div className="image-field-actions">
         {!pasteOnly && !disabled && <button type="button" className="ghost-btn compact image-upload-btn" aria-label={`اختيار ${label} من الجهاز`} onClick={pickFile}><Upload size={14} /> اختر صورة من الجهاز</button>}
         {!disabled && <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : (pasteLabel || "لصق الصورة من الحافظة")}</button>}
-        {!value && !large && <span className="image-empty-state">لم يتم رفع صورة</span>}
         {value && !disabled && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
       </div>
       {value && (

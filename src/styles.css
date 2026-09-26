@@ -7363,7 +7363,7 @@ tr.ws-row-highlight td {
 }
 
 .add-product-actions {
-  justify-content: flex-end;
+  justify-content: flex-start !important;
 }
 
 .add-product-actions .add-product-save,
@@ -7372,17 +7372,28 @@ tr.ws-row-highlight td {
 }
 
 .add-product-actions .add-product-save {
-  width: 108px;
-  min-width: 108px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 130px;
   height: 40px;
   min-height: 40px !important;
-  padding: 8px 16px !important;
+  padding: 0 20px !important;
   border-radius: 6px;
   background: #E60012;
   border: 1px solid #E60012;
   font-size: 15px;
   font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
   box-shadow: 0 2px 6px rgba(230, 0, 18, .28);
+}
+
+.add-product-actions .add-product-save span {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }
 
 .add-product-actions .add-product-save:hover,
