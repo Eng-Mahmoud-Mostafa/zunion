@@ -5922,20 +5922,26 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
     setAddress("");
   }
   return (
-    <form className="panel order-form" onSubmit={submit}>
-      <h2>إضافة عميل</h2>
-      <div className="form-grid">
-        <Select label="طرف" value={party} options={partyOptions} onChange={setParty} />
-        {party === "أخرى" && <Field label="طرف آخر" value={customParty} onChange={setCustomParty} />}
-        <Field label="اسم العميل" value={name} onChange={setName} />
-        <ReadonlyText label="كود العميل" value={code} />
-        <Field label="تليفون" value={phone} onChange={setPhone} />
-        <Field label="البريد الإلكتروني" type="email" value={email} onChange={setEmail} />
-        <Field label="العنوان" value={address} onChange={setAddress} />
-      </div>
-      <ErrorText message={error} />
-      <button className="primary-btn">حفظ العميل</button>
-    </form>
+    <div className="stack add-product-page">
+      <section className="panel add-product-panel">
+        <div className="panel-head"><h2>إضافة عميل</h2></div>
+        <form className="order-form compact-form add-product-form" onSubmit={submit}>
+          <div className="form-grid product-form-grid">
+            <Select label="طرف" value={party} options={partyOptions} onChange={setParty} />
+            {party === "أخرى" && <Field label="طرف آخر" value={customParty} onChange={setCustomParty} />}
+            <Field label="اسم العميل" value={name} onChange={setName} />
+            <ReadonlyText label="كود العميل" value={code} />
+            <Field label="تليفون" value={phone} onChange={setPhone} />
+            <Field label="البريد الإلكتروني" type="email" value={email} onChange={setEmail} />
+            <Field label="العنوان" value={address} onChange={setAddress} />
+          </div>
+          <ErrorText message={error} />
+          <div className="form-actions add-product-actions">
+            <button className="primary-btn add-product-save" type="submit"><span>حفظ العميل</span></button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 

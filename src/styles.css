@@ -7221,7 +7221,7 @@ tr.ws-row-highlight td {
 }
 
 /* =========================================================
-   Add Product page — compact single-row form
+   Add Product / Add Customer page — compact right-aligned card
    ========================================================= */
 .add-product-page {
   display: flex;
