@@ -11,7 +11,7 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions } from "./customerAccounts.js";
@@ -956,7 +956,7 @@ app.delete("/api/roles/:id", requireAppPermission("roles.delete"), async (req, r
 
 app.get("/api/orders", requireAuth, async (req, res) => {
   const where = orderVisibility(req.user!.role);
-  const { search = "", status = "", workStage = "", delivery_date = "", source_party = "" } = req.query as Record<string, string>;
+  const { search = "", status = "", workStage = "", delivery_date = "", source_party = "", type = "", draft = "" } = req.query as Record<string, string>;
   const filters: string[] = [];
   const params: unknown[] = [];
   if (where) filters.push(where.replace(" where ", ""));
@@ -979,6 +979,13 @@ app.get("/api/orders", requireAuth, async (req, res) => {
   if (source_party) {
     params.push(source_party);
     filters.push(`source_party = $${params.length}`);
+  }
+  if (type) {
+    params.push(type);
+    filters.push(`type = $${params.length}`);
+  }
+  if (draft === "true" || draft === "false") {
+    filters.push(`draft = ${draft === "true"}`);
   }
   const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
   const { rows } = await query(`select * from orders ${sqlWhere} order by created_at desc`, params);
@@ -1142,6 +1149,21 @@ app.patch("/api/orders/:id/problem", requireAuth, requireRole("Master", "Helper"
   await query(`update orders set production_notes=$1, updated_by=$2 where id=$3`, [parsed.data.production_notes, req.user!.id, id]);
   await audit(req.user!, "PROBLEM_SET", "orders", id, { production_notes: oldOrder.production_notes ?? "" }, parsed.data);
   res.json({ ok: true });
+});
+
+app.patch("/api/orders/:id/sewing", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = sewingSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid sewing", issues: parsed.error.issues });
+  const oldOrder = await loadOrder(id);
+  if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  await query(
+    `update orders set sewing_worker=coalesce($1, sewing_worker), production_notes=coalesce($2, production_notes), sewing_status=coalesce($3, sewing_status), updated_by=$4 where id=$5`,
+    [parsed.data.sewing_worker ?? null, parsed.data.production_notes ?? null, parsed.data.sewing_status ?? null, req.user!.id, id],
+  );
+  await audit(req.user!, "SEWING_UPDATED", "orders", id, { sewing_worker: oldOrder.sewing_worker ?? "", sewing_status: oldOrder.sewing_status ?? "" }, parsed.data);
+  const saved = await loadOrder(id);
+  res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });
 
 app.get("/api/workers", requireAuth, async (_req, res) => {

@@ -189,6 +189,8 @@ type Order = {
   materialsStatus?: string;
   machineName?: string;
   worker_name?: string;
+  sewing_worker?: string;
+  sewing_status?: string;
   operationWorkers?: string[];
   operationSupervisors?: string[];
   operationMethods?: string[];
@@ -1160,6 +1162,8 @@ const emptyOrder: Order = {
   materialsStatus: "",
   machineName: "",
   worker_name: "",
+  sewing_worker: "",
+  sewing_status: "",
   operationMethods: [""],
   operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
   logoFileName: "",
@@ -1382,6 +1386,8 @@ function orderFromApi(row: Record<string, unknown>): Order {
     materialsStatus: normalizeMaterialsStatus(row.materials_status),
     machineName: String(row.machine_name ?? ""),
     worker_name: String(row.worker_name ?? ""),
+    sewing_worker: String(row.sewing_worker ?? ""),
+    sewing_status: String(row.sewing_status ?? ""),
     operationWorkers: (() => {
       const workers = Array.isArray(row.operation_workers) ? row.operation_workers : (() => {
         try {
@@ -1467,6 +1473,8 @@ function orderToApi(order: Order) {
     materialsStatus: normalizeMaterialsStatus(calculated.materialsStatus) || "available",
     machineName: calculated.machineName || "",
     worker_name: calculated.worker_name || "",
+    sewing_worker: calculated.sewing_worker || "",
+    sewing_status: calculated.sewing_status || "",
     operationMethods: operationMethods.length ? operationMethods : ["not_started"],
     quantity: Math.max(1, Number(calculated.quantity || 1)),
     price: calculated.price,
@@ -2346,7 +2354,16 @@ function normalizedFinishingStatus(value: unknown) {
 
 // Derive the work-flow status from the modern orders columns (status enum +
 // work_stage) when the legacy per-stage columns are absent.
+function isSewingOrder(order: OrdersListRecord) {
+  return String(order.order_type || order.service_type || order.productName || order.product_name_snapshot || "").trim() === "خياطه";
+}
+
 function orderOperationStatusText(order: OrdersListRecord) {
+  if (isSewingOrder(order)) {
+    if (String(order.sewing_status ?? "").trim() === "done") return "تم";
+    if (String(order.sewing_worker ?? "").trim()) return "جاري التشغيل";
+    return "لم يبدأ";
+  }
   if (order.operation_status) return normalizedOperationStatus(order.operation_status);
   const status = String(order.status || "").trim();
   if (status === "WORKER_DONE") return "تم";
@@ -4780,6 +4797,52 @@ function workerRowFromOrder(order: Order): WorkerSpreadRow {
   };
 }
 
+type SewingRow = {
+  id: string;
+  orderNumber: string;
+  deliveryDate: string;
+  addedBy: string;
+  client: string;
+  type: string;
+  logo: string;
+  quantity: number;
+  sewingWorker: string;
+  problem: string;
+  done: boolean;
+};
+
+function sewingRowFromRaw(row: Record<string, unknown>): SewingRow {
+  return {
+    id: String(row.id ?? ""),
+    orderNumber: valueText(row.order_number),
+    deliveryDate: formatDisplayDate(row.delivery_date),
+    addedBy: String(row.created_by ?? row.added_by ?? ""),
+    client: orderDisplayClient(row as OrdersListRecord),
+    type: String(row.type ?? row.product_name_snapshot ?? ""),
+    logo: String(row.logo_place ?? row.logo_status ?? ""),
+    quantity: Number(row.quantity ?? row.pieces_count ?? 0),
+    sewingWorker: String(row.sewing_worker ?? ""),
+    problem: valueText(row.production_notes ?? row.quality_notes, ""),
+    done: String(row.sewing_status ?? "").trim() === "done",
+  };
+}
+
+function sewingRowFromOrder(order: Order): SewingRow {
+  return {
+    id: order.id,
+    orderNumber: order.order_number,
+    deliveryDate: formatDisplayDate(order.delivery_date),
+    addedBy: order.created_by || "",
+    client: order.client_name,
+    type: order.order_type || order.productName || "",
+    logo: order.logo_place || order.logo_status || "",
+    quantity: Number(order.quantity || 0),
+    sewingWorker: order.sewing_worker || "",
+    problem: order.production_notes || order.notes || "",
+    done: String(order.sewing_status ?? "").trim() === "done",
+  };
+}
+
 function formatDisplayDate(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
@@ -5283,7 +5346,7 @@ function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMor
   );
 }
 
-function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
+function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" | "sewing"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -5314,7 +5377,11 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(new Set());
   const [workersSaving, setWorkersSaving] = useState(false);
   const [workersError, setWorkersError] = useState("");
+  const [sewingRows, setSewingRows] = useState<SewingRow[]>([]);
+  const [sewingLoading, setSewingLoading] = useState(false);
+  const [sewingError, setSewingError] = useState("");
   const wsWrapRef = useRef<HTMLDivElement | null>(null);
+  const canManageWorkers = ["Master", "Helper", "Operator", "Supervisor"].includes(session.role);
 
   function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
     const next = { ...record };
@@ -5339,7 +5406,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   }
 
   useEffect(() => {
-    if (!queue) return;
+    if (!queue || queue === "sewing") return;
     let active = true;
     setRemoteLoading(true);
     getOperationStats()
@@ -5350,7 +5417,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   }, [queue]);
 
   useEffect(() => {
-    if (queue !== "worker") return;
+    if (queue !== "worker" && queue !== "sewing") return;
     let active = true;
     const loadDirectory = () => {
       void Promise.all([
@@ -5368,6 +5435,18 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       });
     };
     loadDirectory();
+    return () => { active = false; };
+  }, [queue]);
+
+  useEffect(() => {
+    if (queue !== "sewing") return;
+    let active = true;
+    setSewingLoading(true);
+    setSewingError("");
+    backendJson<{ orders: Array<Record<string, unknown>> }>(`/api/orders?type=${encodeURIComponent("خياطه")}&draft=false`)
+      .then((payload) => { if (active) setSewingRows(payload.orders.map(sewingRowFromRaw)); })
+      .catch((error) => { if (active) setSewingError(error instanceof Error ? error.message : "تعذر تحميل أوردرات الخياطة."); })
+      .finally(() => { if (active) setSewingLoading(false); });
     return () => { active = false; };
   }, [queue]);
 
@@ -5424,6 +5503,10 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     const clear = window.setTimeout(() => { setHighlightOrderId(null); setGotoNotice(""); }, 4000);
     return () => { window.clearTimeout(timer); window.clearTimeout(clear); };
   }, [highlightOrderId]);
+
+  if (queue === "sewing") {
+    return renderSewingSpread();
+  }
 
   if (queue === "worker") {
     return renderWorkerSpread();
@@ -5522,6 +5605,235 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
         setStaffSaving(false);
         setStaffError(error instanceof Error ? error.message : "تعذر حفظ الأسماء");
       });
+  }
+
+  function addRegistryWorker() {
+    const name = workerNameInput.trim();
+    if (!name) return;
+    setWorkersSaving(true);
+    setWorkersError("");
+    backendJson<{ worker: { id: string; name: string; active: boolean } }>("/api/workers", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    })
+      .then(({ worker }) => {
+        setWorkersRegistry((current) => [worker, ...current.filter((item) => item.id !== worker.id)]);
+        setWorkerNameInput("");
+        setWorkersSaving(false);
+      })
+      .catch((error) => {
+        setWorkersSaving(false);
+        setWorkersError(error instanceof Error ? error.message : "تعذر إضافة العامل");
+      });
+  }
+
+  function toggleRemoveWorker(id: string) {
+    setPendingRemoveIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function saveRemoveWorkers() {
+    if (pendingRemoveIds.size === 0) return;
+    setWorkersSaving(true);
+    setWorkersError("");
+    const ids = Array.from(pendingRemoveIds);
+    Promise.allSettled(ids.map((id) =>
+      backendJson<{ worker: { id: string; name: string; active: boolean } }>(`/api/workers/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active: false }),
+      }),
+    ))
+      .then((results) => {
+        const failed = results.some((result) => result.status === "rejected");
+        setWorkersRegistry((current) => current.filter((worker) => !ids.includes(worker.id)));
+        setPendingRemoveIds(new Set());
+        setWorkersSaving(false);
+        if (failed) setWorkersError("لم يُمسح بعض العمال، حاول مرة أخرى");
+      });
+  }
+
+  function renderSewingSpread() {
+    if (sewingLoading && sewingRows.length === 0 && !sewingError) return <LoadingPanel />;
+    if (sewingError && sewingRows.length === 0) return <ErrorPanel message={sewingError || "تعذر تحميل البيانات."} />;
+
+    const rows = sewingRows.map((row) => ({
+      ...row,
+      addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+    }));
+    const sewingWorkerNames = Array.from(new Set([
+      ...workersRegistry.map((worker) => worker.name),
+      ...workerNameOptions(),
+      ...orders.map((order) => order.sewing_worker || ""),
+      ...rows.map((row) => row.sewingWorker),
+    ])).filter((name) => name.trim().length > 0);
+
+    function saveSewingCell(id: string, patch: { sewing_worker?: string; production_notes?: string; sewing_status?: string }) {
+      const key = `${id}:sewing`;
+      setCellSaving((current) => ({ ...current, [key]: true }));
+      setCellError((current) => withoutKey(current, key));
+      backendJson(`/api/orders/${encodeURIComponent(id)}/sewing`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      })
+        .then(() => {
+          const update: Record<string, unknown> = {};
+          if (patch.sewing_worker !== undefined) {
+            update.sewing_worker = patch.sewing_worker;
+            setSewingRows((current) => current.map((row) => row.id === id ? { ...row, sewingWorker: patch.sewing_worker! } : row));
+          }
+          if (patch.production_notes !== undefined) {
+            update.production_notes = patch.production_notes;
+            setSewingRows((current) => current.map((row) => row.id === id ? { ...row, problem: patch.production_notes! } : row));
+          }
+          if (patch.sewing_status !== undefined) {
+            update.sewing_status = patch.sewing_status;
+            setSewingRows((current) => current.map((row) => row.id === id ? { ...row, done: patch.sewing_status === "done" } : row));
+          }
+          setOrders((current) => current.map((order) => order.id === id ? { ...order, ...update } : order));
+          setCellSaving((current) => withoutKey(current, key));
+        })
+        .catch((error) => {
+          setCellSaving((current) => withoutKey(current, key));
+          setCellError((current) => ({ ...current, [key]: error instanceof Error ? error.message : "تعذر الحفظ" }));
+        });
+    }
+
+    function sewingCellFeedback(id: string) {
+      if (cellSaving[`${id}:sewing`]) return <span className="ws-feedback ws-saving">جارِ الحفظ…</span>;
+      const error = cellError[`${id}:sewing`];
+      if (error) return <span className="ws-feedback ws-error" title={error}>فشل الحفظ</span>;
+      return null;
+    }
+
+    const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number }> = [
+      { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
+      { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
+      { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
+      { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
+      { key: "type", label: "النوع", cls: "ws-hd", rowSpan: 2 },
+      { key: "logo", label: "اللوجو", cls: "ws-hd ws-hd-logo", rowSpan: 2 },
+      { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
+      { key: "sewingGroup", label: "خياطه", cls: "ws-hd ws-sewing-group", colSpan: 3 },
+    ];
+
+    return (
+      <div className="ws-screen">
+        <h1 className="ws-heading ws-sewing-heading">خياطه</h1>
+        <div className="ws-table-wrap">
+          <table className="ws-table ws-sewing-table">
+            <thead>
+              <tr>
+                {spreadHeaderRow1.map((col) => (
+                  <th key={col.key} className={col.cls} rowSpan={col.rowSpan} colSpan={col.colSpan}>{col.label}</th>
+                ))}
+              </tr>
+              <tr>
+                <th className="ws-hd ws-sewing-group">اسم العامل</th>
+                <th className="ws-hd ws-sewing-group">مشكله</th>
+                <th className="ws-hd ws-sewing-group">انتهى</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && <EmptyRow colSpan={10} />}
+              {rows.map((row) => (
+                <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
+                  <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
+                  <td className="ws-date">{row.deliveryDate || ""}</td>
+                  <td className="ws-num"><span className="ws-num-static">{row.orderNumber}</span></td>
+                  <td>{row.client}</td>
+                  <td>{row.type}</td>
+                  <td className="ws-logo">{row.logo || "—"}</td>
+                  <td className="ws-qty">{row.quantity || ""}</td>
+                  <td className="ws-worker">
+                    {workerEditId === row.id ? (
+                      <select
+                        autoFocus
+                        value={row.sewingWorker || ""}
+                        onChange={(event) => { saveSewingCell(row.id, { sewing_worker: event.target.value }); setWorkerEditId(null); }}
+                        onBlur={() => setWorkerEditId(null)}
+                      >
+                        <option value="">—</option>
+                        {sewingWorkerNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    ) : (
+                      <button type="button" className="ws-cell-edit" onClick={() => setWorkerEditId(row.id)}>
+                        {row.sewingWorker || "—"}
+                      </button>
+                    )}
+                    {sewingCellFeedback(row.id)}
+                  </td>
+                  <td className="ws-problem">
+                    {problemEditId === row.id ? (
+                      <span className="ws-problem-editor">
+                        <textarea value={problemDraft} rows={2} onChange={(event) => setProblemDraft(event.target.value)} />
+                        <span className="ws-problem-actions">
+                          <button type="button" className="ws-btn-save" onClick={() => { saveSewingCell(row.id, { production_notes: problemDraft }); setProblemEditId(null); }}>حفظ</button>
+                          <button type="button" className="ws-btn-cancel" onClick={() => setProblemEditId(null)}>إلغاء</button>
+                        </span>
+                      </span>
+                    ) : (
+                      <button type="button" className="ws-cell-edit ws-problem-text" onClick={() => { setProblemEditId(row.id); setProblemDraft(row.problem); }}>
+                        {row.problem || "أضف مشكلة"}
+                      </button>
+                    )}
+                    {sewingCellFeedback(row.id)}
+                  </td>
+                  <td className="ws-cell-action">
+                    {row.done ? (
+                      <span className="ws-tam-on ws-sewing-done">تم</span>
+                    ) : (
+                      <button type="button" className="ws-cell-edit ws-hd-end" onClick={() => saveSewingCell(row.id, { sewing_status: "done" })}>إنهاء</button>
+                    )}
+                    {sewingCellFeedback(row.id)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="ws-lower">
+          <section className="ws-workers-card">
+            <h3 className="ws-workers-title">عمال</h3>
+            {workersError && <div className="ws-workers-error">{workersError}</div>}
+            {canManageWorkers && (
+              <div className="ws-workers-add">
+                <input value={workerNameInput} onChange={(event) => setWorkerNameInput(event.target.value)} placeholder="اسم عامل جديد" />
+                <button type="button" className="ws-btn-save" disabled={workersSaving || !workerNameInput.trim()} onClick={addRegistryWorker}>
+                  {workersSaving ? "جارِ…" : "إضافة عامل"}
+                </button>
+              </div>
+            )}
+            <div className="ws-workers-list">
+              {workersRegistry.length === 0 && <p className="ws-workers-empty">لا يوجد عمال بعد</p>}
+              {workersRegistry.map((worker) => (
+                <div key={worker.id} className="ws-workers-item">
+                  <span className="ws-workers-name">{worker.name}</span>
+                  {canManageWorkers && (
+                    <button
+                      type="button"
+                      className={`ws-workers-remove${pendingRemoveIds.has(worker.id) ? " ws-workers-remove-on" : ""}`}
+                      disabled={workersSaving}
+                      onClick={() => toggleRemoveWorker(worker.id)}
+                    >
+                      {pendingRemoveIds.has(worker.id) ? "مسح ✓" : "مسح"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {canManageWorkers && (
+              <div className="ws-workers-actions">
+                <button type="button" className="ws-btn-save" disabled={workersSaving || pendingRemoveIds.size === 0} onClick={saveRemoveWorkers}>حفظ</button>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    );
   }
 
   function renderWorkerSpread() {
@@ -5749,57 +6061,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
           </div>
         </div>
       );
-    }
-
-    const canManageWorkers = ["Master", "Helper", "Operator", "Supervisor"].includes(session.role);
-
-    function addRegistryWorker() {
-      const name = workerNameInput.trim();
-      if (!name) return;
-      setWorkersSaving(true);
-      setWorkersError("");
-      backendJson<{ worker: { id: string; name: string; active: boolean } }>("/api/workers", {
-        method: "POST",
-        body: JSON.stringify({ name }),
-      })
-        .then(({ worker }) => {
-          setWorkersRegistry((current) => [worker, ...current.filter((item) => item.id !== worker.id)]);
-          setWorkerNameInput("");
-          setWorkersSaving(false);
-        })
-        .catch((error) => {
-          setWorkersSaving(false);
-          setWorkersError(error instanceof Error ? error.message : "تعذر إضافة العامل");
-        });
-    }
-
-    function toggleRemoveWorker(id: string) {
-      setPendingRemoveIds((current) => {
-        const next = new Set(current);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
-    }
-
-    function saveRemoveWorkers() {
-      if (pendingRemoveIds.size === 0) return;
-      setWorkersSaving(true);
-      setWorkersError("");
-      const ids = Array.from(pendingRemoveIds);
-      Promise.allSettled(ids.map((id) =>
-        backendJson<{ worker: { id: string; name: string; active: boolean } }>(`/api/workers/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          body: JSON.stringify({ active: false }),
-        }),
-      ))
-        .then((results) => {
-          const failed = results.some((result) => result.status === "rejected");
-          setWorkersRegistry((current) => current.filter((worker) => !ids.includes(worker.id)));
-          setPendingRemoveIds(new Set());
-          setWorkersSaving(false);
-          if (failed) setWorkersError("لم يُمسح بعض العمال، حاول مرة أخرى");
-        });
     }
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
@@ -7320,6 +7581,7 @@ function ZunionApp() {
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [searchGoOrderId, setSearchGoOrderId] = useState<string | null>(null);
   const [workerGoOrderId, setWorkerGoOrderId] = useState<string | null>(null);
+  const [sewingGoOrderId, setSewingGoOrderId] = useState<string | null>(null);
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
   const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
@@ -7629,7 +7891,7 @@ function ZunionApp() {
             {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "print" && <UnderConstructionPanel title="طباعه" />}
-            {view === "sewing" && <UnderConstructionPanel title="خياطه" />}
+            {view === "sewing" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "archive" && <UnderConstructionPanel title="ارشيف" />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
           {view === "customerAccounts" && <CustomerAccountsPage orders={orders} customers={customers} session={session} />}
