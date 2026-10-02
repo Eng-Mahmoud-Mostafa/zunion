@@ -11,7 +11,7 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, staffSchema, statusSchema, workerSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions } from "./customerAccounts.js";
@@ -1142,6 +1142,47 @@ app.patch("/api/orders/:id/problem", requireAuth, requireRole("Master", "Helper"
   await query(`update orders set production_notes=$1, updated_by=$2 where id=$3`, [parsed.data.production_notes, req.user!.id, id]);
   await audit(req.user!, "PROBLEM_SET", "orders", id, { production_notes: oldOrder.production_notes ?? "" }, parsed.data);
   res.json({ ok: true });
+});
+
+app.get("/api/workers", requireAuth, async (_req, res) => {
+  try {
+    const { rows } = await query(`select id, name, active, created_at from workers order by name asc`);
+    res.json({ workers: rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load workers", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/workers", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+  const parsed = workerCreateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid worker name", issues: parsed.error.issues });
+  const name = parsed.data.name;
+  const existing = await query<{ id: string; active: boolean }>(`select id, active from workers where lower(name) = lower($1)`, [name]);
+  if (existing.rows[0]) {
+    if (existing.rows[0].active) return res.status(409).json({ message: "هذا العامل موجود مسبقًا" });
+    const { rows } = await query(
+      `update workers set active = true, updated_by = $1 where id = $2 returning id, name, active, created_at`,
+      [req.user!.id, existing.rows[0].id],
+    );
+    await audit(req.user!, "WORKER_REACTIVATED", "workers", existing.rows[0].id, { active: false }, { active: true });
+    return res.json({ worker: rows[0] });
+  }
+  const { rows } = await query(
+    `insert into workers (name, active, created_by, updated_by) values ($1, true, $2, $2) returning id, name, active, created_at`,
+    [name, req.user!.id],
+  );
+  await audit(req.user!, "WORKER_CREATED", "workers", rows[0].id, undefined, { name });
+  res.json({ worker: rows[0] });
+});
+
+app.patch("/api/workers/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = workerUpdateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid worker update", issues: parsed.error.issues });
+  const { rows } = await query(`update workers set active = $1, updated_by = $2 where id = $3 returning id, name, active, created_at`, [parsed.data.active, req.user!.id, id]);
+  if (!rows[0]) return res.status(404).json({ message: "Worker not found" });
+  await audit(req.user!, "WORKER_UPDATED", "workers", id, { active: !parsed.data.active }, parsed.data);
+  res.json({ worker: rows[0] });
 });
 
 app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {

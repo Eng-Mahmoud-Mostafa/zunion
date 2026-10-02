@@ -34,6 +34,11 @@ export type DbOrder = {
   worker_name?: string | null;
   production_notes?: string | null;
   quality_notes?: string | null;
+  created_by?: string | null;
+  created_by_name?: string | null;
+  logo_place?: string | null;
+  logo_status?: string | null;
+  logo_image_url?: string | null;
   created_at: string | null;
 };
 

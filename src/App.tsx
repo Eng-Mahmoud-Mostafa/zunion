@@ -4721,9 +4721,10 @@ type WorkerSpreadRow = {
   id: string;
   orderNumber: string;
   deliveryDate: string;
-  party: string;
+  addedBy: string;
   client: string;
   type: string;
+  logo: string;
   quantity: number;
   machine: string;
   worker: string;
@@ -4739,9 +4740,10 @@ function workerRowFromDb(row: DbOrder, machine = ""): WorkerSpreadRow {
     id: String(row.id ?? ""),
     orderNumber: valueText(row.order_number),
     deliveryDate: formatDisplayDate(row.delivery_date),
-    party: orderParty(row),
+    addedBy: String(row.created_by ?? ""),
     client: orderClientName(row),
     type: String(row.product_name_snapshot ?? row.order_type ?? row.service_type ?? ""),
+    logo: String(row.logo_place ?? row.logo_status ?? ""),
     quantity: Number(orderPieces(row) || 0),
     machine: machine || String(row.machine_name ?? ""),
     worker: String(row.worker_name ?? ""),
@@ -4756,9 +4758,10 @@ function workerRowFromOrder(order: Order): WorkerSpreadRow {
     id: order.id,
     orderNumber: order.order_number,
     deliveryDate: formatDisplayDate(order.delivery_date),
-    party: order.source_person,
+    addedBy: order.created_by || "",
     client: order.client_name,
     type: order.order_type || order.productName || "",
+    logo: order.logo_place || order.logo_status || "",
     quantity: Number(order.quantity || 0),
     machine: order.machineName ?? "",
     worker: order.worker_name || "",
@@ -5271,7 +5274,7 @@ function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMor
   );
 }
 
-function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
+function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -5296,6 +5299,12 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [staffError, setStaffError] = useState("");
   const [highlightOrderId, setHighlightOrderId] = useState<string | null>(null);
   const [gotoNotice, setGotoNotice] = useState("");
+  const [userDisplayNames, setUserDisplayNames] = useState<Record<string, string>>({});
+  const [workersRegistry, setWorkersRegistry] = useState<Array<{ id: string; name: string; active: boolean }>>([]);
+  const [workerNameInput, setWorkerNameInput] = useState("");
+  const [pendingRemoveIds, setPendingRemoveIds] = useState<Set<string>>(new Set());
+  const [workersSaving, setWorkersSaving] = useState(false);
+  const [workersError, setWorkersError] = useState("");
   const wsWrapRef = useRef<HTMLDivElement | null>(null);
 
   function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -5328,6 +5337,28 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       .then((stats) => { if (active) setRemoteOps(stats); })
       .catch((err) => { if (active) setRemoteError(err instanceof Error ? err.message : "تعذر تحميل بيانات التشغيل."); })
       .finally(() => { if (active) setRemoteLoading(false); });
+    return () => { active = false; };
+  }, [queue]);
+
+  useEffect(() => {
+    if (queue !== "worker") return;
+    let active = true;
+    const loadDirectory = () => {
+      void Promise.all([
+        backendJson<{ users: Array<{ id: string; username: string; full_name?: string | null }> }>("/api/users").catch(() => null),
+        backendJson<{ workers: Array<{ id: string; name: string; active: boolean }> }>("/api/workers").catch(() => null),
+      ]).then(([users, workers]) => {
+        if (!active) return;
+        if (users) {
+          const map: Record<string, string> = {};
+          for (const user of users.users) map[user.id] = user.full_name || user.username || user.id;
+          for (const managed of loadManagedUsers()) map[managed.id] = map[managed.id] || managed.fullName || managed.username || managed.id;
+          setUserDisplayNames(map);
+        }
+        if (workers) setWorkersRegistry(workers.workers.filter((worker) => worker.active));
+      });
+    };
+    loadDirectory();
     return () => { active = false; };
   }, [queue]);
 
@@ -5509,6 +5540,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
 
     const rows = baseRows.map((row) => ({
       ...row,
+      addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
       machine: machineOverrides[row.id] ?? row.machine,
       worker: workerOverrides[row.id] ?? row.worker,
       problem: problemOverrides[row.id] ?? row.problem,
@@ -5516,6 +5548,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       finished: statusOverrides[row.id]?.finished ?? row.finished,
     }));
     const workerNames = Array.from(new Set([
+      ...workersRegistry.map((worker) => worker.name),
       ...workerNameOptions(),
       ...orders.map((order) => order.worker_name || ""),
       ...baseRows.map((row) => row.worker),
@@ -5709,20 +5742,81 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       );
     }
 
+    const canManageWorkers = ["Master", "Helper", "Operator", "Supervisor"].includes(session.role);
+
+    function addRegistryWorker() {
+      const name = workerNameInput.trim();
+      if (!name) return;
+      setWorkersSaving(true);
+      setWorkersError("");
+      backendJson<{ worker: { id: string; name: string; active: boolean } }>("/api/workers", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      })
+        .then(({ worker }) => {
+          setWorkersRegistry((current) => [worker, ...current.filter((item) => item.id !== worker.id)]);
+          setWorkerNameInput("");
+          setWorkersSaving(false);
+        })
+        .catch((error) => {
+          setWorkersSaving(false);
+          setWorkersError(error instanceof Error ? error.message : "تعذر إضافة العامل");
+        });
+    }
+
+    function toggleRemoveWorker(id: string) {
+      setPendingRemoveIds((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    }
+
+    function saveRemoveWorkers() {
+      if (pendingRemoveIds.size === 0) return;
+      setWorkersSaving(true);
+      setWorkersError("");
+      const ids = Array.from(pendingRemoveIds);
+      Promise.allSettled(ids.map((id) =>
+        backendJson<{ worker: { id: string; name: string; active: boolean } }>(`/api/workers/${encodeURIComponent(id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ active: false }),
+        }),
+      ))
+        .then((results) => {
+          const failed = results.some((result) => result.status === "rejected");
+          setWorkersRegistry((current) => current.filter((worker) => !ids.includes(worker.id)));
+          setPendingRemoveIds(new Set());
+          setWorkersSaving(false);
+          if (failed) setWorkersError("لم يُمسح بعض العمال، حاول مرة أخرى");
+        });
+    }
+
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
-      { key: "orderNumber", label: "رقم اوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
+      { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
-      { key: "party", label: "طرف", cls: "ws-hd", rowSpan: 2 },
+      { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
       { key: "type", label: "النوع", cls: "ws-hd", rowSpan: 2 },
+      { key: "logo", label: "اللوجو", cls: "ws-hd ws-hd-logo", rowSpan: 2 },
       { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
-      { key: "machine", label: "المكنه المقترحه", cls: "ws-hd ws-hd-machine", onClick: true },
+      { key: "machine", label: "المكنه المقترحه", cls: "ws-hd ws-hd-machine", rowSpan: 2 },
       { key: "operation", label: "التشغيل", cls: "ws-hd ws-hd-op", colSpan: 4 },
     ];
 
     return (
       <div className="ws-screen">
-        <div className="ws-band ws-band-red">التشغيل</div>
+        <h1 className="ws-heading">التشغيل</h1>
+        <div className="ws-toolbar">
+          <label className="ws-machine-filter">
+            <span>المكنة:</span>
+            <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)}>
+              <option value="all">الكل</option>
+              {machineOptions.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
+            </select>
+          </label>
+        </div>
         <div className="ws-table-wrap" ref={wsWrapRef}>
           <table className="ws-table">
             <thead>
@@ -5735,12 +5829,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                 ))}
               </tr>
               <tr>
-                <th className="ws-machine-filter">
-                  <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)}>
-                    <option value="all">الكل</option>
-                    {machineOptions.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
-                  </select>
-                </th>
                 <th className="ws-hd ws-worker" onClick={() => cycleSort("worker")}>اسم العامل{sortIndicator("worker")}</th>
                 <th className="ws-hd ws-bad" onClick={() => cycleSort("started")}>بدء{sortIndicator("started")}</th>
                 <th className="ws-hd ws-problem" onClick={() => cycleSort("problem")}>مشكله{sortIndicator("problem")}</th>
@@ -5748,14 +5836,15 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
               </tr>
             </thead>
             <tbody>
-              {visibleRows.length === 0 && <EmptyRow colSpan={11} />}
+              {visibleRows.length === 0 && <EmptyRow colSpan={12} />}
               {visibleRows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
-                  <td className="ws-num"><button type="button" className="ws-num-text" onClick={() => { const order = staffOrderForRow(row.id); if (order) openStaffPanel(order); }}>{row.orderNumber}</button></td>
+                  <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
-                  <td>{row.party}</td>
+                  <td className="ws-num"><button type="button" className="ws-num-text" onClick={() => { const order = staffOrderForRow(row.id); if (order) openStaffPanel(order); }}>{row.orderNumber}</button></td>
                   <td>{row.client}</td>
                   <td>{row.type}</td>
+                  <td className="ws-logo">{row.logo || "—"}</td>
                   <td className="ws-qty">{row.quantity || ""}</td>
                   <td className="ws-machine">
                     <select value={row.machine} onChange={(event) => saveMachine(row.id, event.target.value)}>
@@ -5783,7 +5872,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                     {cellFeedback(row.id, "worker")}
                   </td>
                   <td className={`ws-cell-action${row.started ? " ws-tam-on" : ""}`}>
-                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, row.started ? "SENT_TO_WORKER" : "WORKER_STARTED", "started")}>تم</button>
+                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, row.started ? "SENT_TO_WORKER" : "WORKER_STARTED", "started")}>{row.started ? "تم" : "بدء"}</button>
                   </td>
                   <td className="ws-problem">
                     {problemEditId === row.id ? (
@@ -5802,12 +5891,52 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                     {cellFeedback(row.id, "problem")}
                   </td>
                   <td className="ws-cell-action">
-                    <button type="button" className="ws-cell-edit" onClick={() => saveStatus(row.id, "WORKER_DONE", "finished")}>تم</button>
+                    <button type="button" className="ws-cell-edit ws-hd-end" onClick={() => saveStatus(row.id, "WORKER_DONE", "finished")}>إنهاء</button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="ws-lower">
+          <section className="ws-workers-card">
+            <h3 className="ws-workers-title">عمال</h3>
+            {workersError && <div className="ws-workers-error">{workersError}</div>}
+            {canManageWorkers && (
+              <div className="ws-workers-add">
+                <input value={workerNameInput} onChange={(event) => setWorkerNameInput(event.target.value)} placeholder="اسم عامل جديد" />
+                <button type="button" className="ws-btn-save" disabled={workersSaving || !workerNameInput.trim()} onClick={addRegistryWorker}>
+                  {workersSaving ? "جارِ…" : "إضافة عامل"}
+                </button>
+              </div>
+            )}
+            <div className="ws-workers-list">
+              {workersRegistry.length === 0 && <p className="ws-workers-empty">لا يوجد عمال بعد</p>}
+              {workersRegistry.map((worker) => (
+                <div key={worker.id} className="ws-workers-item">
+                  <span className="ws-workers-name">{worker.name}</span>
+                  {canManageWorkers && (
+                    <button
+                      type="button"
+                      className={`ws-workers-remove${pendingRemoveIds.has(worker.id) ? " ws-workers-remove-on" : ""}`}
+                      disabled={workersSaving}
+                      onClick={() => toggleRemoveWorker(worker.id)}
+                    >
+                      {pendingRemoveIds.has(worker.id) ? "مسح ✓" : "مسح"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {canManageWorkers && (
+              <div className="ws-workers-actions">
+                <button type="button" className="ws-btn-save" disabled={workersSaving || pendingRemoveIds.size === 0} onClick={saveRemoveWorkers}>حفظ</button>
+              </div>
+            )}
+          </section>
+          {onDistribute && (
+            <button type="button" className="ws-distribute-btn" onClick={onDistribute}>توزيع مكن</button>
+          )}
         </div>
         {renderStaffPanel()}
       </div>
@@ -7487,7 +7616,7 @@ function ZunionApp() {
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-{view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+{view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onDistribute={() => setView("machineDist")} />}
             {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "print" && <UnderConstructionPanel title="طباعه" />}

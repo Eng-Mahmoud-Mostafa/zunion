@@ -124,6 +124,14 @@ export const workerSchema = z.object({
   worker_name: z.string().max(200).default(""),
 });
 
+export const workerCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+});
+
+export const workerUpdateSchema = z.object({
+  active: z.boolean(),
+});
+
 export const staffSchema = z.object({
   worker_names: z.array(z.string().max(200)).default([]),
   supervisor_names: z.array(z.string().max(200)).default([]),

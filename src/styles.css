@@ -5646,43 +5646,65 @@ input[type="date"] {
   flex-direction: column;
   gap: 0;
   width: 100%;
+  background: #FFFFFF;
 }
 
-.ws-band {
-  width: 100%;
+.ws-heading {
+  color: #156082;
+  font-size: 26px;
+  font-weight: bold;
+  text-align: center;
+  margin: 0;
+  padding: 16px 0 12px;
+}
+
+.ws-toolbar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  text-align: center;
-  font-weight: bold;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 2px 10px;
 }
 
-.ws-band-red {
-  background: #FF0000;
-  color: #FFFFFF;
-  min-height: 46px;
-  font-size: 26px;
+.ws-machine-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: bold;
+  color: #374151;
+}
+
+.ws-machine-filter select {
+  border: 1px solid #D1D5DB;
+  border-radius: 4px;
+  background: #FFFFFF;
+  color: #111827;
+  font-size: 13px;
+  font-weight: bold;
+  padding: 4px 8px;
+  cursor: pointer;
 }
 
 .ws-table-wrap {
   width: 100%;
   overflow-x: auto;
-  background: #EFEFEF;
+  background: #FFFFFF;
 }
 
 .ws-table {
   border-collapse: collapse;
-  min-width: 1800px;
+  min-width: 1650px;
   width: 100%;
   table-layout: fixed;
-  background: #EFEFEF;
+  background: #FFFFFF;
 }
 
 .ws-table th,
 .ws-table td {
-  border: 1px solid #555555;
-  padding: 8px 12px;
-  height: 57px;
+  border: 1px solid #E5E7EB;
+  padding: 6px 8px;
+  height: 48px;
   overflow: hidden;
   text-overflow: clip;
   white-space: nowrap;
@@ -5692,85 +5714,68 @@ input[type="date"] {
 .ws-table thead td {
   text-align: center;
   font-weight: bold;
-  font-size: 16px;
-  color: #000000;
+  font-size: 14px;
+  color: #111827;
   cursor: pointer;
   user-select: none;
+  background: #F3F4F6;
 }
 
 .ws-table tbody td {
-  font-size: 14px;
-  color: #000000;
+  font-size: 13px;
+  color: #111827;
   text-align: center;
+  background: #FFFFFF;
+}
+
+.ws-table tbody tr:nth-child(even) td {
+  background: #FAFAFA;
 }
 
 .ws-hd {
-  background: #EFEFEF;
+  background: #F3F4F6;
 }
 
 .ws-hd-date {
-  color: #000000 !important;
-  background: #FF0000;
+  color: #C62828 !important;
+  background: #F3F4F6;
 }
 
 .ws-hd-qty,
 .ws-hd-machine {
-  color: #FF0000 !important;
-  background: #EFEFEF;
+  color: #C62828 !important;
+  background: #F3F4F6;
 }
 
 .ws-hd-op {
-  background: #EFEFEF;
-}
-
-.ws-machine-filter {
-  background: #FF0000 !important;
-  color: #FFFFFF !important;
-}
-
-.ws-machine-filter select,
-.ws-machine select {
-  width: 100%;
-  border: 1px solid #555555;
-  background: #FF0000;
-  color: #000000;
-  font-weight: bold;
-  font-size: 14px;
-  padding: 4px 6px;
-  cursor: pointer;
-}
-
-.ws-machine-filter select option,
-.ws-machine select option,
-.ws-worker select option {
-  background: #FFFFFF;
-  color: #000000;
-}
-
-.ws-worker-hd {
-  background: none;
+  background: #F3F4F6;
 }
 
 .ws-hd.ws-worker {
-  background: #FF0000;
-  color: #FFFFFF;
+  background: #F3F4F6;
+  color: #111827;
 }
 
 .ws-hd.ws-hd-end {
-  background: #FF0000;
-  color: #FFFFFF;
+  color: #C62828;
+}
+
+.ws-table tbody .ws-user,
+.ws-table tbody .ws-logo {
+  color: #374151;
+  font-size: 13px;
 }
 
 .ws-table tbody .ws-num {
   background: transparent;
-  color: #000000;
+  color: #111827;
   font-weight: bold;
 }
 
 .ws-num-text {
   display: inline-block;
   font-weight: bold;
-  color: #000000;
+  color: #156082;
   text-decoration: underline;
   cursor: pointer;
   background: none;
@@ -5781,79 +5786,44 @@ input[type="date"] {
 }
 
 .ws-num-text:hover {
-  color: #FF0000;
+  color: #0E4C6F;
 }
 
 .ws-table tbody .ws-date {
-  background: #FF0000;
-  color: #000000;
-  font-size: 16px;
+  background: transparent;
+  color: #C62828;
+  font-size: 14px;
   font-weight: bold;
-}
-
-.ws-table tbody .ws-goto {
-  padding: 3px 6px;
-  white-space: nowrap;
-}
-
-.ws-goto-btn {
-  background: #FF0000;
-  color: #FFFFFF;
-  border: 1px solid #B00000;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-  font-weight: bold;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background .15s ease, transform .15s ease;
-}
-
-.ws-goto-btn:disabled {
-  background: #A00000;
-  border-color: #700000;
-  cursor: not-allowed;
-  transform: none;
-  opacity: 0.85;
-}
-
-.ws-goto-hint {
-  display: block;
-  margin-top: 2px;
-  font-size: 10px;
-  color: #B00000;
-  white-space: nowrap;
-}
-
-.ws-goto-btn:hover {
-  background: #CC0000;
-  transform: translateY(-1px);
-}
-
-.ws-goto-btn:active {
-  transform: translateY(0);
 }
 
 .ws-table tbody .ws-qty {
   font-weight: bold;
-  color: #FF0000;
+  color: #C62828;
 }
 
 .ws-table tbody .ws-machine {
-  background: #FF0000;
   padding: 2px 6px;
   position: relative;
 }
 
-.ws-table tbody .ws-machine select {
-  background: #FF0000;
-  color: #000000;
+.ws-table tbody .ws-machine select,
+.ws-table tbody .ws-worker select {
+  width: 100%;
+  min-width: 84px;
+  border: 1px solid #D1D5DB;
+  border-radius: 4px;
+  background: #FFFFFF;
+  color: #111827;
   font-weight: bold;
+  font-size: 13px;
+  padding: 3px 4px;
+  cursor: pointer;
 }
 
-.ws-table tbody .ws-tam-on {
-  color: #FF0000;
-  font-weight: bold;
+.ws-table tbody .ws-machine select option,
+.ws-table tbody .ws-worker select option {
+  background: #FFFFFF;
+  color: #111827;
 }
 
 .ws-table tbody .ws-worker,
@@ -5862,16 +5832,13 @@ input[type="date"] {
   position: relative;
 }
 
-.ws-table tbody .ws-worker select {
-  width: 100%;
-  min-width: 84px;
-  border: 1px solid #555555;
-  background: #FF0000;
-  color: #FFFFFF;
+.ws-table tbody .ws-tam-on {
+  color: #2E7D32;
   font-weight: bold;
-  font-size: 14px;
-  padding: 3px 4px;
-  cursor: pointer;
+}
+
+.ws-table tbody .ws-tam-on .ws-cell-edit {
+  color: #2E7D32;
 }
 
 .ws-cell-edit {
@@ -5893,8 +5860,8 @@ input[type="date"] {
 }
 
 .ws-cell-edit:hover {
-  background: rgba(255, 0, 0, 0.08);
-  border-color: #999999;
+  background: #F3F4F6;
+  border-color: #D1D5DB;
 }
 
 .ws-cell-edit.ws-problem-text {
@@ -5927,10 +5894,10 @@ input[type="date"] {
 .ws-problem-editor textarea {
   width: 100%;
   min-width: 160px;
-  border: 1px solid #555555;
+  border: 1px solid #D1D5DB;
   border-radius: 4px;
   background: #FFFFFF;
-  color: #000000;
+  color: #111827;
   font-size: 13px;
   padding: 4px 6px;
   resize: vertical;
@@ -5943,7 +5910,7 @@ input[type="date"] {
 
 .ws-btn-save,
 .ws-btn-cancel {
-  border: 1px solid #555555;
+  border: 1px solid #D1D5DB;
   border-radius: 4px;
   padding: 2px 12px;
   font-size: 13px;
@@ -5952,18 +5919,18 @@ input[type="date"] {
 }
 
 .ws-btn-save {
-  background: #DDEEBB;
-  color: #000000;
+  background: #E3F2FD;
+  color: #0E4C6F;
+}
+
+.ws-btn-save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .ws-btn-cancel {
-  background: #F5E6E6;
-  color: #000000;
-}
-
-.ws-worker-hd-only {
-  background: #FFFF00;
-  color: #FF0000;
+  background: #F3F4F6;
+  color: #374151;
 }
 
 .ws-staff-overlay {
@@ -6110,6 +6077,143 @@ input[type="date"] {
 .ws-staff-panel-actions .ws-btn-cancel {
   padding: 7px 22px;
   font-size: 14px;
+}
+
+/* ===== عمال + توزيع مكن (أسفل جدول التشغيل) ===== */
+.ws-lower {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 4px 0;
+  background: #FFFFFF;
+}
+
+.ws-workers-card {
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  background: #FFFFFF;
+  padding: 12px 14px;
+  width: min(360px, 100%);
+}
+
+.ws-workers-title {
+  margin: 0 0 10px;
+  background: #C62828;
+  color: #FFFFFF;
+  font-size: 16px;
+  font-weight: bold;
+  text-align: center;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.ws-workers-error {
+  background: #FDE2E2;
+  color: #B00000;
+  border: 1px solid #F5C6C6;
+  border-radius: 6px;
+  padding: 7px 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.ws-workers-add {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.ws-workers-add input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #D1D5DB;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.ws-workers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.ws-workers-empty {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #6B7280;
+}
+
+.ws-workers-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #E5E7EB;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.ws-workers-name {
+  font-size: 14px;
+  font-weight: bold;
+  color: #111827;
+}
+
+.ws-workers-remove {
+  border: 1px solid #D1D5DB;
+  border-radius: 4px;
+  background: #F3F4F6;
+  color: #C62828;
+  font-size: 12px;
+  font-weight: bold;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.ws-workers-remove.ws-workers-remove-on {
+  background: #C62828;
+  color: #FFFFFF;
+  border-color: #C62828;
+}
+
+.ws-workers-remove:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ws-workers-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.ws-workers-actions .ws-btn-save {
+  padding: 6px 20px;
+}
+
+.ws-distribute-btn {
+  background: #C62828;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background .15s ease;
+  flex-shrink: 0;
+}
+
+.ws-distribute-btn:hover {
+  background: #A81D1D;
 }
 
 @media print {

@@ -186,6 +186,23 @@ async function syncPhotosTable(log: (msg: string) => void) {
   );
 }
 
+async function syncWorkersTable(log: (msg: string) => void) {
+  await guarded(
+    () => query(`create table if not exists workers (
+      id uuid primary key default gen_random_uuid(),
+      name text not null,
+      active boolean not null default true,
+      created_by uuid references users(id) on delete set null,
+      updated_by uuid references users(id) on delete set null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create unique index if not exists workers_name_uniq on workers (lower(name));`),
+    log,
+    "workers table drift",
+  );
+}
+
 /**
  * Dedicated sequence for the display order number (00001, 00002, ...). Created
  * once, never reset, and aligned to continue after the highest existing
@@ -218,6 +235,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncOrderStatusEnum(log);
   await syncOrdersTriggers(log);
   await syncPhotosTable(log);
+  await syncWorkersTable(log);
   await syncOrderNumberSequence(log);
 }
 
