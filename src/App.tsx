@@ -8267,14 +8267,6 @@ function ZunionApp() {
         ],
       },
       {
-        id: "customers", label: "العملاء", visible: true, icon: Users,
-        children: [
-          { id: "customers", label: "جميع العملاء", visible: true, icon: Users },
-          { id: "customers", label: "بحث خاص بالعملاء", visible: true, icon: Search },
-          { id: "customerAccounts", label: "إضافة دفعة", visible: true, icon: Banknote },
-        ],
-      },
-      {
         id: "worker", label: "تشغيل تطريز", visible: true, icon: Cog, splitParent: true,
         children: [
           { id: "print", label: "طباعه", visible: true, icon: Printer },
@@ -8283,10 +8275,17 @@ function ZunionApp() {
         ],
       },
       { id: "finish", label: "التشطيب", visible: true, icon: Wrench },
+      {
+        id: "customers", label: "العملاء", visible: true, icon: Users,
+        children: [
+          { id: "customers", label: "جميع العملاء", visible: true, icon: Users },
+          { id: "customers", label: "بحث خاص بالعملاء", visible: true, icon: Search },
+          { id: "customerAccounts", label: "إضافة دفعة", visible: true, icon: Banknote },
+        ],
+      },
       { id: "machineDist", label: "توزيع المكن", visible: false, icon: LayoutGrid },
       { id: "finance", label: "مصروفات وإيرادات", visible: true, icon: WalletCards },
       { id: "reports", label: "التقارير", visible: true, icon: BarChart3 },
-      { id: "import", label: "الاستيراد والتصدير", visible: true, icon: ArrowUpDown },
       { id: "audit", label: "سجل العمليات", visible: true, icon: History },
       { id: "settings", label: "الإعدادات", visible: true, icon: Settings },
     ];
