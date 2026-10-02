@@ -4513,16 +4513,12 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
         {draftNotice && <small className="field-success">{draftNotice}</small>}
       </div>
 
+      {!isEdit && (
       <div className="nf-actionbar">
         {readOnly ? (
           <>
             <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> رجوع</button>
-            {!isEdit && onPrint && <button type="button" className="primary-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة</button>}
-          </>
-        ) : isEdit ? (
-          <>
-            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : "تحديث الأوردر"} <Send size={16} /></button>
-            {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
+            {onPrint && <button type="button" className="primary-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة</button>}
           </>
         ) : onSaveDraft || onSendToProduction ? (
           <>
@@ -4532,11 +4528,12 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
           </>
         ) : (
           <>
-            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : isEdit ? "تحديث الأوردر" : "إرسال أوردر"} <Send size={16} /></button>
+            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : "إرسال أوردر"} <Send size={16} /></button>
             {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
           </>
         )}
       </div>
+      )}
       <div className="form-grid" hidden>
         <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} disabled={readOnly} />
         <PartyField value={form.source_person} onChange={(value) => set("source_person", value)} disabled={readOnly} />
