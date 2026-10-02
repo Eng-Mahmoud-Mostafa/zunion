@@ -8015,7 +8015,7 @@ input[type="number"] {
 }
 
 /* ============================================================================
-   Customer accounts spreadsheet (ÇáÚãáíÇÊ / ÍÓÇÈ ÇáÚãíá)
+   Customer accounts spreadsheet (ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ / ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
    ========================================================================== */
 .ss-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 12px 14px; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; }
 .ss-filter { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 800; color: #111827; min-width: 0; }
@@ -8086,4 +8086,60 @@ input[type="number"] {
 @media (max-width: 900px) {
   .ss-filter-actions { margin-inline-start: 0; }
   .ss-filter { flex: 1 1 160px; }
+}
+
+/* ============================================================================
+   Orders page (Ù…ØªØ§Ø¨Ø¹Ø© Ø£ÙˆØ±Ø¯Ø±Ø§Øª only): restore classic black-text, transparent
+   table buttons. Scoped to the non-queue orders list (applied at App.tsx
+   `orders-classic-list`), overriding the global red-button override.
+   ========================================================================== */
+#root .orders-classic-list .cd-client-link {
+  background-color: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: #111827 !important;
+  font-weight: 800;
+  padding: 2px 6px;
+}
+
+#root .orders-classic-list .cd-client-link:hover,
+#root .orders-classic-list .cd-client-link:focus,
+#root .orders-classic-list .cd-client-link:active {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  color: #111827 !important;
+}
+
+#root .orders-classic-list .cd-client-link:focus-visible {
+  outline: 2px solid #08243D;
+  outline-offset: 1px;
+}
+
+#root .orders-classic-list .table-sort-button {
+  background-color: transparent !important;
+  border: 0 !important;
+  border-color: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  color: #111827 !important;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+}
+
+#root .orders-classic-list .table-sort-button:hover,
+#root .orders-classic-list .table-sort-button:focus,
+#root .orders-classic-list .table-sort-button:active {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  color: #111827 !important;
+}
+
+#root .orders-classic-list .table-sort-button:focus-visible {
+  outline: 2px solid #08243D;
+  outline-offset: 1px;
+  color: #111827 !important;
 }

@@ -6695,7 +6695,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
 
   if (!body) {
     body = (
-      <div className="stack">
+      <div className="stack orders-classic-list">
         {editing && <OrderForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
         {gotoNotice && <div className="notice">{gotoNotice}</div>}
         <OrdersInfiniteList
