@@ -153,6 +153,14 @@ export const printingSchema = z.object({
   printing_status: z.enum(["", "done"]).optional(),
 });
 
+export const finishingSchema = z.object({
+  finishing_worker: z.string().max(200).optional(),
+  finishing_notes: z.string().max(2000).optional(),
+  finishing_status: z.enum(["", "done"]).optional(),
+  work_stage: z.enum(["finishing", "completed"]).optional(),
+  status: z.enum(["SENT_TO_FINISH", "FINISH_DONE", "READY"]).optional(),
+});
+
 export const customerSchema = z.object({
   name: z.string().min(1),
   code: z.string().optional().default(""),

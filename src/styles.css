@@ -5668,6 +5668,35 @@ input[type="date"] {
   min-width: 1180px;
 }
 
+.ws-finishing-heading {
+  color: #156082;
+  font-size: 26px;
+}
+
+.ws-table.ws-finishing-table {
+  min-width: 1650px;
+}
+
+.ws-table-wrap.ws-finishing-table-wrap {
+  overflow-y: auto;
+  max-height: calc(100vh - 240px);
+}
+
+.ws-table-wrap.ws-finishing-table-wrap .ws-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.ws-table-wrap.ws-finishing-table-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.ws-table-wrap.ws-finishing-table-wrap tbody tr:last-child td {
+  border-bottom: 1px solid #E5E7EB;
+}
+
 .ws-hd.ws-sewing-group,
 .ws-hd.ws-printing-group {
   background: #F3F4F6;

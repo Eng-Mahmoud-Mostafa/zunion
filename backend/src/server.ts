@@ -11,7 +11,7 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, finishingSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions } from "./customerAccounts.js";
@@ -1177,6 +1177,21 @@ app.patch("/api/orders/:id/printing", requireAuth, requireRole("Master", "Helper
     [parsed.data.printing_worker ?? null, parsed.data.production_notes ?? null, parsed.data.printing_status ?? null, req.user!.id, id],
   );
   await audit(req.user!, "PRINTING_UPDATED", "orders", id, { printing_worker: oldOrder.printing_worker ?? "", printing_status: oldOrder.printing_status ?? "" }, parsed.data);
+  const saved = await loadOrder(id);
+  res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
+});
+
+app.patch("/api/orders/:id/finishing", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = finishingSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid finishing", issues: parsed.error.issues });
+  const oldOrder = await loadOrder(id);
+  if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  await query(
+    `update orders set finishing_worker=coalesce($1, finishing_worker), finishing_notes=coalesce($2, finishing_notes), finishing_status=coalesce($3, finishing_status), work_stage=coalesce($4, work_stage), status=coalesce($5, status), updated_by=$6 where id=$7`,
+    [parsed.data.finishing_worker ?? null, parsed.data.finishing_notes ?? null, parsed.data.finishing_status ?? null, parsed.data.work_stage ?? null, parsed.data.status ?? null, req.user!.id, id],
+  );
+  await audit(req.user!, "FINISHING_UPDATED", "orders", id, { finishing_worker: oldOrder.finishing_worker ?? "", finishing_status: oldOrder.finishing_status ?? "" }, parsed.data);
   const saved = await loadOrder(id);
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });

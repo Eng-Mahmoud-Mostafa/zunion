@@ -30,6 +30,8 @@ const REQUIRED_ORDER_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["sewing_status", "text not null default ''"],
   ["printing_worker", "text not null default ''"],
   ["printing_status", "text not null default ''"],
+  ["finishing_worker", "text not null default ''"],
+  ["finishing_status", "text not null default ''"],
   ["operation_methods", "jsonb not null default '[]'::jsonb"],
   ["operation_attachments", "jsonb not null default '[]'::jsonb"],
   ["operation_workers", "jsonb not null default '[]'::jsonb"],
