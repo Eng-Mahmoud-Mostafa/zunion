@@ -132,7 +132,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   const [entryType, setEntryType] = useState("");
   const [searchTick, setSearchTick] = useState(0);
   const [data, setData] = useState<StatementResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -244,6 +244,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
 
   function changeCustomer(id: string) {
     setCustomerId(id);
+    setData(null);
     setDraft({});
     setPaymentAmount("");
     setCharge({ orderId: "", logo: "", quantity: "", price: "" });
@@ -253,6 +254,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
 
   function resetFilters() {
     setCustomerId("");
+    setData(null);
     setFrom("");
     setTo("");
     setLogo("");
@@ -499,7 +501,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
               </tr>
             </thead>
             <tbody className="ss-body">
-              {rows.length === 0 && !canEdit && <tr><td colSpan={10} className="ss-empty">لا توجد عمليات.</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={10} className="ss-empty">لا توجد عمليات.</td></tr>}
               {rows.map((row) => (
                 <tr key={row.id} className={row.entry_type === "payment" ? "ss-pay-row" : undefined}>
                   <td className="grp-gray ss-name-cell">
