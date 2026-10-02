@@ -6262,6 +6262,211 @@ input[type="date"] {
   padding: 6px 20px;
 }
 
+.ws-workers-open {
+  background: #C62828;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.ws-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1300;
+  padding: 16px;
+}
+
+.ws-modal {
+  background: #FFFFFF;
+  border: 2px solid #C62828;
+  border-radius: 10px;
+  padding: 16px;
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow: hidden;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #EEEEEE;
+  padding-bottom: 8px;
+}
+
+.ws-modal-head h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #C62828;
+}
+
+.ws-modal-close {
+  background: none;
+  border: none;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  color: #C62828;
+  padding: 0 6px;
+}
+
+.ws-modal-feedback {
+  margin-bottom: 10px;
+}
+
+.ws-modal-error {
+  background: #FDE2E2;
+  color: #B00000;
+  border: 1px solid #F5C6C6;
+  border-radius: 6px;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.ws-modal-ok {
+  background: #E8F5E9;
+  color: #1B5E20;
+  border: 1px solid #A5D6A7;
+  border-radius: 6px;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.ws-workers-toolbar {
+  margin-bottom: 10px;
+}
+
+.ws-workers-add-btn {
+  background: #C62828;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.ws-workers-add-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ws-worker-form {
+  border: 1px solid #DDDDDD;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #FAFAFA;
+}
+
+.ws-worker-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.ws-worker-field label {
+  font-size: 13px;
+  font-weight: bold;
+  color: #000000;
+}
+
+.ws-worker-field input {
+  border: 1px solid #CCCCCC;
+  border-radius: 5px;
+  padding: 7px 9px;
+  font-size: 14px;
+  background: #FFFFFF;
+}
+
+.ws-worker-field input:focus {
+  outline: none;
+  border-color: #C62828;
+}
+
+.ws-worker-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+
+.ws-workers-table-wrap {
+  overflow: auto;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+}
+
+.ws-workers-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: #FFFFFF;
+}
+
+.ws-workers-table th,
+.ws-workers-table td {
+  border-bottom: 1px solid #E5E7EB;
+  padding: 8px 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ws-workers-table thead th {
+  background: #F9FAFB;
+  color: #111827;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.ws-workers-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ws-workers-table .ws-worker-actions-cell {
+  display: flex;
+  gap: 6px;
+}
+
+.ws-workers-table .ws-worker-actions-cell .ws-workers-remove {
+  padding: 4px 12px;
+}
+
+.ws-worker-inactive {
+  opacity: 0.6;
+}
+
+.ws-worker-disabled-badge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  background: #C62828;
+  color: #FFFFFF;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: bold;
+}
+
 .ws-distribute-btn {
   background: #C62828;
   color: #FFFFFF;

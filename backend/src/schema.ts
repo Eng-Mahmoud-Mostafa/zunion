@@ -311,12 +311,18 @@ create index if not exists machine_assignments_machine_pos_idx on machine_assign
 create table if not exists workers (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  department text not null default '',
+  card_id text not null default '',
+  phone text not null default '',
   active boolean not null default true,
   created_by uuid references users(id) on delete set null,
   updated_by uuid references users(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table workers add column if not exists department text not null default '';
+alter table workers add column if not exists card_id text not null default '';
+alter table workers add column if not exists phone text not null default '';
 create unique index if not exists workers_name_uniq on workers (lower(name));
 
 create table if not exists monthly_periods (

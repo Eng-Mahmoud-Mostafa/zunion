@@ -126,10 +126,17 @@ export const workerSchema = z.object({
 
 export const workerCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  department: z.string().trim().min(1).max(40),
+  card_id: z.string().trim().max(60).default(""),
+  phone: z.string().trim().max(60).default(""),
 });
 
 export const workerUpdateSchema = z.object({
-  active: z.boolean(),
+  name: z.string().trim().min(1).max(120).optional(),
+  department: z.string().trim().max(40).optional(),
+  card_id: z.string().trim().max(60).optional(),
+  phone: z.string().trim().max(60).optional(),
+  active: z.boolean().optional(),
 });
 
 export const staffSchema = z.object({

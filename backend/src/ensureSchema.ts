@@ -197,15 +197,55 @@ async function syncWorkersTable(log: (msg: string) => void) {
     () => query(`create table if not exists workers (
       id uuid primary key default gen_random_uuid(),
       name text not null,
+      department text not null default '',
+      card_id text not null default '',
+      phone text not null default '',
       active boolean not null default true,
       created_by uuid references users(id) on delete set null,
       updated_by uuid references users(id) on delete set null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+    alter table workers add column if not exists department text not null default '';
+    alter table workers add column if not exists card_id text not null default '';
+    alter table workers add column if not exists phone text not null default '';
     create unique index if not exists workers_name_uniq on workers (lower(name));`),
     log,
     "workers table drift",
+  );
+  await guarded(
+    () => query(`
+      update workers
+      set department = case
+        when
+          exists (select 1 from orders o where o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o where o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o where o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o, jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) wn where trim(coalesce(wn, '')) <> '' and lower(wn) = lower(workers.name))
+        then 'sewing'
+        when
+          exists (select 1 from orders o where o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o where o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o where o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o, jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) wn where trim(coalesce(wn, '')) <> '' and lower(wn) = lower(workers.name))
+        then 'printing'
+        when
+          exists (select 1 from orders o where o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o where o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o where o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o, jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) wn where trim(coalesce(wn, '')) <> '' and lower(wn) = lower(workers.name))
+        then 'finishing'
+        when
+          exists (select 1 from orders o, jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) wn where trim(coalesce(wn, '')) <> '' and lower(wn) = lower(workers.name))
+          and not exists (select 1 from orders o where o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o where o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower(workers.name))
+          and not exists (select 1 from orders o where o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower(workers.name))
+        then 'operation'
+        else department
+      end
+      where department = '';`),
+    log,
+    "workers department migration",
   );
 }
 

@@ -1123,6 +1123,8 @@ app.patch("/api/orders/:id/worker", requireAuth, requireRole("Master", "Helper",
   if (!parsed.success) return res.status(400).json({ message: "Invalid worker", issues: parsed.error.issues });
   const oldOrder = await loadOrder(id);
   if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  const workerViolation = await assertWorkerDepartment(parsed.data.worker_name, "operation");
+  if (workerViolation) return res.status(400).json({ message: workerViolation });
   await query(`update orders set worker_name=$1, updated_by=$2 where id=$3`, [parsed.data.worker_name, req.user!.id, id]);
   await audit(req.user!, "WORKER_ASSIGNED", "orders", id, { worker_name: oldOrder.worker_name ?? "" }, parsed.data);
   res.json({ ok: true });
@@ -1135,6 +1137,10 @@ app.patch("/api/orders/:id/staff", requireAuth, requireRole("Master", "Helper", 
   const oldOrder = await loadOrder(id);
   if (!oldOrder) return res.status(404).json({ message: "Order not found" });
   const oldStaff = { workers: parseJsonArray(oldOrder.operation_workers).map(String), supervisors: parseJsonArray(oldOrder.operation_supervisors).map(String) };
+  for (const name of parsed.data.worker_names) {
+    const violation = await assertWorkerDepartment(name, "operation");
+    if (violation) return res.status(400).json({ message: violation });
+  }
   await query(`update orders set operation_workers=$1, operation_supervisors=$2, updated_by=$3 where id=$4`, [JSON.stringify(parsed.data.worker_names), JSON.stringify(parsed.data.supervisor_names), req.user!.id, id]);
   await audit(req.user!, "STAFF_ASSIGNED", "orders", id, oldStaff, parsed.data);
   res.json({ ok: true });
@@ -1157,6 +1163,8 @@ app.patch("/api/orders/:id/sewing", requireAuth, requireRole("Master", "Helper",
   if (!parsed.success) return res.status(400).json({ message: "Invalid sewing", issues: parsed.error.issues });
   const oldOrder = await loadOrder(id);
   if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  const sewingViolation = await assertWorkerDepartment(parsed.data.sewing_worker ?? "", "sewing");
+  if (sewingViolation) return res.status(400).json({ message: sewingViolation });
   await query(
     `update orders set sewing_worker=coalesce($1, sewing_worker), production_notes=coalesce($2, production_notes), sewing_status=coalesce($3, sewing_status), updated_by=$4 where id=$5`,
     [parsed.data.sewing_worker ?? null, parsed.data.production_notes ?? null, parsed.data.sewing_status ?? null, req.user!.id, id],
@@ -1172,6 +1180,8 @@ app.patch("/api/orders/:id/printing", requireAuth, requireRole("Master", "Helper
   if (!parsed.success) return res.status(400).json({ message: "Invalid printing", issues: parsed.error.issues });
   const oldOrder = await loadOrder(id);
   if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  const printingViolation = await assertWorkerDepartment(parsed.data.printing_worker ?? "", "printing");
+  if (printingViolation) return res.status(400).json({ message: printingViolation });
   await query(
     `update orders set printing_worker=coalesce($1, printing_worker), production_notes=coalesce($2, production_notes), printing_status=coalesce($3, printing_status), updated_by=$4 where id=$5`,
     [parsed.data.printing_worker ?? null, parsed.data.production_notes ?? null, parsed.data.printing_status ?? null, req.user!.id, id],
@@ -1187,6 +1197,8 @@ app.patch("/api/orders/:id/finishing", requireAuth, requireRole("Master", "Helpe
   if (!parsed.success) return res.status(400).json({ message: "Invalid finishing", issues: parsed.error.issues });
   const oldOrder = await loadOrder(id);
   if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  const finishingViolation = await assertWorkerDepartment(parsed.data.finishing_worker ?? "", "finishing");
+  if (finishingViolation) return res.status(400).json({ message: finishingViolation });
   await query(
     `update orders set finishing_worker=coalesce($1, finishing_worker), finishing_notes=coalesce($2, finishing_notes), finishing_status=coalesce($3, finishing_status), work_stage=coalesce($4, work_stage), status=coalesce($5, status), updated_by=$6 where id=$7`,
     [parsed.data.finishing_worker ?? null, parsed.data.finishing_notes ?? null, parsed.data.finishing_status ?? null, parsed.data.work_stage ?? null, parsed.data.status ?? null, req.user!.id, id],
@@ -1196,9 +1208,38 @@ app.patch("/api/orders/:id/finishing", requireAuth, requireRole("Master", "Helpe
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });
 
-app.get("/api/workers", requireAuth, async (_req, res) => {
+const WORKER_DEPARTMENTS = new Set(["operation", "sewing", "printing", "finishing"]);
+const WORKER_DEPARTMENT_LABELS: Record<string, string> = {
+  operation: "تشغيل تطريز",
+  sewing: "الخياطه",
+  printing: "الطباعه",
+  finishing: "التشطيب",
+};
+
+async function assertWorkerDepartment(name: string, department: string): Promise<string | null> {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) return null;
+  const { rows } = await query<{ active: boolean; department: string }>(`select active, department from workers where lower(name) = lower($1)`, [trimmed]);
+  const worker = rows[0];
+  if (!worker) return null;
+  if (!worker.active) return null;
+  if (!worker.department) return null;
+  if (worker.department !== department) {
+    const label = WORKER_DEPARTMENT_LABELS[worker.department] ?? worker.department;
+    return `هذا العامل مسجّل في قسم ${label} ولا يمكن استخدامه في هذا القسم`;
+  }
+  return null;
+}
+
+app.get("/api/workers", requireAuth, async (req, res) => {
   try {
-    const { rows } = await query(`select id, name, active, created_at from workers order by name asc`);
+    const department = typeof req.query.department === "string" ? req.query.department.trim() : "";
+    if (department && !WORKER_DEPARTMENTS.has(department)) {
+      return res.status(400).json({ message: "قسم غير معروف" });
+    }
+    const { rows } = department
+      ? await query(`select id, name, active, department, card_id, phone, created_at from workers where department = $1 order by name asc`, [department])
+      : await query(`select id, name, active, department, card_id, phone, created_at from workers order by name asc`);
     res.json({ workers: rows });
   } catch (error) {
     res.status(500).json({ message: "Failed to load workers", details: error instanceof Error ? error.message : String(error) });
@@ -1207,34 +1248,73 @@ app.get("/api/workers", requireAuth, async (_req, res) => {
 
 app.post("/api/workers", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const parsed = workerCreateSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "Invalid worker name", issues: parsed.error.issues });
-  const name = parsed.data.name;
+  if (!parsed.success) return res.status(400).json({ message: "بيانات العامل غير صالحة", issues: parsed.error.issues });
+  const { name, department, card_id, phone } = parsed.data;
+  if (!WORKER_DEPARTMENTS.has(department)) return res.status(400).json({ message: "قسم غير معروف" });
   const existing = await query<{ id: string; active: boolean }>(`select id, active from workers where lower(name) = lower($1)`, [name]);
   if (existing.rows[0]) {
     if (existing.rows[0].active) return res.status(409).json({ message: "هذا العامل موجود مسبقًا" });
     const { rows } = await query(
-      `update workers set active = true, updated_by = $1 where id = $2 returning id, name, active, created_at`,
-      [req.user!.id, existing.rows[0].id],
+      `update workers set active = true, department = $1, card_id = $2, phone = $3, updated_by = $4 where id = $5 returning id, name, active, department, card_id, phone, created_at`,
+      [department, card_id, phone, req.user!.id, existing.rows[0].id],
     );
-    await audit(req.user!, "WORKER_REACTIVATED", "workers", existing.rows[0].id, { active: false }, { active: true });
+    await audit(req.user!, "WORKER_REACTIVATED", "workers", existing.rows[0].id, { active: false }, rows[0]);
     return res.json({ worker: rows[0] });
   }
   const { rows } = await query(
-    `insert into workers (name, active, created_by, updated_by) values ($1, true, $2, $2) returning id, name, active, created_at`,
-    [name, req.user!.id],
+    `insert into workers (name, department, card_id, phone, active, created_by, updated_by) values ($1, $2, $3, $4, true, $5, $5) returning id, name, active, department, card_id, phone, created_at`,
+    [name, department, card_id, phone, req.user!.id],
   );
-  await audit(req.user!, "WORKER_CREATED", "workers", rows[0].id, undefined, { name });
+  await audit(req.user!, "WORKER_CREATED", "workers", rows[0].id, undefined, rows[0]);
   res.json({ worker: rows[0] });
 });
 
 app.patch("/api/workers/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const id = param(req.params.id);
   const parsed = workerUpdateSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "Invalid worker update", issues: parsed.error.issues });
-  const { rows } = await query(`update workers set active = $1, updated_by = $2 where id = $3 returning id, name, active, created_at`, [parsed.data.active, req.user!.id, id]);
-  if (!rows[0]) return res.status(404).json({ message: "Worker not found" });
-  await audit(req.user!, "WORKER_UPDATED", "workers", id, { active: !parsed.data.active }, parsed.data);
+  if (!parsed.success) return res.status(400).json({ message: "بيانات العامل غير صالحة", issues: parsed.error.issues });
+  const payload = parsed.data;
+  if (payload.department !== undefined && payload.department !== "" && !WORKER_DEPARTMENTS.has(payload.department)) {
+    return res.status(400).json({ message: "قسم غير معروف" });
+  }
+  const current = await query<{ name: string; active: boolean }>(`select name, active from workers where id = $1`, [id]);
+  if (!current.rows[0]) return res.status(404).json({ message: "Worker not found" });
+  const name = payload.name ?? current.rows[0].name;
+  if (String(name).toLowerCase() !== current.rows[0].name.toLowerCase()) {
+    const duplicate = await query(`select id from workers where lower(name) = lower($1) and id <> $2`, [name, id]);
+    if (duplicate.rows[0]) return res.status(409).json({ message: "هذا العامل موجود مسبقًا" });
+  }
+  const { rows } = await query(
+    `update workers set name = $1, department = coalesce($2, department), card_id = coalesce($3, card_id), phone = coalesce($4, phone), active = coalesce($5, active), updated_by = $6 where id = $7 returning id, name, active, department, card_id, phone, created_at`,
+    [name, payload.department && payload.department.trim() !== "" ? payload.department : null, payload.card_id ?? null, payload.phone ?? null, payload.active ?? null, req.user!.id, id],
+  );
+  await audit(req.user!, "WORKER_UPDATED", "workers", id, current.rows[0], rows[0]);
   res.json({ worker: rows[0] });
+});
+
+app.delete("/api/workers/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+  const id = param(req.params.id);
+  const found = await query<{ id: string; name: string; active: boolean }>(`select id, name, active from workers where id = $1`, [id]);
+  if (!found.rows[0]) return res.status(404).json({ message: "Worker not found" });
+  const name = found.rows[0].name;
+  const assignment = await query<{ has: boolean }>(`
+    select exists(
+      select 1 from orders o
+      where (o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower($1))
+         or (o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower($1))
+         or (o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower($1))
+         or (o.worker_name is not null and trim(coalesce(o.worker_name, '')) <> '' and lower(o.worker_name) = lower($1))
+         or exists (select 1 from jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) n where trim(coalesce(n, '')) <> '' and lower(n) = lower($1))
+    ) as has
+  `, [name]);
+  if (assignment.rows[0]?.has) {
+    const { rows } = await query(`update workers set active = false, updated_by = $1 where id = $2 returning id, name, active, department, card_id, phone, created_at`, [req.user!.id, id]);
+    await audit(req.user!, "WORKER_DEACTIVATED", "workers", id, { active: true }, { active: false });
+    return res.json({ worker: rows[0], deactivated: true });
+  }
+  await query(`delete from workers where id = $1`, [id]);
+  await audit(req.user!, "WORKER_DELETED", "workers", id, found.rows[0], undefined);
+  res.json({ worker: found.rows[0], deleted: true });
 });
 
 app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
