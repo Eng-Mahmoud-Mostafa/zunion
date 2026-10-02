@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Banknote, Briefcase, Calendar, Plus, Printer, RotateCcw, Search, Trash2, Wallet } from "lucide-react";
+import { Calendar, Printer, RotateCcw, Search, Trash2 } from "lucide-react";
 import { formatDateArabic, normalizeDigitsToEnglish } from "../utils/formatters";
 
 type AccountCustomer = {
@@ -38,6 +38,7 @@ type AccountTransaction = {
   debit: number;
   credit: number;
   created_by: string | null;
+  created_by_name?: string | null;
   created_at: string;
 };
 
@@ -83,8 +84,14 @@ function formatPlainNumber(value: number) {
   return text;
 }
 
-function backToApiDate(value: string) {
-  return normalizeDigitsToEnglish(value) || null;
+function localToday() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function randomKey() {
+  return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2);
 }
 
 async function backendJson<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -113,6 +120,9 @@ function printableCell(value: unknown) {
   return String(html).replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char] || char);
 }
 
+type DraftFields = { quantity?: string; price?: string; credit?: string };
+type ChargeDraft = { orderId: string; logo: string; quantity: string; price: string };
+
 export default function CustomerAccountsPage({ customers, orders, session }: Props) {
   const [customerId, setCustomerId] = useState("");
   const [from, setFrom] = useState("");
@@ -120,19 +130,23 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   const [logo, setLogo] = useState("");
   const [q, setQ] = useState("");
   const [entryType, setEntryType] = useState("");
-  const [advanced, setAdvanced] = useState(false);
   const [searchTick, setSearchTick] = useState(0);
   const [data, setData] = useState<StatementResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [modal, setModal] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<Record<string, DraftFields>>({});
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [charge, setCharge] = useState<ChargeDraft>({ orderId: "", logo: "", quantity: "", price: "" });
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.id === customerId) ?? null,
     [customers, customerId],
   );
+
+  const canEdit = Boolean(selectedCustomer);
+  const userName = session?.fullName || session?.username || session?.email || "";
 
   const customerOrders = useMemo(() => {
     if (!selectedCustomer) return [];
@@ -159,6 +173,19 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     [customers],
   );
 
+  const chargedOrderIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const txn of data?.transactions ?? []) {
+      if (txn.entry_type === "charge" && txn.order_id) set.add(txn.order_id);
+    }
+    return set;
+  }, [data]);
+
+  const availableOrders = useMemo(
+    () => customerOrders.filter((order) => !chargedOrderIds.has(order.id)),
+    [customerOrders, chargedOrderIds],
+  );
+
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -169,6 +196,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     if (logo) query.set("logo", logo);
     if (entryType) query.set("entry_type", entryType);
     if (q.trim()) query.set("q", q.trim());
+    query.set("limit", "100000");
     const suffix = query.toString() ? `?${query.toString()}` : "";
     const endpoint = customerId
       ? `/api/customer-accounts/${encodeURIComponent(customerId)}/transactions${suffix}`
@@ -184,16 +212,44 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     if (!data) return [];
     let running = Number(data.openingDebit) - Number(data.openingCredit);
     return data.transactions.map((txn) => {
-      running = round2(running + Number(txn.debit) - Number(txn.credit));
-      return { ...txn, balance: running };
+      const next = { ...txn, debit: Number(txn.debit), credit: Number(txn.credit), balance: 0, effQty: Number(txn.quantity), effPrice: Number(txn.price) };
+      const d = draft[txn.id];
+      if (txn.entry_type === "charge") {
+        const dq = d?.quantity != null && d.quantity.trim() !== "" ? Number(d.quantity) : Number(txn.quantity);
+        const dp = d?.price != null && d.price.trim() !== "" ? Number(d.price) : Number(txn.price);
+        next.effQty = Number.isFinite(dq) ? dq : 0;
+        next.effPrice = Number.isFinite(dp) ? dp : 0;
+        next.debit = round2(next.effQty * next.effPrice);
+        next.credit = 0;
+      } else {
+        const dc = d?.credit != null && d.credit.trim() !== "" ? round2(Number(d.credit)) : Number(txn.credit);
+        next.debit = 0;
+        next.credit = Number.isFinite(dc) ? dc : 0;
+      }
+      running = round2(running + next.debit - next.credit);
+      next.balance = running;
+      return next;
     });
-  }, [data]);
+  }, [data, draft]);
 
-  const totalDebit = Number(data?.totalDebit ?? 0);
-  const totalCredit = Number(data?.totalCredit ?? 0);
   const openingBalance = Number(data?.openingDebit ?? 0) - Number(data?.openingCredit ?? 0);
+  const totalDebit = rows.reduce((sum, row) => sum + row.debit, 0);
+  const totalCredit = rows.reduce((sum, row) => sum + row.credit, 0);
+  const totalQuantity = rows.reduce((sum, row) => sum + (row.entry_type === "charge" ? Number(row.effQty || 0) : 0), 0);
   const finalBalance = rows.length ? rows[rows.length - 1].balance : openingBalance;
-  const totalQuantity = useMemo(() => rows.reduce((sum, row) => sum + (row.entry_type === "charge" ? Number(row.quantity || 0) : 0), 0), [rows]);
+  const lastBalance = rows.length ? rows[rows.length - 1].balance : openingBalance;
+
+  const chargeDebit = round2((Number(charge.quantity) || 0) * (Number(charge.price) || 0));
+  const paymentDebit = round2(Number(paymentAmount) || 0);
+
+  function changeCustomer(id: string) {
+    setCustomerId(id);
+    setDraft({});
+    setPaymentAmount("");
+    setCharge({ orderId: "", logo: "", quantity: "", price: "" });
+    setNotice(null);
+    setSearchTick((tick) => tick + 1);
+  }
 
   function resetFilters() {
     setCustomerId("");
@@ -202,7 +258,137 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     setLogo("");
     setQ("");
     setEntryType("");
+    setDraft({});
+    setPaymentAmount("");
+    setCharge({ orderId: "", logo: "", quantity: "", price: "" });
+    setNotice(null);
     setSearchTick((tick) => tick + 1);
+  }
+
+  function touchDraft(id: string, key: keyof DraftFields, value: string) {
+    setDraft((prev) => ({ ...prev, [id]: { ...prev[id], [key]: value } }));
+  }
+
+  function pickChargeOrder(orderId: string) {
+    const order = availableOrders.find((item) => item.id === orderId);
+    const patch: Partial<ChargeDraft> = { orderId };
+    if (order) {
+      const orderLogo = String(order.logo_place || order.logo_status || "").trim();
+      if (orderLogo) patch.logo = orderLogo;
+      if (Number(order.quantity || 0) > 0) patch.quantity = String(order.quantity);
+      if (Number(order.price || 0) > 0) patch.price = String(order.price);
+    }
+    setCharge((prev) => ({ ...prev, ...patch }));
+  }
+
+  async function deleteTransaction(txn: AccountTransaction) {
+    if (!window.confirm(`حذف العملية رقم ${txn.order_number || txn.id}؟`)) return;
+    setSaving(true);
+    try {
+      await backendJson(`/api/customer-accounts/transactions/${encodeURIComponent(txn.id)}?customer_id=${encodeURIComponent(txn.customer_id)}`, { method: "DELETE" });
+      setNotice({ text: "تم حذف العملية.", ok: true });
+      setSearchTick((tick) => tick + 1);
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : "تعذر حذف العملية.", ok: false });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveDraft() {
+    if (!selectedCustomer) return;
+    setSaving(true);
+    setNotice(null);
+    setError("");
+    try {
+      const patches: { id: string; customerId: string; quantity?: number; price?: number; credit?: number }[] = [];
+      for (const row of data?.transactions ?? []) {
+        const d = draft[row.id];
+        if (!d) continue;
+        const patch: { id: string; customerId: string; quantity?: number; price?: number; credit?: number } = { id: row.id, customerId: row.customer_id };
+        if (row.entry_type === "charge") {
+          if (d.quantity != null && d.quantity.trim() !== "") {
+            const current = Number(d.quantity);
+            if (String(current) !== String(Number(row.quantity))) patch.quantity = current;
+          }
+          if (d.price != null && d.price.trim() !== "") {
+            const current = Number(d.price);
+            if (String(current) !== String(Number(row.price))) patch.price = current;
+          }
+        } else {
+          if (d.credit != null && d.credit.trim() !== "") {
+            const current = round2(Number(d.credit));
+            if (String(current) !== String(Number(row.credit))) patch.credit = current;
+          }
+        }
+        if (patch.quantity !== undefined || patch.price !== undefined || patch.credit !== undefined) patches.push(patch);
+      }
+
+      const hasCharge = Boolean(charge.orderId) && Number(charge.quantity) >= 1 && Number(charge.price) > 0;
+      const hasPayment = paymentDebit > 0;
+      if (!patches.length && !hasCharge && !hasPayment) {
+        setNotice({ text: "لا توجد تغييرات للحفظ.", ok: false });
+        setSaving(false);
+        return;
+      }
+
+      for (const p of patches) {
+        await backendJson(`/api/customer-accounts/transactions/${encodeURIComponent(p.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ customer_id: p.customerId, quantity: p.quantity, price: p.price, credit: p.credit }),
+        });
+      }
+
+      if (hasCharge) {
+        await backendJson("/api/customer-accounts/transactions", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: selectedCustomer.id,
+            customer_id: selectedCustomer.id,
+            txn_date: localToday(),
+            entry_type: "charge",
+            order_id: charge.orderId,
+            description: "",
+            logo: charge.logo,
+            quantity: Number(charge.quantity) || 0,
+            price: Number(charge.price) || 0,
+            debit: chargeDebit,
+            credit: 0,
+            client_key: `ca-${selectedCustomer.id}-${Date.now()}-c-${randomKey()}`,
+          }),
+        });
+      }
+
+      if (hasPayment) {
+        await backendJson("/api/customer-accounts/transactions", {
+          method: "POST",
+          body: JSON.stringify({
+            account_id: selectedCustomer.id,
+            customer_id: selectedCustomer.id,
+            txn_date: localToday(),
+            entry_type: "payment",
+            order_id: null,
+            description: "",
+            logo: "",
+            quantity: 0,
+            price: 0,
+            debit: 0,
+            credit: paymentDebit,
+            client_key: `ca-${selectedCustomer.id}-${Date.now()}-p-${randomKey()}`,
+          }),
+        });
+      }
+
+      setDraft({});
+      setPaymentAmount("");
+      setCharge({ orderId: "", logo: "", quantity: "", price: "" });
+      setNotice({ text: "تم الحفظ بنجاح.", ok: true });
+      setSearchTick((tick) => tick + 1);
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : "تعذر الحفظ.", ok: false });
+    } finally {
+      setSaving(false);
+    }
   }
 
   function printStatement() {
@@ -245,124 +431,157 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     setTimeout(() => popup.print(), 250);
   }
 
-  async function deleteTransaction(txn: AccountTransaction) {
-    if (!window.confirm(`حذف العملية رقم ${txn.order_number || txn.id}؟`)) return;
-    setBusy(true);
-    try {
-      await backendJson(`/api/customer-accounts/transactions/${encodeURIComponent(txn.id)}?customer_id=${encodeURIComponent(txn.customer_id)}`, { method: "DELETE" });
-      setMessage("تم حذف العملية.");
-      setSearchTick((tick) => tick + 1);
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "تعذر حذف العملية.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function closeModal() {
-    setModal(false);
-    setMessage("");
-  }
+  const today = localToday();
 
   return (
     <div className="stack ca-screen">
       <div className="ca-customer-row">
         <label className="ca-customer-button">العميل حساب
-          <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setSearchTick((tick) => tick + 1); }}>
+          <select value={customerId} onChange={(event) => changeCustomer(event.target.value)}>
             <option value="">الكل / جميع العملاء</option>
             {sortedCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
           </select>
         </label>
       </div>
 
-      <div className="ca-title-row">
-        <div>
-          <h2>العمليات</h2>
-          <div className="ca-breakcrumbs">
-            <span>الرئيسية</span>
-            <span className="ca-crumb-sep"><span>{"<"}</span></span>
-            <span className="ca-crumb-current">العمليات</span>
-          </div>
-        </div>
-      </div>
-
       {loading && !data && <p className="muted">جاري تحميل الكشف...</p>}
       {!data && !loading && error && <ErrorText message={error} />}
       {!data && !loading && !error && <p className="muted">لا توجد بيانات.</p>}
+
       {data && (<>
-        <div className="ca-body">
-          <div className="ca-cards">
-            <div className="ca-card ca-card-debit"><div className="ca-card-copy"><span>مدين (شغل)</span><strong>{accountMoney(totalDebit)}</strong></div><div className="ca-card-icon"><Briefcase size={24} /></div></div>
-            <div className="ca-card ca-card-credit"><div className="ca-card-copy"><span>دائن (دفعات)</span><strong>{accountMoney(totalCredit)}</strong></div><div className="ca-card-icon"><Banknote size={24} /></div></div>
-            <div className="ca-card ca-card-balance"><div className="ca-card-copy"><span>رصيد نهائي</span><strong>{accountMoney(finalBalance)}</strong></div><div className="ca-card-icon"><Wallet size={24} /></div></div>
-          </div>
-
-          {error && <ErrorText message={error} />}
-          {message && <p className="ca-message">{message}</p>}
-
-          <div className="ca-filters">
-            <div className="ca-filter"><span>من تاريخ</span><div className="ca-date-wrap"><Calendar size={15} /><input type="date" value={normalizeDigitsToEnglish(from)} onChange={(event) => setFrom(normalizeDigitsToEnglish(event.target.value))} /></div></div>
-            <div className="ca-filter"><span>إلى تاريخ</span><div className="ca-date-wrap"><Calendar size={15} /><input type="date" value={normalizeDigitsToEnglish(to)} onChange={(event) => setTo(normalizeDigitsToEnglish(event.target.value))} /></div></div>
-            <div className="ca-filter"><span>بيان</span><select value={logo} onChange={(event) => setLogo(event.target.value)}><option value="">الكل</option>{logoOptions.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
-            <div className="ca-filter"><span>بحث في البيان</span><div className="ca-date-wrap"><Search size={15} /><input value={normalizeDigitsToEnglish(q)} onChange={(event) => setQ(normalizeDigitsToEnglish(event.target.value))} placeholder="إبحث في البيان" /></div></div>
-            <div className="ca-actions">
-              <button type="button" className="ca-btn ca-btn-search" onClick={() => setAdvanced((value) => !value)}><Search size={16} /> بحث متقدم</button>
-              <button type="button" className="ca-btn ca-btn-print" onClick={resetFilters}><RotateCcw size={16} /> مسح الفلاتر</button>
-            </div>
-          </div>
-
-          {advanced && (
-            <div className="ca-filters ca-advanced">
-              <div className="ca-filter"><span>نوع العملية</span><select value={entryType} onChange={(event) => setEntryType(event.target.value)}><option value="">الكل</option><option value="charge">شغل</option><option value="payment">دفعة</option></select></div>
-            </div>
-          )}
-
-          <div className="ca-actions">
-            <button type="button" className="ca-btn ca-btn-add" onClick={() => { if (!selectedCustomer) { setMessage("اختر عميلاً أولاً لإضافة عملية"); return; } setModal(true); }}><Plus size={18} /> إضافة عملية</button>
-            <button type="button" className="ca-btn ca-btn-search" onClick={() => setSearchTick((tick) => tick + 1)}><Search size={16} /> بحث</button>
-            <button type="button" className="ca-btn ca-btn-print" onClick={printStatement}><Printer size={16} /> طباعة</button>
-          </div>
-
-          <div className="ca-table-card">
-            <div className="ca-table-wrap">
-              <table className="ca-table">
-                <thead>
-                  <tr>{["التاريخ", "رقم الاوردر", "بيان", "اللوجو", "العدد", "السعر", "مدين (شغل)", "دائن (دفعات)", "رصيد نهائي", ""].map((head) => <th key={head}>{head}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 && <tr><td colSpan={10}>لا توجد عمليات.</td></tr>}
-                  {rows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{accountDay(row)}</td>
-                      <td>{row.order_number || "—"}</td>
-                      <td>{row.description || "—"}</td>
-                      <td>{row.logo || "—"}</td>
-                      <td className="num">{row.entry_type === "charge" ? formatNumberLocal(row.quantity) : "—"}</td>
-                      <td className="num">{row.entry_type === "charge" ? accountMoney(row.price) : "—"}</td>
-                      <td className="num ca-debit">{accountMoney(row.debit)}</td>
-                      <td className="num ca-credit">{row.entry_type === "payment" ? accountMoney(row.credit) : "—"}</td>
-                      <td className="num ca-balance">{accountMoney(row.balance)}</td>
-                      <td className="ca-actions-cell">{session.role === "Master" && <button type="button" className="ghost-btn compact ca-delete" onClick={() => deleteTransaction(row)} disabled={busy}><Trash2 size={14} /></button>}</td>
-                    </tr>
-                  ))}
-                  {rows.length > 0 && (
-                    <tr className="ca-totals">
-                      <td colSpan={4}>الإجمالي</td>
-                      <td className="num">{formatNumberLocal(totalQuantity)}</td>
-                      <td />
-                      <td className="num">{accountMoney(totalDebit)}</td>
-                      <td className="num">{accountMoney(totalCredit)}</td>
-                      <td className="num ca-balance">{accountMoney(finalBalance)}</td>
-                      <td />
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+        <div className="ss-filters">
+          <div className="ss-filter"><span>من تاريخ</span><div className="ss-date-wrap"><Calendar size={15} /><input type="date" value={normalizeDigitsToEnglish(from)} onChange={(event) => setFrom(normalizeDigitsToEnglish(event.target.value))} /></div></div>
+          <div className="ss-filter"><span>إلى تاريخ</span><div className="ss-date-wrap"><Calendar size={15} /><input type="date" value={normalizeDigitsToEnglish(to)} onChange={(event) => setTo(normalizeDigitsToEnglish(event.target.value))} /></div></div>
+          <div className="ss-filter"><span>البيان</span><select value={logo} onChange={(event) => setLogo(event.target.value)}><option value="">الكل</option>{logoOptions.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
+          <div className="ss-filter"><span>بحث في البيان</span><div className="ss-date-wrap"><Search size={15} /><input value={normalizeDigitsToEnglish(q)} onChange={(event) => setQ(normalizeDigitsToEnglish(event.target.value))} placeholder="إبحث في البيان" /></div></div>
+          <div className="ss-filter"><span>نوع العملية</span><select value={entryType} onChange={(event) => setEntryType(event.target.value)}><option value="">الكل</option><option value="charge">شغل</option><option value="payment">دفعة</option></select></div>
+          <div className="ss-filter-actions">
+            <button type="button" className="ca-btn ca-btn-search" onClick={() => setSearchTick((tick) => tick + 1)}><Search size={15} /> بحث</button>
+            <button type="button" className="ca-btn ca-btn-print" onClick={resetFilters}><RotateCcw size={15} /> مسح</button>
+            <button type="button" className="ca-btn ca-btn-print" onClick={printStatement}><Printer size={15} /> طباعة</button>
           </div>
         </div>
-        </>)}
-      {modal && selectedCustomer && <TransactionModal customer={selectedCustomer} orders={customerOrders} logos={logoOptions} onClose={closeModal} onSaved={() => { setModal(false); setMessage(""); setSearchTick((tick) => tick + 1); }} />}
+
+        {error && <ErrorText message={error} />}
+        {notice && <p className={"ss-message " + (notice.ok ? "ok" : "err")}>{notice.text}</p>}
+
+        <div className="ss-scroll">
+          <table className="ss-table">
+            <colgroup>
+              <col style={{ width: "11.59%" }} />
+              <col style={{ width: "11.59%" }} />
+              <col style={{ width: "11.59%" }} />
+              <col style={{ width: "13.04%" }} />
+              <col style={{ width: "11.59%" }} />
+              <col style={{ width: "6.52%" }} />
+              <col style={{ width: "6.52%" }} />
+              <col style={{ width: "8.33%" }} />
+              <col style={{ width: "8.33%" }} />
+              <col style={{ width: "10.87%" }} />
+            </colgroup>
+            <thead>
+              <tr className="ss-top">
+                <td className="ss-save"><button type="button" className="ss-save-btn" onClick={saveDraft} disabled={saving || !canEdit}>{saving ? "جاري الحفظ..." : "حفظ"}</button></td>
+                <td className="ss-title" colSpan={8}>{selectedCustomer ? `حساب العميل — ${selectedCustomer.client_name}` : "العمليات"}</td>
+                <td className="ss-balance-cell">{accountMoney(finalBalance)}</td>
+              </tr>
+              <tr className="ss-head">
+                <th>كتب بواسطة</th>
+                <th>تاريخ التسليم</th>
+                <th>رقم الأوردر</th>
+                <th>النوع</th>
+                <th>اللوجو</th>
+                <th>العدد</th>
+                <th>السعر</th>
+                <th>مدين (شغل)</th>
+                <th>دائن (دفعات)</th>
+                <th>رصيد نهائي</th>
+              </tr>
+            </thead>
+            <tbody className="ss-body">
+              {rows.length === 0 && !canEdit && <tr><td colSpan={10} className="ss-empty">لا توجد عمليات.</td></tr>}
+              {rows.map((row) => (
+                <tr key={row.id} className={row.entry_type === "payment" ? "ss-pay-row" : undefined}>
+                  <td className="grp-gray ss-name-cell">
+                    <span className="ss-name">{row.created_by_name || "—"}</span>
+                    {session.role === "Master" && canEdit && (
+                      <button type="button" className="ss-delete-row" onClick={() => deleteTransaction(row)} disabled={saving} aria-label="حذف"><Trash2 size={14} /></button>
+                    )}
+                  </td>
+                  <td className="grp-gray">{accountDay(row)}</td>
+                  <td className="grp-gray">{row.order_number || "—"}</td>
+                  <td className={"ss-type" + (row.entry_type === "payment" ? " ss-pay-type" : "")}>{row.entry_type === "payment" ? "دفعة" : "شغل"}</td>
+                  <td>{row.logo || "—"}</td>
+                  {canEdit && row.entry_type === "charge" ? (
+                    <>
+                      <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={draft[row.id]?.quantity ?? String(row.quantity)} onChange={(event) => touchDraft(row.id, "quantity", normalizeDigitsToEnglish(event.target.value))} aria-label="العدد" /></td>
+                      <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={draft[row.id]?.price ?? String(row.price)} onChange={(event) => touchDraft(row.id, "price", normalizeDigitsToEnglish(event.target.value))} aria-label="السعر" /></td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="ss-num">{row.entry_type === "charge" ? formatNumberLocal(row.quantity) : "—"}</td>
+                      <td className="ss-num">{row.entry_type === "charge" ? accountMoney(row.price) : "—"}</td>
+                    </>
+                  )}
+                  <td className="ss-num ss-debit-val">{accountMoney(row.debit)}</td>
+                  {canEdit && row.entry_type === "payment" ? (
+                    <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={draft[row.id]?.credit ?? String(row.credit)} onChange={(event) => touchDraft(row.id, "credit", normalizeDigitsToEnglish(event.target.value))} aria-label="الدائن" /></td>
+                  ) : (
+                    <td className="ss-num">{row.entry_type === "payment" ? accountMoney(row.credit) : "—"}</td>
+                  )}
+                  <td className="ss-num ss-bal">{accountMoney(row.balance)}</td>
+                </tr>
+              ))}
+              {rows.length > 0 && (
+                <tr className="ss-total">
+                  <td className="grp-gray" colSpan={4}>الإجمالي</td>
+                  <td />
+                  <td className="ss-num">{formatNumberLocal(totalQuantity)}</td>
+                  <td />
+                  <td className="ss-num">{accountMoney(totalDebit)}</td>
+                  <td className="ss-num">{accountMoney(totalCredit)}</td>
+                  <td className="ss-num ss-bal">{accountMoney(finalBalance)}</td>
+                </tr>
+              )}
+              {canEdit && (
+                <tr className="ss-entry ss-charge-entry">
+                  <td className="grp-gray ss-name-cell"><span className="ss-name">{userName || "—"}</span></td>
+                  <td className="grp-gray">{formatDateArabic(`${today}T00:00:00`)}</td>
+                  <td className="grp-gray">
+                    <select className="ss-select-cell" value={charge.orderId} onChange={(event) => pickChargeOrder(event.target.value)}>
+                      <option value="">اختر الأوردر</option>
+                      {availableOrders.map((order) => <option key={order.id} value={order.id}>#{order.order_number}</option>)}
+                    </select>
+                  </td>
+                  <td className="ss-type">شغل</td>
+                  <td><input className="ss-cell-input" value={normalizeDigitsToEnglish(charge.logo)} onChange={(event) => setCharge((prev) => ({ ...prev, logo: normalizeDigitsToEnglish(event.target.value) }))} placeholder="اللوجو" list="ca-logo-options" /></td>
+                  <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={normalizeDigitsToEnglish(charge.quantity)} onChange={(event) => setCharge((prev) => ({ ...prev, quantity: normalizeDigitsToEnglish(event.target.value) }))} placeholder="0" aria-label="العدد الجديد" /></td>
+                  <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={normalizeDigitsToEnglish(charge.price)} onChange={(event) => setCharge((prev) => ({ ...prev, price: normalizeDigitsToEnglish(event.target.value) }))} placeholder="0" aria-label="السعر الجديد" /></td>
+                  <td className="ss-num ss-debit-val">{accountMoney(chargeDebit)}</td>
+                  <td className="ss-num">—</td>
+                  <td className="ss-num ss-bal">{accountMoney(round2(lastBalance + chargeDebit))}</td>
+                </tr>
+              )}
+              {canEdit && (
+                <tr className="ss-entry ss-pay-entry">
+                  <td className="grp-gray ss-name-cell"><span className="ss-name">{userName || "—"}</span></td>
+                  <td className="ss-pay-date">{formatDateArabic(`${today}T00:00:00`)}</td>
+                  <td className="grp-gray">—</td>
+                  <td className="ss-pay-type">دفعة</td>
+                  <td className="grp-gray">—</td>
+                  <td className="grp-gray">—</td>
+                  <td className="grp-gray">—</td>
+                  <td className="ss-num">0</td>
+                  <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={normalizeDigitsToEnglish(paymentAmount)} onChange={(event) => setPaymentAmount(normalizeDigitsToEnglish(event.target.value))} placeholder="0" aria-label="مبلغ الدفعة" /></td>
+                  <td className="ss-num ss-bal">{accountMoney(round2(lastBalance - paymentDebit))}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {canEdit && <datalist id="ca-logo-options">{logoOptions.map((value) => <option key={value} value={value} />)}</datalist>}
+        </>
+      )}
     </div>
   );
 }
@@ -374,120 +593,6 @@ function ErrorText({ message }: { message: string }) {
 function formatNumberLocal(value: unknown) {
   const n = Number(value ?? 0) || 0;
   return normalizeDigitsToEnglish(Math.round(n * 100) / 100);
-}
-
-function TransactionModal({ customer, orders, logos, onClose, onSaved }: {
-  customer: AccountCustomer;
-  orders: AccountOrder[];
-  logos: string[];
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [entryType, setEntryType] = useState<"charge" | "payment">("charge");
-  const [txnDate, setTxnDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [orderId, setOrderId] = useState("");
-  const [description, setDescription] = useState("");
-  const [logo, setLogo] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [price, setPrice] = useState("");
-  const [amount, setAmount] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  function chooseOrder(order: AccountOrder | null) {
-    setOrderId(order?.id ?? "");
-    if (order) {
-      const orderLogo = String(order.logo_place || order.logo_status || "").trim();
-      if (orderLogo) setLogo(orderLogo);
-      if (Number(order.quantity || 0) > 0) setQuantity(String(order.quantity));
-      if (Number(order.price || 0) > 0) setPrice(String(order.price));
-    }
-  }
-
-  const computedDebit = entryType === "charge" ? round2((Number(quantity) || 0) * (Number(price) || 0)) : 0;
-
-  async function submit() {
-    setError("");
-    if (!txnDate) { setError("التاريخ مطلوب"); return; }
-    if (entryType === "charge") {
-      if (!orderId) { setError("اختر رقم الأوردر"); return; }
-      if (!(Number(quantity) > 0)) { setError("العدد يجب أن يكون 1 على الأقل"); return; }
-      if (!(Number(price) > 0)) { setError("السعر مطلوب"); return; }
-    } else {
-      if (!(Number(amount) > 0)) { setError("مبلغ الدفعة مطلوب"); return; }
-    }
-    setSaving(true);
-    try {
-      const clientKey = `ca-${customer.id}-${Date.now()}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)}`;
-      await backendJson("/api/customer-accounts/transactions", {
-        method: "POST",
-        body: JSON.stringify({
-          account_id: customer.id,
-          customer_id: customer.id,
-          txn_date: backToApiDate(txnDate) ?? "",
-          entry_type: entryType,
-          order_id: entryType === "charge" ? orderId : null,
-          description,
-          logo: entryType === "charge" ? logo : "",
-          quantity: entryType === "charge" ? Number(quantity) || 0 : 0,
-          price: entryType === "charge" ? Number(price) || 0 : 0,
-          debit: entryType === "charge" ? computedDebit : 0,
-          credit: entryType === "payment" ? round2(Number(amount) || 0) : 0,
-          client_key: clientKey,
-        }),
-      });
-      onSaved();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "تعذر حفظ العملية.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="ca-modal">
-      <div className="ca-modal-box">
-        <div className="ca-modal-head"><h3>إضافة عملية - {customer.client_name}</h3><button type="button" className="ghost-btn compact" onClick={onClose} aria-label="إغلاق">×</button></div>
-        <div className="ca-form">
-          <label>نوع العملية
-            <select value={entryType} onChange={(event) => { setEntryType(event.target.value as "charge" | "payment"); setError(""); }}>
-              <option value="charge">شغل (مدين)</option>
-              <option value="payment">دفعة (دائن)</option>
-            </select>
-          </label>
-          <label>التاريخ<input type="date" value={normalizeDigitsToEnglish(txnDate)} onChange={(event) => setTxnDate(normalizeDigitsToEnglish(event.target.value))} /></label>
-          {entryType === "charge" && (
-            <>
-              <label>رقم الأوردر
-                <select value={orderId} onChange={(event) => chooseOrder(orders.find((order) => order.id === event.target.value) ?? null)}>
-                  <option value="" disabled hidden>اختر الأوردر</option>
-                  {orders.map((order) => <option key={order.id} value={order.id}>#{order.order_number}</option>)}
-                </select>
-              </label>
-              <label>اللوجو
-                <input value={normalizeDigitsToEnglish(logo)} onChange={(event) => setLogo(normalizeDigitsToEnglish(event.target.value))} placeholder="اللوجو" list="ca-logo-options" />
-                <datalist id="ca-logo-options">{logos.map((value) => <option key={value} value={value} />)}</datalist>
-              </label>
-              <div className="ca-form-row">
-                <label>العدد<input type="number" min="1" value={normalizeDigitsToEnglish(quantity)} onChange={(event) => setQuantity(normalizeDigitsToEnglish(event.target.value))} /></label>
-                <label>السعر<input type="number" min="0" step="0.01" value={normalizeDigitsToEnglish(price)} onChange={(event) => setPrice(normalizeDigitsToEnglish(event.target.value))} /></label>
-              </div>
-              <div className="ca-compute">إجمالي الشغل: <strong>{accountMoney(computedDebit)}</strong></div>
-            </>
-          )}
-          {entryType === "payment" && (
-            <label>المبلغ<input type="number" min="0" step="0.01" value={normalizeDigitsToEnglish(amount)} onChange={(event) => setAmount(normalizeDigitsToEnglish(event.target.value))} placeholder="مبلغ الدفعة" /></label>
-          )}
-          <label>البيان<textarea value={normalizeDigitsToEnglish(description)} onChange={(event) => setDescription(normalizeDigitsToEnglish(event.target.value))} rows={2} placeholder="وصف اختياري" /></label>
-        </div>
-        <ErrorText message={error} />
-        <div className="ca-modal-actions">
-          <button type="button" className="ca-btn ca-btn-add" onClick={submit} disabled={saving}>{saving ? "جاري الحفظ..." : `${entryType === "charge" ? "إضافة شغل" : "إضافة دفعة"}`}</button>
-          <button type="button" className="ghost-btn" onClick={onClose} disabled={saving}>إلغاء</button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function escapeHtml(value: unknown) {

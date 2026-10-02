@@ -27,6 +27,7 @@ export type CustomerTransactionRow = {
   debit: number;
   credit: number;
   created_by: string | null;
+  created_by_name: string | null;
   created_at: string;
 };
 
@@ -69,13 +70,15 @@ export async function listTransactions(
   );
   const total = Number(countRows[0]?.count ?? 0);
 
-  const limit = Math.min(filters.limit ?? 200, 1000);
+  const limit = Math.min(filters.limit ?? 5000, 100000);
   const offset = filters.offset ?? 0;
 
   const { rows } = await query<CustomerTransactionRow>(
-    `select t.*, to_char(t.txn_date, 'YYYY-MM-DD') as txn_date_text, o.order_number as order_number
+    `select t.*, to_char(t.txn_date, 'YYYY-MM-DD') as txn_date_text, o.order_number as order_number,
+       coalesce(nullif(u.full_name, ''), u.username) as created_by_name
      from customer_account_transactions t
      left join orders o on o.id = t.order_id
+     left join users u on u.id = t.created_by
      where ${where}
      order by t.txn_date, t.created_at, t.id
      limit $${params.length + 1} offset $${params.length + 2}`,
@@ -120,29 +123,87 @@ export async function createTransaction(input: {
     );
     if (dupRows[0]) return dupRows[0] as CustomerTransactionRow;
 
-    const { rows } = await client.query<CustomerTransactionRow>(
-      `insert into customer_account_transactions
-       (account_id, customer_id, txn_date, entry_type, order_id, description, logo, quantity, price, debit, credit, client_key, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       returning *`,
-      [
-        input.accountId,
-        input.customerId,
-        input.txnDate,
-        input.entryType,
-        input.orderId,
-        input.description,
-        input.logo,
-        input.quantity,
-        input.price,
-        input.debit,
-        input.credit,
-        input.clientKey,
-        input.createdBy,
-      ],
-    );
-    return rows[0];
+    try {
+      const { rows } = await client.query<CustomerTransactionRow>(
+        `insert into customer_account_transactions
+         (account_id, customer_id, txn_date, entry_type, order_id, description, logo, quantity, price, debit, credit, client_key, created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         returning *`,
+        [
+          input.accountId,
+          input.customerId,
+          input.txnDate,
+          input.entryType,
+          input.orderId,
+          input.description,
+          input.logo,
+          input.quantity,
+          input.price,
+          input.debit,
+          input.credit,
+          input.clientKey,
+          input.createdBy,
+        ],
+      );
+      return rows[0];
+    } catch (error) {
+      if (error instanceof Error && (error as { code?: string }).code === "23505") {
+        throw Object.assign(new Error("هذا الأوردر مدين بالفعل في كشف العميل"), { code: "ZUNION_ORDER_ALREADY_CHARGED" });
+      }
+      throw error;
+    }
   });
+}
+
+export async function updateTransaction(
+  txnId: string,
+  customerId: string,
+  fields: {
+    txnDate?: string;
+    description?: string;
+    logo?: string;
+    quantity?: number;
+    price?: number;
+    credit?: number;
+  },
+): Promise<CustomerTransactionRow | null> {
+  const { rows: existingRows } = await query<CustomerTransactionRow>(
+    "select * from customer_account_transactions where id=$1 and customer_id=$2",
+    [txnId, customerId],
+  );
+  const existing = existingRows[0];
+  if (!existing) return null;
+
+  let quantity = Number(existing.quantity);
+  let price = Number(existing.price);
+  let credit = Number(existing.credit);
+  if (fields.quantity !== undefined) quantity = Number(fields.quantity);
+  if (fields.price !== undefined) price = Number(fields.price);
+  if (fields.credit !== undefined) credit = Number(fields.credit);
+
+  let debit: number;
+  if (existing.entry_type === "charge") {
+    debit = Math.round(quantity * price * 100) / 100;
+    credit = 0;
+  } else {
+    debit = 0;
+    credit = Math.round(credit * 100) / 100;
+  }
+
+  const { rows } = await query<CustomerTransactionRow>(
+    `update customer_account_transactions set
+       txn_date = coalesce($1::date, txn_date),
+       description = coalesce($2, description),
+       logo = coalesce($3, logo),
+       quantity = $4,
+       price = $5,
+       debit = $6,
+       credit = $7
+     where id = $8 and customer_id = $9
+     returning *`,
+    [fields.txnDate ?? null, fields.description ?? null, fields.logo ?? null, quantity, price, debit, credit, txnId, customerId],
+  );
+  return rows[0] ?? null;
 }
 
 export async function deleteTransaction(txnId: string, customerId: string): Promise<boolean> {

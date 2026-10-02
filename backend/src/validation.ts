@@ -239,3 +239,13 @@ export const customerTransactionSchema = z
       txn.debit = 0;
     }
   });
+
+export const customerTransactionUpdateSchema = z.object({
+  customer_id: z.string().uuid(),
+  txn_date: z.string().trim().min(1, "التاريخ مطلوب").optional(),
+  description: z.string().trim().max(2000).optional(),
+  logo: z.string().trim().max(500).optional(),
+  quantity: z.coerce.number().min(0).optional(),
+  price: z.coerce.number().min(0).optional(),
+  credit: z.coerce.number().min(0).optional(),
+});

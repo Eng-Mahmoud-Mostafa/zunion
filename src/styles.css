@@ -8013,3 +8013,77 @@ input[type="number"] {
   border-color: #ED1525 !important;
   color: #FFFFFF !important;
 }
+
+/* ============================================================================
+   Customer accounts spreadsheet (ÇáÚãáíÇÊ / ÍÓÇÈ ÇáÚãíá)
+   ========================================================================== */
+.ss-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 12px 14px; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; }
+.ss-filter { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 800; color: #111827; min-width: 0; }
+.ss-filter > span { color: #6B7280; }
+.ss-filter select, .ss-filter input { height: 38px; font-size: 13px; padding: 0 10px; border: 1px solid #E5E7EB; border-radius: 8px; background: #fff; color: #111827; font-weight: 600; }
+.ss-filter select:focus, .ss-filter input:focus { outline: none; border-color: #08243D; box-shadow: 0 0 0 3px rgba(8, 36, 61, .1); }
+.ss-date-wrap { display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 10px; border: 1px solid #E5E7EB; border-radius: 8px; background: #fff; color: #6B7280; }
+.ss-date-wrap input { border: 0; outline: none; background: transparent; height: 100%; font-size: 13px; font-weight: 600; color: #111827; padding: 0; min-height: 0; box-shadow: none; }
+.ss-date-wrap svg { flex: 0 0 auto; }
+.ss-filter-actions { display: flex; align-items: center; gap: 10px; margin-inline-start: auto; flex-wrap: wrap; }
+.ss-message { margin: 8px 0 12px; font-size: 13px; font-weight: 800; }
+.ss-message.ok { color: #137A3B; }
+.ss-message.err { color: #E30613; }
+
+.ss-scroll { overflow: auto; max-height: calc(100vh - 290px); background: #fff; border: 1px solid #000; }
+.ss-table { width: 100%; min-width: 1380px; table-layout: fixed; border-collapse: collapse; font-size: 18px; }
+.ss-table, .ss-table th, .ss-table td { border: 1px solid #000; }
+.ss-table thead { position: sticky; top: 0; z-index: 20; }
+
+/* top row: save | merged title | dark-red balance */
+.ss-table .ss-top td { height: 75px; padding: 0; vertical-align: middle; text-align: center; background: #F2F2F2; }
+.ss-save { background: #ED1525 !important; }
+.ss-save button { width: 100%; height: 75px; border: 0; border-radius: 0; font-size: 19px; font-weight: 900; }
+.ss-save button:disabled { opacity: .55; cursor: not-allowed; }
+.ss-title { font-size: 26px; font-weight: 900; color: #111827; background: #F2F2F2 !important; padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-balance-cell { background: #A61610 !important; color: #fff !important; font-size: 26px; font-weight: 900; direction: ltr; unicode-bidi: embed; }
+
+/* column headers */
+.ss-head th { height: 51px; background: #F2F2F2; color: #111827; font-size: 16px; font-weight: 800; text-align: center; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* body */
+.ss-body td { height: 52px; padding: 0 8px; text-align: center; color: #111827; vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ss-body td.grp-gray { background: #D9D9D9; }
+.ss-body tr.ss-pay-row { background: #A6A6A6; }
+.ss-body tr.ss-pay-row td.grp-gray { background: #B8B8B8; }
+.ss-body td.ss-pay-type { background: #ED1525 !important; color: #fff !important; font-weight: 900; }
+.ss-body td.ss-pay-date { background: #ED1525 !important; color: #fff !important; font-weight: 900; }
+.ss-body td.ss-num { direction: ltr; unicode-bidi: embed; font-variant-numeric: tabular-nums; }
+.ss-body td.ss-debit-val { font-weight: 700; }
+.ss-body td.ss-bal { color: #E30613; font-weight: 800; }
+.ss-body td.ss-empty { color: #9CA3AF; }
+
+.ss-type { font-weight: 800; }
+.ss-name-cell { display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; }
+.ss-name { overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* totals */
+.ss-total td { height: 44px; background: #D9D9D9; font-weight: 800; border-top: 2px solid #000; }
+
+/* inline cell inputs / selects */
+.ss-cell-input { width: 100%; height: 100%; min-height: 0; border: 0; outline: none; background: transparent; text-align: center; font: inherit; color: inherit; padding: 0 4px; direction: ltr; box-shadow: none; }
+.ss-cell-input:focus { background: #FFF7ED; outline: 2px solid #F97316; outline-offset: -2px; }
+.ss-cell-input::placeholder { color: #9CA3AF; }
+.ss-select-cell { width: 100%; height: 100%; border: 0; outline: none; background: transparent; text-align: center; font: inherit; font-size: 14px; color: inherit; padding: 0 4px; box-shadow: none; cursor: pointer; }
+.ss-select-cell:focus { background: #FFF7ED; outline: 2px solid #F97316; outline-offset: -2px; }
+.ss-select-cell option { color: #111827; }
+
+/* entry rows */
+.ss-entry td { height: 54px; }
+.ss-charge-entry td.grp-gray { background: #D9D9D9; }
+.ss-pay-entry { background: #A6A6A6 !important; }
+.ss-pay-entry td.grp-gray { background: #B8B8B8; }
+
+/* delete row button: shown on hover */
+.ss-delete-row { display: none; align-items: center; justify-content: center; width: 24px; height: 24px; flex: 0 0 auto; border-radius: 5px; padding: 0 !important; }
+.ss-body tr:hover .ss-delete-row { display: inline-flex; }
+
+@media (max-width: 900px) {
+  .ss-filter-actions { margin-inline-start: 0; }
+  .ss-filter { flex: 1 1 160px; }
+}

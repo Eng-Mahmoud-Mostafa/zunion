@@ -11,10 +11,10 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, finishingSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, customerTransactionUpdateSchema, finishingSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
-import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions } from "./customerAccounts.js";
+import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions, updateTransaction } from "./customerAccounts.js";
 import { effectivePermissions, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
@@ -1628,21 +1628,29 @@ app.post("/api/customer-accounts/transactions", requireAuth, requireRole("Master
   if (!parsed.success) return res.status(400).json({ message: "Invalid transaction", issues: parsed.error.issues });
   const txn = parsed.data;
   const accountId = await ensureCustomerAccount(txn.customer_id);
-  const row = await createTransaction({
-    accountId,
-    customerId: txn.customer_id,
-    txnDate: txn.txn_date,
-    entryType: txn.entry_type,
-    orderId: txn.order_id ?? null,
-    description: txn.description,
-    logo: txn.logo,
-    quantity: txn.quantity,
-    price: txn.price,
-    debit: txn.debit,
-    credit: txn.credit,
-    clientKey: txn.client_key,
-    createdBy: req.user!.id,
-  });
+  let row: Awaited<ReturnType<typeof createTransaction>>;
+  try {
+    row = await createTransaction({
+      accountId,
+      customerId: txn.customer_id,
+      txnDate: txn.txn_date,
+      entryType: txn.entry_type,
+      orderId: txn.order_id ?? null,
+      description: txn.description,
+      logo: txn.logo,
+      quantity: txn.quantity,
+      price: txn.price,
+      debit: txn.debit,
+      credit: txn.credit,
+      clientKey: txn.client_key,
+      createdBy: req.user!.id,
+    });
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === "ZUNION_ORDER_MISMATCH") return res.status(400).json({ message: "الأوردر لا ينتمي لهذا العميل" });
+    if (code === "ZUNION_ORDER_ALREADY_CHARGED") return res.status(409).json({ message: "هذا الأوردر مدين بالفعل في كشف العميل" });
+    throw err;
+  }
   await audit(req.user!, txn.entry_type === "charge" ? "CUSTOMER_ACCOUNT_CHARGED" : "CUSTOMER_ACCOUNT_PAID", "customer_account_transactions", row.id, undefined, {
     customer_id: txn.customer_id,
     order_id: txn.order_id,
@@ -1661,6 +1669,27 @@ app.delete("/api/customer-accounts/transactions/:id", requireAuth, requireRole("
   if (!deleted) return res.status(404).json({ message: "Transaction not found" });
   await audit(req.user!, "CUSTOMER_ACCOUNT_TRANSACTION_DELETED", "customer_account_transactions", txnId, before.rows[0]);
   res.json({ ok: true });
+});
+
+app.patch("/api/customer-accounts/transactions/:id", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const txnId = param(req.params.id);
+  const parsed = customerTransactionUpdateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid transaction update", issues: parsed.error.issues });
+  const body = parsed.data;
+  const before = await query("select * from customer_account_transactions where id=$1", [txnId]);
+  const updated = await updateTransaction(txnId, body.customer_id, {
+    txnDate: body.txn_date,
+    description: body.description,
+    logo: body.logo,
+    quantity: body.quantity,
+    price: body.price,
+    credit: body.credit,
+  });
+  if (!updated) return res.status(404).json({ message: "Transaction not found" });
+  if (before.rows[0]) {
+    await audit(req.user!, "CUSTOMER_ACCOUNT_TRANSACTION_UPDATED", "customer_account_transactions", txnId, before.rows[0], updated);
+  }
+  res.json({ transaction: updated });
 });
 
 app.get("/api/products", requireAuth, async (_req, res) => {
