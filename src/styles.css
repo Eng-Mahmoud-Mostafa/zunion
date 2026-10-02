@@ -7497,3 +7497,42 @@ tr.ws-row-highlight td {
   text-overflow: clip;
   white-space: nowrap;
 }
+
+/* ---------- orders list: continuous page scroll, no pagination ---------- */
+.orders-list-table-wrap.orders-infinite-list {
+  overflow: visible;
+  max-height: none;
+  border-radius: 10px;
+}
+
+.orders-infinite-list .orders-table-sticky {
+  position: sticky;
+  top: 72px;
+  z-index: 5;
+  overflow: hidden;
+  background: #fff;
+  border-bottom: 1px solid #d9dee8;
+}
+
+.orders-infinite-list .orders-table-sticky table {
+  margin: 0;
+}
+
+.orders-infinite-list .orders-table-scroll {
+  overflow: auto;
+  max-height: none;
+}
+
+.orders-infinite-list .orders-table-more td {
+  height: 44px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  background: #f8fafc;
+}
+
+@media (max-width: 1024px) {
+  .orders-infinite-list .orders-table-sticky {
+    top: 64px;
+  }
+}

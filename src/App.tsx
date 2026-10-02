@@ -5205,12 +5205,76 @@ function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Or
   );
 }
 
+function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMore, empty }: {
+  headers: React.ReactNode;
+  rows: React.ReactNode[];
+  total: number;
+  colSpan: number;
+  rowLimit: number;
+  onLoadMore: () => void;
+  empty: boolean;
+}) {
+  const headRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLTableRowElement>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  onLoadMoreRef.current = onLoadMore;
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    const head = headRef.current;
+    if (!body || !head) return;
+    let frame = 0;
+    const sync = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => { head.scrollLeft = body.scrollLeft; frame = 0; });
+    };
+    body.addEventListener("scroll", sync, { passive: true });
+    return () => {
+      body.removeEventListener("scroll", sync);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    const sentinel = sentinelRef.current;
+    if (!body || !sentinel || rowLimit >= total) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onLoadMoreRef.current();
+    }, { root: body, rootMargin: "600px 0px", threshold: 0 });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [rowLimit, total]);
+
+  return (
+    <section className="table-wrap orders-list-table-wrap orders-infinite-list">
+      <div className="orders-table-sticky" ref={headRef}>
+        <table className="orders-list-table"><thead><tr>{headers}</tr></thead></table>
+      </div>
+      <div className="orders-table-scroll" ref={bodyRef}>
+        <table className="orders-list-table">
+          <tbody>
+            {empty && <EmptyRow colSpan={colSpan} />}
+            {rows}
+            {rowLimit < total && (
+              <tr ref={sentinelRef} className="orders-table-more">
+                <td colSpan={colSpan}>جارٍ تحميل المزيد...</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
   const [editing, setEditing] = useState<Order | null>(null);
-  const [page, setPage] = useState(1);
+  const [rowLimit, setRowLimit] = useState(100);
   const [dateSort, setDateSort] = useState<"none" | "asc" | "desc">("none");
   const [spreadSort, setSpreadSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [machineFilter, setMachineFilter] = useState("all");
@@ -5300,7 +5364,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       setDateSort("none");
       setMachineFilter("all");
       setSpreadSort(null);
-      setPage(Math.max(1, Math.floor(index / 8) + 1));
+      setRowLimit(Math.max(1, Math.ceil((index + 1) / 100) * 100));
       setHighlightOrderId(goToOrderId);
       setGotoNotice("");
     } else {
@@ -5331,8 +5395,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       const second = new Date(String(b.delivery_date || "")).getTime() || 0;
       return dateSort === "asc" ? first - second : second - first;
     });
-    const pagesRemote = Math.max(1, Math.ceil(sortedRemote.length / 8));
-    const visibleRemote = sortedRemote.slice((page - 1) * 8, page * 8);
     return (
       <div className="stack operation-screen">
         <section className="stats-grid">
@@ -5341,11 +5403,15 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
           <StatCard title="جاهز للإرسال" value={formatNumber(remoteOps.readyToSend)} />
           <StatCard title="تسليم اليوم" value={formatNumber(remoteOps.deliveryToday)} />
         </section>
-        <section className="table-wrap accounts-table orders-list-table-wrap"><table className="orders-list-table"><thead><tr>{renderOrdersListHeaders(queue === "finish" ? finishListHeaders : undefined)}</tr></thead><tbody>
-          {visibleRemote.length === 0 && <EmptyRow colSpan={queue === "finish" ? finishListHeaders.length : ordersListHeaders.length} />}
-          {visibleRemote.map((order) => queue === "finish" ? <FinishOrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} /> : <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
-        </tbody></table></section>
-        <div className="pagination"><button disabled={page === 1} onClick={() => setPage((value) => value - 1)}>السابق</button><span>{page} / {pagesRemote}</span><button disabled={page === pagesRemote} onClick={() => setPage((value) => value + 1)}>التالي</button></div>
+        <OrdersInfiniteList
+          headers={renderOrdersListHeaders(queue === "finish" ? finishListHeaders : undefined)}
+          rows={sortedRemote.slice(0, rowLimit).map((order) => queue === "finish" ? <FinishOrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} /> : <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
+          total={sortedRemote.length}
+          colSpan={queue === "finish" ? finishListHeaders.length : ordersListHeaders.length}
+          rowLimit={rowLimit}
+          onLoadMore={() => setRowLimit((value) => value + 100)}
+          empty={sortedRemote.length === 0}
+        />
       </div>
     );
   }
@@ -5363,9 +5429,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       return dateSort === "asc" ? first - second : second - first;
     });
   }, [baseOrders, dateSort]);
-
-  const pages = Math.max(1, Math.ceil(filtered.length / 8));
-  const visible = filtered.slice((page - 1) * 8, page * 8);
 
   function save(order: Order) {
     const previous = orders.find((item) => item.id === order.id);
@@ -5753,24 +5816,17 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     <div className="stack">
       {editing && <OrderForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
       {gotoNotice && <div className="notice">{gotoNotice}</div>}
-      <section className="table-wrap orders-list-table-wrap">
-        <table className="orders-list-table">
-          <thead>
-            <tr>{renderOrdersListHeaders(queue === "finish" ? finishListHeaders : undefined)}</tr>
-          </thead>
-          <tbody>
-            {visible.length === 0 && <EmptyRow colSpan={queue === "finish" ? finishListHeaders.length : ordersListHeaders.length} />}
-            {visible.map((order) => queue === "finish"
-              ? <FinishOrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />
-              : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
-          </tbody>
-        </table>
-      </section>
-      <div className="pagination">
-        <button disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>السابق</button>
-        <span>{page} / {pages}</span>
-        <button disabled={page >= pages} onClick={() => setPage((current) => current + 1)}>التالي</button>
-      </div>
+      <OrdersInfiniteList
+        headers={renderOrdersListHeaders(queue === "finish" ? finishListHeaders : undefined)}
+        rows={filtered.slice(0, rowLimit).map((order) => queue === "finish"
+          ? <FinishOrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />
+          : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
+        total={filtered.length}
+        colSpan={queue === "finish" ? finishListHeaders.length : ordersListHeaders.length}
+        rowLimit={rowLimit}
+        onLoadMore={() => setRowLimit((value) => value + 100)}
+        empty={filtered.length === 0}
+      />
     </div>
   );
 }
