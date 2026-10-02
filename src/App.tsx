@@ -8283,7 +8283,7 @@ function ZunionApp() {
         ],
       },
       { id: "finish", label: "التشطيب", visible: true, icon: Wrench },
-      { id: "machineDist", label: "توزيع المكن", visible: true, icon: LayoutGrid },
+      { id: "machineDist", label: "توزيع المكن", visible: false, icon: LayoutGrid },
       { id: "finance", label: "مصروفات وإيرادات", visible: true, icon: WalletCards },
       { id: "reports", label: "التقارير", visible: true, icon: BarChart3 },
       { id: "import", label: "الاستيراد والتصدير", visible: true, icon: ArrowUpDown },
