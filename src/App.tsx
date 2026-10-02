@@ -4414,30 +4414,34 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
                 <input type="number" min={1} value={form.quantity || ""} onChange={(event) => set("quantity", Number(event.target.value))} disabled={readOnly} />
                 <ErrorText message={errors.quantity} />
               </label>
-              <label className={`nf-field${errors.price ? " nf-field-invalid" : ""}`}>
-                <span>السعر</span>
-                <input type="number" min={0} step="0.01" value={form.price || ""} onChange={(event) => set("price", Number(event.target.value))} disabled={readOnly} />
-                <ErrorText message={errors.price} />
-              </label>
-              <ReadonlyText className="nf-field" label="الإجمالي" value={(form.quantity || form.price) ? formatNumber(computed.total) : ""} />
-              <div className={`nf-field nf-field-materials-inrow${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
-                <div className="nf-materials-line">
-                  <span className="nf-materials-label">الخامات<em className="nf-required">*</em></span>
-                  <div className="nf-radio-group">
-                    <label className="nf-radio">
-                      <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} disabled={readOnly} />
-                      <span className="nf-radio-mark" aria-hidden="true" />
-                      <span>موجود</span>
-                    </label>
-                    <label className="nf-radio">
-                      <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} disabled={readOnly} />
-                      <span className="nf-radio-mark" aria-hidden="true" />
-                      <span>غير موجود</span>
-                    </label>
+              {!isEdit && (
+                <>
+                  <label className={`nf-field${errors.price ? " nf-field-invalid" : ""}`}>
+                    <span>السعر</span>
+                    <input type="number" min={0} step="0.01" value={form.price || ""} onChange={(event) => set("price", Number(event.target.value))} disabled={readOnly} />
+                    <ErrorText message={errors.price} />
+                  </label>
+                  <ReadonlyText className="nf-field" label="الإجمالي" value={(form.quantity || form.price) ? formatNumber(computed.total) : ""} />
+                  <div className={`nf-field nf-field-materials-inrow${errors.materialsStatus ? " nf-field-invalid" : ""}`}>
+                    <div className="nf-materials-line">
+                      <span className="nf-materials-label">الخامات<em className="nf-required">*</em></span>
+                      <div className="nf-radio-group">
+                        <label className="nf-radio">
+                          <input type="radio" name="materialsStatus" value="available" checked={normalizeMaterialsStatus(form.materialsStatus) === "available"} onChange={() => set("materialsStatus", "available")} disabled={readOnly} />
+                          <span className="nf-radio-mark" aria-hidden="true" />
+                          <span>موجود</span>
+                        </label>
+                        <label className="nf-radio">
+                          <input type="radio" name="materialsStatus" value="unavailable" checked={normalizeMaterialsStatus(form.materialsStatus) === "unavailable"} onChange={() => set("materialsStatus", "unavailable")} disabled={readOnly} />
+                          <span className="nf-radio-mark" aria-hidden="true" />
+                          <span>غير موجود</span>
+                        </label>
+                      </div>
+                    </div>
+                    <ErrorText message={errors.materialsStatus} />
                   </div>
-                </div>
-                <ErrorText message={errors.materialsStatus} />
-              </div>
+                </>
+              )}
             </div>
 
           </section>
@@ -4479,7 +4483,12 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
         {readOnly ? (
           <>
             <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> رجوع</button>
-            {onPrint && <button type="button" className="primary-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة</button>}
+            {!isEdit && onPrint && <button type="button" className="primary-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة</button>}
+          </>
+        ) : isEdit ? (
+          <>
+            <button type="submit" className="primary-btn nf-btn nf-btn-create" disabled={saving || !canSubmit}>{saving ? "جارٍ الحفظ..." : "تحديث الأوردر"} <Send size={16} /></button>
+            {onCancel && <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={onCancel}><X size={16} /> إلغاء</button>}
           </>
         ) : onSaveDraft || onSendToProduction ? (
           <>
