@@ -5471,7 +5471,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [rowLimit, setRowLimit] = useState(100);
   const [dateSort, setDateSort] = useState<"none" | "asc" | "desc">("none");
   const [spreadSort, setSpreadSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  const [machineFilter, setMachineFilter] = useState("all");
   const [machineOverrides, setMachineOverrides] = useState<Record<string, string>>({});
   const [cellSaving, setCellSaving] = useState<Record<string, boolean>>({});
   const [cellError, setCellError] = useState<Record<string, string>>({});
@@ -5621,7 +5620,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       window.removeEventListener("resize", fit);
       window.removeEventListener("load", fit);
     };
-  }, [queue, orders, remoteOps, machineOverrides, workerOverrides, statusOverrides, problemOverrides, machineFilter, spreadSort, cellSaving, workerEditId, problemEditId, problemDraft]);
+  }, [queue, orders, remoteOps, machineOverrides, workerOverrides, statusOverrides, problemOverrides, spreadSort, cellSaving, workerEditId, problemEditId, problemDraft]);
 
   useEffect(() => {
     if (!goToOrderId) return;
@@ -5632,7 +5631,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     const index = list.findIndex((order) => order.id === goToOrderId);
     if (index >= 0) {
       setDateSort("none");
-      setMachineFilter("all");
       setSpreadSort(null);
       setRowLimit(Math.max(1, Math.ceil((index + 1) / 100) * 100));
       setHighlightOrderId(goToOrderId);
@@ -6318,7 +6316,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       ...orders.map((order) => order.worker_name || ""),
       ...baseRows.map((row) => row.worker),
     ])).filter((name) => name.trim().length > 0);
-    let visibleRows = machineFilter === "all" ? rows : rows.filter((row) => row.machine === machineFilter);
+    let visibleRows = [...rows];
     if (spreadSort) {
       const { key, dir } = spreadSort;
       const sign = dir === "asc" ? 1 : -1;
@@ -6522,15 +6520,6 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
     return (
       <div className="ws-screen">
         <h1 className="ws-heading">التشغيل</h1>
-        <div className="ws-toolbar">
-          <label className="ws-machine-filter">
-            <span>المكنة:</span>
-            <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)}>
-              <option value="all">الكل</option>
-              {machineOptions.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
-            </select>
-          </label>
-        </div>
         <div className="ws-table-wrap" ref={wsWrapRef}>
           <table className="ws-table">
             <thead>
