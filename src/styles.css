@@ -5658,30 +5658,21 @@ input[type="date"] {
   padding: 16px 0 12px;
 }
 
-.ws-sewing-heading {
-  color: #C62828;
-  font-size: 30px;
-}
-
+.ws-sewing-heading,
 .ws-printing-heading {
-  color: #C62828;
-  font-size: 30px;
+  color: #156082;
+  font-size: 26px;
 }
 
 .ws-table.ws-sewing-table {
   min-width: 1180px;
 }
 
-.ws-hd.ws-sewing-group {
-  background: #C62828;
-  color: #FFFFFF;
-  border-color: #A11E1E;
-}
-
+.ws-hd.ws-sewing-group,
 .ws-hd.ws-printing-group {
-  background: #C62828;
-  color: #FFFFFF;
-  border-color: #A11E1E;
+  background: #F3F4F6;
+  color: #111827;
+  border-color: #E5E7EB;
 }
 
 .ws-sewing-done {
@@ -5851,6 +5842,7 @@ input[type="date"] {
 .ws-table tbody .ws-worker select {
   width: 100%;
   min-width: 84px;
+  box-sizing: border-box;
   border: 1px solid #D1D5DB;
   border-radius: 4px;
   background: #FFFFFF;
@@ -5906,7 +5898,7 @@ input[type="date"] {
 }
 
 .ws-cell-edit.ws-problem-text {
-  max-width: 200px;
+  max-width: 100%;
 }
 
 .ws-feedback {
@@ -5934,7 +5926,8 @@ input[type="date"] {
 
 .ws-problem-editor textarea {
   width: 100%;
-  min-width: 160px;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid #D1D5DB;
   border-radius: 4px;
   background: #FFFFFF;
