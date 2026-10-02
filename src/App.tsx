@@ -4370,7 +4370,7 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
 
             <div className="nf-row nf-row-products">
               <label className="nf-field">
-                <span>انواع اوردرات</span>
+                <span>نوع الاوردر</span>
                 <select value={form.order_type} onChange={(event) => set("order_type", event.target.value)} disabled={readOnly}>
                   <option value="">اختر نوع الأوردر</option>
                   <option value="تطريز">تطريز</option>
