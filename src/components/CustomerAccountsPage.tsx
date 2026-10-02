@@ -234,7 +234,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     const user = session?.fullName || session?.username || session?.email || "";
     const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>كشف حساب ${escapeHtml(selectedCustomer?.client_name ?? "")}</title>
       <style>@page{size:landscape;margin:12mm}body{font-family:Tahoma,Arial,sans-serif;color:#111827;margin:0;direction:rtl}
-      .toolbar{margin-bottom:12px}.toolbar button{background:#E60012;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
+      .toolbar{margin-bottom:12px}.toolbar button{background:#ED1525;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
       @media print{.toolbar{display:none}}
       </style></head><body><div class="toolbar"><button onclick="window.print()">طباعة</button></div>
       ${body}<p style="color:#6b7280;font-size:11px;margin-top:12px">${escapeHtml(printedAt)}${user ? ` - المستخدم: ${escapeHtml(user)}` : ""}</p></body></html>`;

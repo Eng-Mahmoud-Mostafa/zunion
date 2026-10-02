@@ -973,7 +973,7 @@ function printDocument(title: string, body: string, session?: Session | null, or
       .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.box{border:1px solid #d1d5db;border-radius:6px;padding:9px;break-inside:avoid}
       .box strong{display:block;color:#111827;font-size:12px;margin-bottom:4px}.section-title{color:#111827;margin:18px 0 8px}
       .email-text{display:block;width:100%;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:break-word;direction:ltr;text-align:left}
-      .toolbar{margin-bottom:12px}.toolbar button{background:#ed1c24;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
+      .toolbar{margin-bottom:12px}.toolbar button{background:#ED1525;color:white;border:0;border-radius:7px;padding:10px 18px;font-weight:800}
       @media print{.toolbar{display:none}}
     </style></head><body><div class="toolbar"><button onclick="window.print()">طباعة</button></div>
     <div class="print-head"><div><h1>${escapeHtml(title)}</h1><div class="meta">نظام Zunion لإدارة الأوردرات</div><div class="meta">تاريخ الطباعة: ${escapeHtml(printedAt)}${user ? ` - المستخدم: ${userHtml}` : ""}</div></div><img src="/zunion-logo.png" /></div>${body}</body></html>`;
@@ -2867,7 +2867,7 @@ function OrderDetailsDrawer({ open, onClose, order, customers, setOrders, sessio
             setOrders((current) => current.map((o) => o.id === order.id ? next : o));
             onClose();
           }}><CheckCircle size={14} /> جاهز</button>}
-          {order.order_status !== "مشكلة جودة" && <button className="cd-action-btn" style={{ color: "var(--red)" }} onClick={() => {
+          {order.order_status !== "مشكلة جودة" && <button className="cd-action-btn" onClick={() => {
             const next = calculate({ ...order, order_status: "مشكلة جودة" as OrderStatus, updated_at: new Date().toISOString() });
             setOrders((current) => current.map((o) => o.id === order.id ? next : o));
             onClose();
@@ -6819,7 +6819,7 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
             <option value="">الكل</option>
             {partyOptions.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-          <button className="ghost-btn compact" type="button" style={debtorOnly ? { background: "var(--zunion-red, #d90416)", color: "#fff", borderColor: "var(--zunion-red, #d90416)" } : undefined} onClick={() => setDebtorOnly((v) => !v)}>مدان</button>
+          <button className="ghost-btn compact" type="button" onClick={() => setDebtorOnly((v) => !v)}>مدان</button>
           <input placeholder="بحث باسم العميل / الكود / الهاتف / البريد / العنوان" value={search} onChange={(event) => setSearch(event.target.value)} />
         </div>
       </div>

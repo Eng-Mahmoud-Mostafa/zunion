@@ -153,18 +153,23 @@ textarea:focus {
 }
 
 .primary-btn {
-  background: var(--red);
+  background: #ED1525;
   color: #fff;
 }
 
 .primary-btn:hover {
-  background: var(--red-dark);
+  background: #bd141a;
 }
 
 .ghost-btn {
-  background: #fff;
-  border-color: var(--line);
-  color: var(--dark);
+  background: #ED1525;
+  border-color: #ED1525;
+  color: #fff;
+}
+
+.ghost-btn:hover {
+  background: #bd141a;
+  border-color: #bd141a;
 }
 
 .compact {
@@ -1654,16 +1659,20 @@ th {
 
 .ghost-btn,
 .ghost-btn *,
-.account-buttons button,
 .actions button {
+  color: #fff;
+}
+
+.account-buttons button {
   color: #000;
 }
 
 .primary-btn:disabled,
 .success-btn:disabled,
 button:disabled {
-  color: #ffe4e6;
+  color: #fff;
   cursor: not-allowed;
+  opacity: 0.55;
 }
 
 @media print {
@@ -7915,4 +7924,92 @@ input[type="number"]::-webkit-outer-spin-button {
 input[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
+}
+
+/* ================================================================
+   Zunion unified action-button style.
+   Every action button: red background #ED1525, white text + icons.
+   Hover/focus/active: darker red. Disabled: visibly dimmed but
+   white text stays readable. Labels never wrap or clip.
+   Excluded (kept as-is): sidebar navigation, topbar nav controls,
+   dashboard quick-grid cards, pagination, and selection chips
+   (.account-buttons). Ordinary text/inputs/dropdowns untouched.
+   ================================================================ */
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card),
+:where(.app) label.file-btn,
+:where(.app) a.cd-action-btn {
+  background-color: #ED1525 !important;
+  border-color: #ED1525 !important;
+  color: #FFFFFF !important;
+  white-space: nowrap;
+}
+
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card) *,
+:where(.app) label.file-btn *,
+:where(.app) a.cd-action-btn * {
+  color: #FFFFFF !important;
+}
+
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):hover,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):focus,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):focus-visible,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):active,
+:where(.app) label.file-btn:hover,
+:where(.app) label.file-btn:focus-within,
+:where(.app) a.cd-action-btn:hover,
+:where(.app) a.cd-action-btn:focus-visible,
+:where(.app) a.cd-action-btn:active {
+  background-color: #bd141a !important;
+  border-color: #bd141a !important;
+  color: #FFFFFF !important;
+}
+
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):active {
+  background-color: #a61114 !important;
+  border-color: #a61114 !important;
+}
+
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):disabled,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):disabled:hover,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):disabled:active {
+  background-color: #ED1525 !important;
+  border-color: #ED1525 !important;
+  color: #FFFFFF !important;
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+}
+
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):disabled * {
+  color: #FFFFFF !important;
+}
+
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card) svg,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card) svg *,
+:where(.app) label.file-btn svg,
+:where(.app) a.cd-action-btn svg {
+  color: #FFFFFF !important;
+  stroke: #FFFFFF !important;
+}
+
+/* ---- keep navigation / selection controls with their existing look ---- */
+:where(.app) .pagination button,
+:where(.app) .pagination button *,
+:where(.app) .account-buttons button:not(.primary-btn):not(.account-active),
+:where(.app) .account-buttons button:not(.primary-btn):not(.account-active) * {
+  background-color: #FFFFFF !important;
+  border-color: var(--line) !important;
+  color: #27272a !important;
+  stroke: #27272a !important;
+}
+
+:where(.app) .pagination button:disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+}
+
+:where(.app) .account-buttons button.primary-btn,
+:where(.app) .account-buttons button.account-active {
+  background-color: #ED1525 !important;
+  border-color: #ED1525 !important;
+  color: #FFFFFF !important;
 }
