@@ -11,7 +11,7 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions } from "./customerAccounts.js";
@@ -1162,6 +1162,21 @@ app.patch("/api/orders/:id/sewing", requireAuth, requireRole("Master", "Helper",
     [parsed.data.sewing_worker ?? null, parsed.data.production_notes ?? null, parsed.data.sewing_status ?? null, req.user!.id, id],
   );
   await audit(req.user!, "SEWING_UPDATED", "orders", id, { sewing_worker: oldOrder.sewing_worker ?? "", sewing_status: oldOrder.sewing_status ?? "" }, parsed.data);
+  const saved = await loadOrder(id);
+  res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
+});
+
+app.patch("/api/orders/:id/printing", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = printingSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid printing", issues: parsed.error.issues });
+  const oldOrder = await loadOrder(id);
+  if (!oldOrder) return res.status(404).json({ message: "Order not found" });
+  await query(
+    `update orders set printing_worker=coalesce($1, printing_worker), production_notes=coalesce($2, production_notes), printing_status=coalesce($3, printing_status), updated_by=$4 where id=$5`,
+    [parsed.data.printing_worker ?? null, parsed.data.production_notes ?? null, parsed.data.printing_status ?? null, req.user!.id, id],
+  );
+  await audit(req.user!, "PRINTING_UPDATED", "orders", id, { printing_worker: oldOrder.printing_worker ?? "", printing_status: oldOrder.printing_status ?? "" }, parsed.data);
   const saved = await loadOrder(id);
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });

@@ -5663,11 +5663,22 @@ input[type="date"] {
   font-size: 30px;
 }
 
+.ws-printing-heading {
+  color: #C62828;
+  font-size: 30px;
+}
+
 .ws-table.ws-sewing-table {
   min-width: 1180px;
 }
 
 .ws-hd.ws-sewing-group {
+  background: #C62828;
+  color: #FFFFFF;
+  border-color: #A11E1E;
+}
+
+.ws-hd.ws-printing-group {
   background: #C62828;
   color: #FFFFFF;
   border-color: #A11E1E;

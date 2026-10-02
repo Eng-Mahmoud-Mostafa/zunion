@@ -147,6 +147,12 @@ export const sewingSchema = z.object({
   sewing_status: z.enum(["", "done"]).optional(),
 });
 
+export const printingSchema = z.object({
+  printing_worker: z.string().max(200).optional(),
+  production_notes: z.string().max(2000).optional(),
+  printing_status: z.enum(["", "done"]).optional(),
+});
+
 export const customerSchema = z.object({
   name: z.string().min(1),
   code: z.string().optional().default(""),

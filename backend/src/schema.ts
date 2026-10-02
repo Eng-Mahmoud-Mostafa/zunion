@@ -182,6 +182,8 @@ create table if not exists orders (
   worker_name text not null default '',
   sewing_worker text not null default '',
   sewing_status text not null default '',
+  printing_worker text not null default '',
+  printing_status text not null default '',
   operation_methods jsonb not null default '[]'::jsonb,
   operation_attachments jsonb not null default '[]'::jsonb,
   operation_workers jsonb not null default '[]'::jsonb,
@@ -233,6 +235,8 @@ alter table orders add column if not exists machine_name text not null default '
 alter table orders add column if not exists worker_name text not null default '';
 alter table orders add column if not exists sewing_worker text not null default '';
 alter table orders add column if not exists sewing_status text not null default '';
+alter table orders add column if not exists printing_worker text not null default '';
+alter table orders add column if not exists printing_status text not null default '';
 alter table orders drop constraint if exists orders_work_stage_check;
 alter table orders add constraint orders_work_stage_check check (work_stage in ('new', 'operation', 'finishing', 'completed', 'cancelled'));
 update orders

@@ -191,6 +191,8 @@ type Order = {
   worker_name?: string;
   sewing_worker?: string;
   sewing_status?: string;
+  printing_worker?: string;
+  printing_status?: string;
   operationWorkers?: string[];
   operationSupervisors?: string[];
   operationMethods?: string[];
@@ -1164,6 +1166,8 @@ const emptyOrder: Order = {
   worker_name: "",
   sewing_worker: "",
   sewing_status: "",
+  printing_worker: "",
+  printing_status: "",
   operationMethods: [""],
   operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
   logoFileName: "",
@@ -1388,6 +1392,8 @@ function orderFromApi(row: Record<string, unknown>): Order {
     worker_name: String(row.worker_name ?? ""),
     sewing_worker: String(row.sewing_worker ?? ""),
     sewing_status: String(row.sewing_status ?? ""),
+    printing_worker: String(row.printing_worker ?? ""),
+    printing_status: String(row.printing_status ?? ""),
     operationWorkers: (() => {
       const workers = Array.isArray(row.operation_workers) ? row.operation_workers : (() => {
         try {
@@ -1475,6 +1481,8 @@ function orderToApi(order: Order) {
     worker_name: calculated.worker_name || "",
     sewing_worker: calculated.sewing_worker || "",
     sewing_status: calculated.sewing_status || "",
+    printing_worker: calculated.printing_worker || "",
+    printing_status: calculated.printing_status || "",
     operationMethods: operationMethods.length ? operationMethods : ["not_started"],
     quantity: Math.max(1, Number(calculated.quantity || 1)),
     price: calculated.price,
@@ -2358,10 +2366,19 @@ function isSewingOrder(order: OrdersListRecord) {
   return String(order.order_type || order.service_type || order.productName || order.product_name_snapshot || "").trim() === "خياطه";
 }
 
+function isPrintingOrder(order: OrdersListRecord) {
+  return String(order.order_type || order.service_type || order.productName || order.product_name_snapshot || "").trim() === "طباعه";
+}
+
 function orderOperationStatusText(order: OrdersListRecord) {
   if (isSewingOrder(order)) {
     if (String(order.sewing_status ?? "").trim() === "done") return "تم";
     if (String(order.sewing_worker ?? "").trim()) return "جاري التشغيل";
+    return "لم يبدأ";
+  }
+  if (isPrintingOrder(order)) {
+    if (String(order.printing_status ?? "").trim() === "done") return "تم";
+    if (String(order.printing_worker ?? "").trim()) return "جاري التشغيل";
     return "لم يبدأ";
   }
   if (order.operation_status) return normalizedOperationStatus(order.operation_status);
@@ -4843,6 +4860,52 @@ function sewingRowFromOrder(order: Order): SewingRow {
   };
 }
 
+type PrintingRow = {
+  id: string;
+  orderNumber: string;
+  deliveryDate: string;
+  addedBy: string;
+  client: string;
+  type: string;
+  logo: string;
+  quantity: number;
+  printingWorker: string;
+  problem: string;
+  done: boolean;
+};
+
+function printingRowFromRaw(row: Record<string, unknown>): PrintingRow {
+  return {
+    id: String(row.id ?? ""),
+    orderNumber: valueText(row.order_number),
+    deliveryDate: formatDisplayDate(row.delivery_date),
+    addedBy: String(row.created_by ?? row.added_by ?? ""),
+    client: orderDisplayClient(row as OrdersListRecord),
+    type: String(row.type ?? row.product_name_snapshot ?? ""),
+    logo: String(row.logo_place ?? row.logo_status ?? ""),
+    quantity: Number(row.quantity ?? row.pieces_count ?? 0),
+    printingWorker: String(row.printing_worker ?? ""),
+    problem: valueText(row.production_notes ?? row.quality_notes, ""),
+    done: String(row.printing_status ?? "").trim() === "done",
+  };
+}
+
+function printingRowFromOrder(order: Order): PrintingRow {
+  return {
+    id: order.id,
+    orderNumber: order.order_number,
+    deliveryDate: formatDisplayDate(order.delivery_date),
+    addedBy: order.created_by || "",
+    client: order.client_name,
+    type: order.order_type || order.productName || "",
+    logo: order.logo_place || order.logo_status || "",
+    quantity: Number(order.quantity || 0),
+    printingWorker: order.printing_worker || "",
+    problem: order.production_notes || order.notes || "",
+    done: String(order.printing_status ?? "").trim() === "done",
+  };
+}
+
 function formatDisplayDate(value: unknown): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
@@ -5346,7 +5409,7 @@ function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMor
   );
 }
 
-function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" | "sewing"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
+function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" | "sewing" | "printing"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -5380,6 +5443,9 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   const [sewingRows, setSewingRows] = useState<SewingRow[]>([]);
   const [sewingLoading, setSewingLoading] = useState(false);
   const [sewingError, setSewingError] = useState("");
+  const [printingRows, setPrintingRows] = useState<PrintingRow[]>([]);
+  const [printingLoading, setPrintingLoading] = useState(false);
+  const [printingError, setPrintingError] = useState("");
   const wsWrapRef = useRef<HTMLDivElement | null>(null);
   const canManageWorkers = ["Master", "Helper", "Operator", "Supervisor"].includes(session.role);
 
@@ -5406,7 +5472,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   }
 
   useEffect(() => {
-    if (!queue || queue === "sewing") return;
+    if (!queue || queue === "sewing" || queue === "printing") return;
     let active = true;
     setRemoteLoading(true);
     getOperationStats()
@@ -5417,7 +5483,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
   }, [queue]);
 
   useEffect(() => {
-    if (queue !== "worker" && queue !== "sewing") return;
+    if (queue !== "worker" && queue !== "sewing" && queue !== "printing") return;
     let active = true;
     const loadDirectory = () => {
       void Promise.all([
@@ -5447,6 +5513,18 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       .then((payload) => { if (active) setSewingRows(payload.orders.map(sewingRowFromRaw)); })
       .catch((error) => { if (active) setSewingError(error instanceof Error ? error.message : "تعذر تحميل أوردرات الخياطة."); })
       .finally(() => { if (active) setSewingLoading(false); });
+    return () => { active = false; };
+  }, [queue]);
+
+  useEffect(() => {
+    if (queue !== "printing") return;
+    let active = true;
+    setPrintingLoading(true);
+    setPrintingError("");
+    backendJson<{ orders: Array<Record<string, unknown>> }>(`/api/orders?type=${encodeURIComponent("طباعه")}&draft=false`)
+      .then((payload) => { if (active) setPrintingRows(payload.orders.map(printingRowFromRaw)); })
+      .catch((error) => { if (active) setPrintingError(error instanceof Error ? error.message : "تعذر تحميل أوردرات الطباعة."); })
+      .finally(() => { if (active) setPrintingLoading(false); });
     return () => { active = false; };
   }, [queue]);
 
@@ -5506,6 +5584,10 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
 
   if (queue === "sewing") {
     return renderSewingSpread();
+  }
+
+  if (queue === "printing") {
+    return renderPrintingSpread();
   }
 
   if (queue === "worker") {
@@ -5789,6 +5871,186 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                       <button type="button" className="ws-cell-edit ws-hd-end" onClick={() => saveSewingCell(row.id, { sewing_status: "done" })}>إنهاء</button>
                     )}
                     {sewingCellFeedback(row.id)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="ws-lower">
+          <section className="ws-workers-card">
+            <h3 className="ws-workers-title">عمال</h3>
+            {workersError && <div className="ws-workers-error">{workersError}</div>}
+            {canManageWorkers && (
+              <div className="ws-workers-add">
+                <input value={workerNameInput} onChange={(event) => setWorkerNameInput(event.target.value)} placeholder="اسم عامل جديد" />
+                <button type="button" className="ws-btn-save" disabled={workersSaving || !workerNameInput.trim()} onClick={addRegistryWorker}>
+                  {workersSaving ? "جارِ…" : "إضافة عامل"}
+                </button>
+              </div>
+            )}
+            <div className="ws-workers-list">
+              {workersRegistry.length === 0 && <p className="ws-workers-empty">لا يوجد عمال بعد</p>}
+              {workersRegistry.map((worker) => (
+                <div key={worker.id} className="ws-workers-item">
+                  <span className="ws-workers-name">{worker.name}</span>
+                  {canManageWorkers && (
+                    <button
+                      type="button"
+                      className={`ws-workers-remove${pendingRemoveIds.has(worker.id) ? " ws-workers-remove-on" : ""}`}
+                      disabled={workersSaving}
+                      onClick={() => toggleRemoveWorker(worker.id)}
+                    >
+                      {pendingRemoveIds.has(worker.id) ? "مسح ✓" : "مسح"}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {canManageWorkers && (
+              <div className="ws-workers-actions">
+                <button type="button" className="ws-btn-save" disabled={workersSaving || pendingRemoveIds.size === 0} onClick={saveRemoveWorkers}>حفظ</button>
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPrintingSpread() {
+    if (printingLoading && printingRows.length === 0 && !printingError) return <LoadingPanel />;
+    if (printingError && printingRows.length === 0) return <ErrorPanel message={printingError || "تعذر تحميل البيانات."} />;
+
+    const rows = printingRows.map((row) => ({
+      ...row,
+      addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+    }));
+    const printingWorkerNames = Array.from(new Set([
+      ...workersRegistry.map((worker) => worker.name),
+      ...workerNameOptions(),
+      ...orders.map((order) => order.printing_worker || ""),
+      ...rows.map((row) => row.printingWorker),
+    ])).filter((name) => name.trim().length > 0);
+
+    function savePrintingCell(id: string, patch: { printing_worker?: string; production_notes?: string; printing_status?: string }) {
+      const key = `${id}:printing`;
+      setCellSaving((current) => ({ ...current, [key]: true }));
+      setCellError((current) => withoutKey(current, key));
+      backendJson(`/api/orders/${encodeURIComponent(id)}/printing`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      })
+        .then(() => {
+          const update: Record<string, unknown> = {};
+          if (patch.printing_worker !== undefined) {
+            update.printing_worker = patch.printing_worker;
+            setPrintingRows((current) => current.map((row) => row.id === id ? { ...row, printingWorker: patch.printing_worker! } : row));
+          }
+          if (patch.production_notes !== undefined) {
+            update.production_notes = patch.production_notes;
+            setPrintingRows((current) => current.map((row) => row.id === id ? { ...row, problem: patch.production_notes! } : row));
+          }
+          if (patch.printing_status !== undefined) {
+            update.printing_status = patch.printing_status;
+            setPrintingRows((current) => current.map((row) => row.id === id ? { ...row, done: patch.printing_status === "done" } : row));
+          }
+          setOrders((current) => current.map((order) => order.id === id ? { ...order, ...update } : order));
+          setCellSaving((current) => withoutKey(current, key));
+        })
+        .catch((error) => {
+          setCellSaving((current) => withoutKey(current, key));
+          setCellError((current) => ({ ...current, [key]: error instanceof Error ? error.message : "تعذر الحفظ" }));
+        });
+    }
+
+    function printingCellFeedback(id: string) {
+      if (cellSaving[`${id}:printing`]) return <span className="ws-feedback ws-saving">جارِ الحفظ…</span>;
+      const error = cellError[`${id}:printing`];
+      if (error) return <span className="ws-feedback ws-error" title={error}>فشل الحفظ</span>;
+      return null;
+    }
+
+    const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number }> = [
+      { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
+      { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
+      { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
+      { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
+      { key: "type", label: "النوع", cls: "ws-hd", rowSpan: 2 },
+      { key: "logo", label: "اللوجو", cls: "ws-hd ws-hd-logo", rowSpan: 2 },
+      { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
+      { key: "printingGroup", label: "طباعه", cls: "ws-hd ws-printing-group", colSpan: 3 },
+    ];
+
+    return (
+      <div className="ws-screen">
+        <h1 className="ws-heading ws-printing-heading">طباعه</h1>
+        <div className="ws-table-wrap">
+          <table className="ws-table ws-sewing-table">
+            <thead>
+              <tr>
+                {spreadHeaderRow1.map((col) => (
+                  <th key={col.key} className={col.cls} rowSpan={col.rowSpan} colSpan={col.colSpan}>{col.label}</th>
+                ))}
+              </tr>
+              <tr>
+                <th className="ws-hd ws-printing-group">اسم العامل</th>
+                <th className="ws-hd ws-printing-group">مشكله</th>
+                <th className="ws-hd ws-printing-group">انتهى</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && <EmptyRow colSpan={10} />}
+              {rows.map((row) => (
+                <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
+                  <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
+                  <td className="ws-date">{row.deliveryDate || ""}</td>
+                  <td className="ws-num"><span className="ws-num-static">{row.orderNumber}</span></td>
+                  <td>{row.client}</td>
+                  <td>{row.type}</td>
+                  <td className="ws-logo">{row.logo || "—"}</td>
+                  <td className="ws-qty">{row.quantity || ""}</td>
+                  <td className="ws-worker">
+                    {workerEditId === row.id ? (
+                      <select
+                        autoFocus
+                        value={row.printingWorker || ""}
+                        onChange={(event) => { savePrintingCell(row.id, { printing_worker: event.target.value }); setWorkerEditId(null); }}
+                        onBlur={() => setWorkerEditId(null)}
+                      >
+                        <option value="">—</option>
+                        {printingWorkerNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    ) : (
+                      <button type="button" className="ws-cell-edit" onClick={() => setWorkerEditId(row.id)}>
+                        {row.printingWorker || "—"}
+                      </button>
+                    )}
+                    {printingCellFeedback(row.id)}
+                  </td>
+                  <td className="ws-problem">
+                    {problemEditId === row.id ? (
+                      <span className="ws-problem-editor">
+                        <textarea value={problemDraft} rows={2} onChange={(event) => setProblemDraft(event.target.value)} />
+                        <span className="ws-problem-actions">
+                          <button type="button" className="ws-btn-save" onClick={() => { savePrintingCell(row.id, { production_notes: problemDraft }); setProblemEditId(null); }}>حفظ</button>
+                          <button type="button" className="ws-btn-cancel" onClick={() => setProblemEditId(null)}>إلغاء</button>
+                        </span>
+                      </span>
+                    ) : (
+                      <button type="button" className="ws-cell-edit ws-problem-text" onClick={() => { setProblemEditId(row.id); setProblemDraft(row.problem); }}>
+                        {row.problem || "أضف مشكلة"}
+                      </button>
+                    )}
+                    {printingCellFeedback(row.id)}
+                  </td>
+                  <td className="ws-cell-action">
+                    {row.done ? (
+                      <span className="ws-tam-on ws-sewing-done">تم</span>
+                    ) : (
+                      <button type="button" className="ws-cell-edit ws-hd-end" disabled={Boolean(cellSaving[`${row.id}:printing`])} onClick={() => savePrintingCell(row.id, { printing_status: "done" })}>إنهاء</button>
+                    )}
+                    {printingCellFeedback(row.id)}
                   </td>
                 </tr>
               ))}
@@ -7582,6 +7844,7 @@ function ZunionApp() {
   const [searchGoOrderId, setSearchGoOrderId] = useState<string | null>(null);
   const [workerGoOrderId, setWorkerGoOrderId] = useState<string | null>(null);
   const [sewingGoOrderId, setSewingGoOrderId] = useState<string | null>(null);
+  const [printingGoOrderId, setPrintingGoOrderId] = useState<string | null>(null);
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
   const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
@@ -7890,7 +8153,7 @@ function ZunionApp() {
 {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onDistribute={() => setView("machineDist")} />}
             {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-            {view === "print" && <UnderConstructionPanel title="طباعه" />}
+            {view === "print" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="printing" goToOrderId={printingGoOrderId} onGoToOrderHandled={() => setPrintingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "sewing" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "archive" && <UnderConstructionPanel title="ارشيف" />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
