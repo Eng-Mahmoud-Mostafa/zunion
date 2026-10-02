@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import {
   ArrowDownCircle,
   ArrowUpDown,
+  Archive,
   BadgeInfo,
   Banknote,
   BarChart3,
@@ -41,6 +42,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  Scissors,
   Settings,
   ShoppingBag,
   Star,
@@ -76,7 +78,7 @@ import { allPermissionKeys, masterProtectedPermissions, roleDefaultPermissions, 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -7055,11 +7057,21 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   );
 }
 
+function UnderConstructionPanel({ title }: { title: string }) {
+  return (
+    <section className="panel">
+      <div className="panel-head"><h2>{title}</h2></div>
+      <p className="muted">هذه الصفحة غير متاحة بعد.</p>
+    </section>
+  );
+}
+
 type SidebarItemConfig = {
   id: View | string;
   label: string;
   visible: boolean;
   icon: LucideIcon;
+  splitParent?: boolean;
   children?: SidebarItemConfig[];
 };
 
@@ -7101,18 +7113,33 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
         <nav className="sidebar-menu" aria-label="القائمة الرئيسية">
           {items.map((item) => {
             if (item.children && item.children.length > 0) {
-              const isOpen = !!openSections[item.id] || (openSections[item.id] === undefined && hasActiveChild(item));
-              const isActive = hasActiveChild(item) || item.id === activeView;
+              const childActive = hasActiveChild(item);
+              const isOpen = !!openSections[item.id] || (openSections[item.id] === undefined && (childActive || item.id === activeView));
+              const isActive = childActive || item.id === activeView;
               const ToggleIcon = isOpen ? Minus : Plus;
               return (
                 <div key={item.id} className={`sidebar-section${isOpen ? " open" : ""}${isActive ? " has-active" : ""}`}>
-                  <button type="button" className={`sidebar-parent${isActive ? " active" : ""}`} onClick={() => toggleSection(item.id)}>
-                    <span className="sidebar-parent-copy">
-                      <item.icon size={22} />
-                      <span>{item.label}</span>
-                    </span>
-                    <span className="sidebar-toggle"><ToggleIcon size={18} /></span>
-                  </button>
+                  {item.splitParent ? (
+                    <div className={`sidebar-parent${isActive ? " active" : ""}`}>
+                      <button type="button" className="sidebar-parent-nav" onClick={() => onSelect(item.id as View)}>
+                        <span className="sidebar-parent-copy">
+                          <item.icon size={22} />
+                          <span>{item.label}</span>
+                        </span>
+                      </button>
+                      <button type="button" className="sidebar-toggle" aria-label={isOpen ? "طيّ القائمة الفرعية" : "فتح القائمة الفرعية"} onClick={() => toggleSection(item.id)}>
+                        <ToggleIcon size={18} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button type="button" className={`sidebar-parent${isActive ? " active" : ""}`} onClick={() => toggleSection(item.id)}>
+                      <span className="sidebar-parent-copy">
+                        <item.icon size={22} />
+                        <span>{item.label}</span>
+                      </span>
+                      <span className="sidebar-toggle"><ToggleIcon size={18} /></span>
+                    </button>
+                  )}
                   {isOpen && (
                     <div className="sidebar-submenu">
                       <div className="sidebar-submenu-inner">
@@ -7140,7 +7167,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "customers", "customerAccounts", "finance", "reports", "audit", "import", "alerts", "settings"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "alerts", "settings"];
 
 function viewFromHash(): View {
   const raw = window.location.hash.replace(/^#\/?/, "");
@@ -7357,7 +7384,14 @@ function ZunionApp() {
           { id: "customerAccounts", label: "إضافة دفعة", visible: true, icon: Banknote },
         ],
       },
-      { id: "worker", label: "التشغيل", visible: true, icon: Cog },
+      {
+        id: "worker", label: "تشغيل تطريز", visible: true, icon: Cog, splitParent: true,
+        children: [
+          { id: "print", label: "طباعه", visible: true, icon: Printer },
+          { id: "sewing", label: "خياطه", visible: true, icon: Scissors },
+          { id: "archive", label: "ارشيف", visible: true, icon: Archive },
+        ],
+      },
       { id: "finish", label: "التشطيب", visible: true, icon: Wrench },
       { id: "machineDist", label: "توزيع المكن", visible: true, icon: LayoutGrid },
       { id: "finance", label: "مصروفات وإيرادات", visible: true, icon: WalletCards },
@@ -7456,6 +7490,9 @@ function ZunionApp() {
 {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+            {view === "print" && <UnderConstructionPanel title="طباعه" />}
+            {view === "sewing" && <UnderConstructionPanel title="خياطه" />}
+            {view === "archive" && <UnderConstructionPanel title="ارشيف" />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
           {view === "customerAccounts" && <CustomerAccountsPage orders={orders} customers={customers} session={session} />}
           {view === "finance" && <FinancePageModern session={session} />}

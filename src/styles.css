@@ -6700,7 +6700,32 @@ tr.ws-row-highlight td {
   border-radius: 50%;
   color: inherit;
   flex: 0 0 auto;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  cursor: pointer;
 }
+
+/* split parent row: separate nav button + expand/collapse toggle */
+.sidebar-parent-nav {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  min-width: 0;
+  height: 58px;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  color: inherit;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: right;
+  cursor: pointer;
+}
+.sidebar-parent-nav:hover svg { color: #fff; }
 
 /* submenu */
 .sidebar-submenu {
