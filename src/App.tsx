@@ -8471,11 +8471,12 @@ function ZunionApp() {
         ],
       },
       {
-        id: "worker", label: "تشغيل تطريز", visible: true, icon: Cog, splitParent: true,
+        id: "operation", label: "تشغيل", visible: true, icon: Cog,
         children: [
+          { id: "worker", label: "تشغيل تطريز", visible: true, icon: Cog },
           { id: "print", label: "طباعه", visible: true, icon: Printer },
           { id: "sewing", label: "خياطه", visible: true, icon: Scissors },
-          { id: "archive", label: "ارشيف", visible: true, icon: Archive },
+          { id: "archive", label: "أرشيف", visible: true, icon: Archive },
         ],
       },
       { id: "finish", label: "التشطيب", visible: true, icon: Wrench },
