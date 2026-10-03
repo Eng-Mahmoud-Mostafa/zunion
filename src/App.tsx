@@ -5594,7 +5594,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
         </table>
       </div>
       <div className="md-tools-bar">
-        <button type="button" className="ws-workers-open" onClick={openMachinesModal}>الماكينات</button>
+        <button type="button" className="md-machines-btn" onClick={openMachinesModal}>الماكينات</button>
       </div>
       {modal && (modal.kind === "add" ? renderAddModal() : renderEditModal())}
       {renderMachinesModal()}
