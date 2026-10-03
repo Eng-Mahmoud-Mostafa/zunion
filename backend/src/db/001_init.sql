@@ -317,6 +317,21 @@ alter table workers add column if not exists card_id text not null default '';
 alter table workers add column if not exists phone text not null default '';
 create unique index if not exists workers_name_uniq on workers (lower(name));
 
+create table if not exists machines (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  position integer not null default 0,
+  active boolean not null default true,
+  created_by uuid references users(id) on delete set null,
+  updated_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table machines add column if not exists position integer not null default 0;
+alter table machines add column if not exists active boolean not null default true;
+create unique index if not exists machines_name_uniq on machines (lower(name));
+create index if not exists machines_position_idx on machines (position);
+
 create table if not exists monthly_periods (
   id uuid primary key default gen_random_uuid(),
   month integer not null,
@@ -787,6 +802,7 @@ alter table order_items enable row level security;
 alter table order_files enable row level security;
 alter table machine_assignments enable row level security;
 alter table workers enable row level security;
+alter table machines enable row level security;
 alter table monthly_periods enable row level security;
 alter table expenses enable row level security;
 alter table incomes enable row level security;
@@ -804,7 +820,7 @@ do $$ begin
      and exists (select 1 from pg_roles where rolname = 'authenticated')
   then
     -- User directory, credentials and audit trail: service-role only.
-    revoke all on users, users_profile, roles, password_reset_codes, otp_codes, sessions, audit_logs, order_files, machine_assignments, workers from anon, authenticated;
+    revoke all on users, users_profile, roles, password_reset_codes, otp_codes, sessions, audit_logs, order_files, machine_assignments, workers, machines from anon, authenticated;
     -- App data: closed to anon/authenticated except the two dashboard reads below.
     revoke all on customers, products, orders, order_items, monthly_periods, expenses, incomes, transactions, operation_logs, company_settings from anon, authenticated;
     grant usage on schema public to anon;

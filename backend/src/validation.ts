@@ -124,6 +124,15 @@ export const workerSchema = z.object({
   worker_name: z.string().max(200).default(""),
 });
 
+export const machineCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+});
+
+export const machineUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  active: z.boolean().optional(),
+});
+
 export const workerCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
   department: z.string().trim().min(1).max(40),
@@ -189,18 +198,20 @@ export const MACHINE_NAMES = [
   "فيا الي برا",
 ] as const;
 
+export const machineNameSchema = z.string().trim().min(1).max(120);
+
 export const machineAssignmentSchema = z.object({
   order_id: z.string().min(1),
-  machine_name: z.enum(MACHINE_NAMES),
+  machine_name: machineNameSchema,
   position: z.number().int().min(1).optional(),
 });
 
 export const machineMoveSchema = z.object({
-  machine_name: z.enum(MACHINE_NAMES),
+  machine_name: machineNameSchema,
 });
 
 export const machineReorderSchema = z.object({
-  machine_name: z.enum(MACHINE_NAMES),
+  machine_name: machineNameSchema,
   ids: z.array(z.string().min(1)).max(500),
 });
 

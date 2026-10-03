@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import * as XLSX from "xlsx";
 import {
@@ -243,6 +243,8 @@ const searchCacheKey = "zunion-local-search-cache-v1";
 const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
 const onFieldOptions = ["أحمد", "رضا", "سامح"];
 const machineOptions = ["تاجيما 2015", "تاجيما 2007", "الجلوبال", "swf", "تاجيما 2005", "فيا الي جوا", "فيا الي برا"];
+
+type MachineRecord = { id: string; name: string; position: number; active: boolean };
 
 const WORKER_DEPARTMENT_LABELS: Record<string, string> = {
   operation: "تشغيل تطريز",
@@ -1875,6 +1877,41 @@ async function syncProducts(previous: Product[], next: Product[]) {
     }
     await backendJson("/api/products", { method: "POST", body });
   }));
+}
+
+function useMachines(session: Session | null) {
+  const [machines, setMachines] = useState<MachineRecord[]>([]);
+
+  const refreshMachines = useCallback(() => {
+    if (!session) return;
+    backendJson<{ machines: Array<Record<string, unknown>> }>("/api/machines")
+      .then((data) => setMachines(data.machines.map((row) => ({
+        id: String(row.id ?? ""),
+        name: String(row.name ?? ""),
+        position: Number(row.position ?? 0),
+        active: Boolean(row.active),
+      }))))
+      .catch(() => undefined);
+  }, [session?.username, session?.email]);
+
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
+    backendJson<{ machines: Array<Record<string, unknown>> }>("/api/machines")
+      .then((data) => {
+        if (!active) return;
+        setMachines(data.machines.map((row) => ({
+          id: String(row.id ?? ""),
+          name: String(row.name ?? ""),
+          position: Number(row.position ?? 0),
+          active: Boolean(row.active),
+        })));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [session?.username, session?.email]);
+
+  return { machines, setMachines, refreshMachines };
 }
 
 function daysUntil(date: string) {
@@ -5080,7 +5117,9 @@ type MachineDistModal =
   | { kind: "add"; machine: string; position: number }
   | { kind: "edit"; assignmentId: string; machine: string };
 
-function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Order[]; session: Session; onOrderClick?: (orderNumber: string) => void }) {
+type MachineDraftRow = { id: string | null; name: string; active: boolean; isNew: boolean; remove: boolean };
+
+function MachineDistributionPage({ orders, session, machines, onMachinesChanged, onOrderClick }: { orders: Order[]; session: Session; machines: MachineRecord[]; onMachinesChanged?: () => void; onOrderClick?: (orderNumber: string) => void }) {
   const [assignments, setAssignments] = useState<MachineAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -5092,6 +5131,12 @@ function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Or
   const [confirmRemoveMode, setConfirmRemoveMode] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [machinesModalOpen, setMachinesModalOpen] = useState(false);
+  const [machinesDraft, setMachinesDraft] = useState<MachineDraftRow[]>([]);
+  const [machinesAddOpen, setMachinesAddOpen] = useState(false);
+  const [machinesAddName, setMachinesAddName] = useState("");
+  const [machinesSaving, setMachinesSaving] = useState(false);
+  const [machinesError, setMachinesError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -5111,7 +5156,10 @@ function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Or
     return () => window.clearInterval(timer);
   }, []);
 
-  const boardMachines = useMemo(() => [...machineOptions].reverse(), []);
+  const boardMachines = useMemo(() => {
+    const active = machines.filter((m) => m.active);
+    return (active.length > 0 ? [...active].sort((a, b) => a.position - b.position).map((m) => m.name) : [...machineOptions]).reverse();
+  }, [machines]);
   const byMachine: Partial<Record<string, Map<number, MachineAssignment>>> = {};
   for (const machine of boardMachines) byMachine[machine] = new Map();
   for (const assignment of assignments) {
@@ -5239,6 +5287,154 @@ function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Or
     } finally {
       setBusy(false);
     }
+  }
+
+  function openMachinesModal() {
+    setMachinesError("");
+    setMachinesAddName("");
+    setMachinesAddOpen(false);
+    setMachinesDraft(machines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active, isNew: false, remove: false })));
+    setMachinesModalOpen(true);
+  }
+
+  function closeMachinesModal() {
+    if (machinesSaving) return;
+    setMachinesModalOpen(false);
+    setMachinesDraft([]);
+    setMachinesAddOpen(false);
+    setMachinesAddName("");
+    setMachinesError("");
+  }
+
+  function stageAddMachine() {
+    const name = machinesAddName.trim();
+    if (!name) return;
+    const duplicated = machinesDraft.some((row) => row.name.trim().toLowerCase() === name.toLowerCase() && !row.remove);
+    if (duplicated) {
+      setMachinesError("هذه المكنة موجودة بالفعل");
+      return;
+    }
+    setMachinesError("");
+    setMachinesDraft((current) => [...current, { id: null, name, active: true, isNew: true, remove: false }]);
+    setMachinesAddName("");
+    setMachinesAddOpen(false);
+  }
+
+  function toggleRemoveMachine(machineName: string) {
+    const hasJobs = assignments.some((assignment) => assignment.machine_name.trim().toLowerCase() === machineName.trim().toLowerCase());
+    if (hasJobs) {
+      setMachinesError("لا يمكن مسح هذه المكنة لأن عليها أوردرات في الطابور، انقلها أولاً قبل المسح");
+      return;
+    }
+    setMachinesError("");
+    setMachinesDraft((current) => current.map((row) => row.name === machineName ? { ...row, remove: !row.remove } : row));
+  }
+
+  async function saveMachines() {
+    if (machinesSaving) return;
+    setMachinesSaving(true);
+    setMachinesError("");
+    try {
+      for (const row of machinesDraft) {
+        if (row.isNew && !row.remove) {
+          await backendJson<{ machine: MachineRecord }>("/api/machines", {
+            method: "POST",
+            body: JSON.stringify({ name: row.name }),
+          });
+        } else if (!row.isNew && row.remove && row.id) {
+          await backendJson(`/api/machines/${encodeURIComponent(row.id)}`, { method: "DELETE" });
+        }
+      }
+      setMachinesSaving(false);
+      setMachinesModalOpen(false);
+      setMachinesDraft([]);
+      setMachinesAddOpen(false);
+      setMachinesAddName("");
+      setMsg("تم حفظ المكن");
+      onMachinesChanged?.();
+    } catch (error) {
+      setMachinesSaving(false);
+      setMachinesError(error instanceof Error ? error.message : "تعذر حفظ المكن");
+    }
+  }
+
+  function renderMachinesModal() {
+    if (!machinesModalOpen) return null;
+    const sorted = [...machinesDraft].sort((a, b) => {
+      if (a.isNew !== b.isNew) return a.isNew ? 1 : -1;
+      return String(a.active ? 0 : 1).localeCompare(String(b.active ? 0 : 1));
+    });
+    return (
+      <div className="ws-modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) closeMachinesModal(); }}>
+        <div className="ws-modal ws-machines-modal" role="dialog" aria-modal="true">
+          <div className="ws-modal-head">
+            <h2>الماكينات</h2>
+            <button type="button" className="ws-modal-close" aria-label="إغلاق" disabled={machinesSaving} onClick={closeMachinesModal}>×</button>
+          </div>
+          <div className="ws-modal-feedback">
+            {machinesError && <div className="ws-modal-error">{machinesError}</div>}
+          </div>
+          {!machinesAddOpen && (
+            <div className="ws-workers-toolbar">
+              <button type="button" className="ws-workers-add-btn" disabled={machinesSaving} onClick={() => { setMachinesError(""); setMachinesAddOpen(true); }}>
+                إضافة مكنه
+              </button>
+            </div>
+          )}
+          {machinesAddOpen && (
+            <div className="ws-worker-form">
+              <div className="ws-worker-field">
+                <label>اسم المكنة</label>
+                <input autoFocus value={machinesAddName} onChange={(event) => setMachinesAddName(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); stageAddMachine(); } }} />
+              </div>
+              <div className="ws-worker-form-actions">
+                <button type="button" className="ws-btn-save" disabled={machinesSaving} onClick={stageAddMachine}>إضافة</button>
+                <button type="button" className="ws-btn-cancel" disabled={machinesSaving} onClick={() => { setMachinesAddOpen(false); setMachinesAddName(""); setMachinesError(""); }}>إلغاء</button>
+              </div>
+            </div>
+          )}
+          <div className="ws-workers-table-wrap">
+            <table className="ws-workers-table">
+              <thead>
+                <tr>
+                  <th>الاسم</th>
+                  <th>الحالة</th>
+                  <th>الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.length === 0 && (
+                  <tr><td colSpan={3} className="ws-workers-empty">لا توجد ماكينات بعد</td></tr>
+                )}
+                {sorted.map((row) => (
+                  <tr key={row.id ?? row.name} className={row.remove ? "ws-worker-inactive" : !row.active && !row.isNew ? "ws-worker-inactive" : undefined}>
+                    <td>
+                      {row.name}
+                      {row.remove && <span className="ws-worker-disabled-badge">سيتم مسحها</span>}
+                      {!row.active && !row.isNew && !row.remove && <span className="ws-worker-disabled-badge">معطّلة</span>}
+                      {row.isNew && <span className="ws-worker-disabled-badge">جديدة</span>}
+                    </td>
+                    <td>{row.isNew ? "جديدة (لم تُحفظ بعد)" : row.active ? "فعالة" : "معطّلة"}</td>
+                    <td className="ws-worker-actions-cell">
+                      <button type="button" className="ws-workers-remove" disabled={machinesSaving} onClick={() => toggleRemoveMachine(row.name)}>
+                        {row.remove ? "تراجع" : "مسح مكنه"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="ws-worker-form-actions ws-machines-actions">
+            <button type="button" className="ws-btn-save" disabled={machinesSaving} onClick={() => void saveMachines()}>
+              {machinesSaving ? "جارِ الحفظ…" : "حفظ"}
+            </button>
+            <button type="button" className="ws-btn-cancel" disabled={machinesSaving} onClick={closeMachinesModal}>إلغاء</button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   function renderAddModal() {
@@ -5394,7 +5590,11 @@ function MachineDistributionPage({ orders, session, onOrderClick }: { orders: Or
           </tbody>
         </table>
       </div>
+      <div className="md-tools-bar">
+        <button type="button" className="ws-workers-open" onClick={openMachinesModal}>الماكينات</button>
+      </div>
       {modal && (modal.kind === "add" ? renderAddModal() : renderEditModal())}
+      {renderMachinesModal()}
     </div>
   );
 }
@@ -5463,7 +5663,7 @@ function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMor
   );
 }
 
-function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" | "sewing" | "printing"; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
+function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" | "sewing" | "printing"; machines?: MachineRecord[]; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -6316,6 +6516,9 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
       ...orders.map((order) => order.worker_name || ""),
       ...baseRows.map((row) => row.worker),
     ])).filter((name) => name.trim().length > 0);
+    const machineDropdownOptions = machines.length > 0
+      ? [...machines].sort((a, b) => a.position - b.position).filter((m) => m.active).map((m) => m.name)
+      : machineOptions;
     let visibleRows = [...rows];
     if (spreadSort) {
       const { key, dir } = spreadSort;
@@ -6552,7 +6755,7 @@ function OrdersPage({ orders, setOrders, session, queue, onCustomerClick, onOrde
                   <td className="ws-machine">
                     <select value={row.machine} onChange={(event) => saveMachine(row.id, event.target.value)}>
                       <option value="">—</option>
-                      {machineOptions.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
+                      {machineDropdownOptions.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
                     </select>
                     {cellFeedback(row.id, "machine")}
                   </td>
@@ -8084,6 +8287,7 @@ function ZunionApp() {
   const { items: customers, setItems: setCustomers } = useCustomers(session);
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
   const { items: products, setItems: setProducts } = useProducts(session);
+  const { machines, refreshMachines } = useMachines(session);
 
   useEffect(() => {
     if (!useServerAuth) return;
@@ -8376,8 +8580,8 @@ function ZunionApp() {
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-{view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onDistribute={() => setView("machineDist")} />}
-            {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
+{view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onDistribute={() => setView("machineDist")} />}
+            {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} machines={machines} onMachinesChanged={refreshMachines} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "print" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="printing" goToOrderId={printingGoOrderId} onGoToOrderHandled={() => setPrintingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "sewing" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}

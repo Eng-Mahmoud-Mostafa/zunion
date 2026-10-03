@@ -249,6 +249,39 @@ async function syncWorkersTable(log: (msg: string) => void) {
   );
 }
 
+async function syncMachinesTable(log: (msg: string) => void) {
+  await guarded(
+    () => query(`create table if not exists machines (
+      id uuid primary key default gen_random_uuid(),
+      name text not null,
+      position integer not null default 0,
+      active boolean not null default true,
+      created_by uuid references users(id) on delete set null,
+      updated_by uuid references users(id) on delete set null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    alter table machines add column if not exists position integer not null default 0;
+    alter table machines add column if not exists active boolean not null default true;
+    create unique index if not exists machines_name_uniq on machines (lower(name));
+    create index if not exists machines_position_idx on machines (position);`),
+    log,
+    "machines table drift",
+  );
+  const { rows } = await query<{ count: string }>(`select count(*) as count from machines`);
+  if (Number(rows[0]?.count ?? 0) === 0) {
+    const names = ["تاجيما 2015", "تاجيما 2007", "الجلوبال", "swf", "تاجيما 2005", "فيا الي جوا", "فيا الي برا"];
+    await guarded(
+      () => query(
+        `insert into machines (name, position, active) select * from unnest($1::text[], $2::int[], $3::boolean[])`,
+        [names, names.map((_, index) => index + 1), names.map(() => true)],
+      ),
+      log,
+      "machines default seed",
+    );
+  }
+}
+
 /**
  * Dedicated sequence for the display order number (00001, 00002, ...). Created
  * once, never reset, and aligned to continue after the highest existing
@@ -282,6 +315,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncOrdersTriggers(log);
   await syncPhotosTable(log);
   await syncWorkersTable(log);
+  await syncMachinesTable(log);
   await syncOrderNumberSequence(log);
 }
 

@@ -11,9 +11,10 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, customerTransactionUpdateSchema, finishingSchema, machineAssignmentSchema, machineMoveSchema, machineReorderSchema, machineSchema, orderSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, customerTransactionUpdateSchema, finishingSchema, machineAssignmentSchema, machineCreateSchema, machineMoveSchema, machineReorderSchema, machineSchema, machineUpdateSchema, orderSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
+import { activateMachine, createOrReactivateMachine, deactivateMachine, findMachineByName, listMachines, loadMachine, removeMachine, renameMachine } from "./machines.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions, updateTransaction } from "./customerAccounts.js";
 import { effectivePermissions, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
@@ -1347,6 +1348,8 @@ app.get("/api/machine-assignments", requireAuth, requireRole("Master", "Helper",
 app.post("/api/machine-assignments", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
   const parsed = machineAssignmentSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid machine assignment", issues: parsed.error.issues });
+  const machineIssue = await assertMachineActive(parsed.data.machine_name);
+  if (machineIssue) return res.status(400).json({ message: machineIssue });
   const order = await loadOrder(parsed.data.order_id);
   if (!order) return res.status(404).json({ message: "الأوردر غير موجود" });
   try {
@@ -1378,6 +1381,8 @@ app.patch("/api/machine-assignments/:id", requireAuth, requireRole("Master", "He
   const id = param(req.params.id);
   const parsed = machineMoveSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid machine move", issues: parsed.error.issues });
+  const machineIssue = await assertMachineActive(parsed.data.machine_name);
+  if (machineIssue) return res.status(400).json({ message: machineIssue });
   const oldAssignment = await loadMachineAssignment(id);
   if (!oldAssignment) return res.status(404).json({ message: "Assignment not found" });
   const assignment = await moveMachineAssignment(id, parsed.data.machine_name, req.user!.id);
@@ -1391,6 +1396,76 @@ app.delete("/api/machine-assignments/:id", requireAuth, requireRole("Master", "H
   if (!removed) return res.status(404).json({ message: "Assignment not found" });
   await audit(req.user!, "MACHINE_REMOVED", "machine_assignments", id, { machine_name: removed.machine_name, position: removed.position }, undefined);
   res.json({ ok: true });
+});
+
+async function assertMachineActive(machineName: string): Promise<string | null> {
+  const machine = await findMachineByName(machineName);
+  if (!machine) return "هذه المكنة غير مسجلة";
+  if (!machine.active) return "هذه المكنة معطّلة ولا يمكن التوزيع عليها";
+  return null;
+}
+
+app.get("/api/machines", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (_req, res) => {
+  try {
+    const machines = await listMachines();
+    res.json({ machines });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load machines", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/machines", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+  const parsed = machineCreateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "اسم المكنة مطلوب", issues: parsed.error.issues });
+  try {
+    const { machine, reactivated } = await createOrReactivateMachine(parsed.data.name, req.user!.id);
+    await audit(req.user!, reactivated ? "MACHINE_REACTIVATED" : "MACHINE_CREATED", "machines", machine.id, reactivated ? { active: false } : undefined, machine);
+    res.status(reactivated ? 200 : 201).json({ machine, reactivated });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === "ZUNION_MACHINE_EXISTS") return res.status(409).json({ message: (error as Error).message });
+    throw error;
+  }
+});
+
+app.patch("/api/machines/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = machineUpdateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "بيانات المكنة غير صالحة", issues: parsed.error.issues });
+  const current = await loadMachine(id);
+  if (!current) return res.status(404).json({ message: "Machine not found" });
+  let machine = current;
+  if (parsed.data.name !== undefined && parsed.data.name.trim() !== current.name) {
+    const name = parsed.data.name.trim();
+    const duplicate = await findMachineByName(name);
+    if (duplicate && duplicate.id !== id) return res.status(409).json({ message: "هذه المكنة موجودة بالفعل" });
+    machine = (await renameMachine(id, name, req.user!.id)) ?? current;
+  }
+  if (parsed.data.active !== undefined && parsed.data.active !== machine.active) {
+    machine = parsed.data.active
+      ? (await activateMachine(id, req.user!.id)) ?? machine
+      : (await deactivateMachine(id, req.user!.id)) ?? machine;
+  }
+  await audit(req.user!, "MACHINE_UPDATED", "machines", id, current, machine);
+  res.json({ machine });
+});
+
+app.delete("/api/machines/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+  const id = param(req.params.id);
+  try {
+    const result = await removeMachine(id, req.user!.id);
+    if (!result) return res.status(404).json({ message: "Machine not found" });
+    if ("deactivated" in result) {
+      await audit(req.user!, "MACHINE_DEACTIVATED", "machines", id, { active: true }, result.machine);
+      return res.json({ machine: result.machine, deactivated: true });
+    }
+    await audit(req.user!, "MACHINE_DELETED", "machines", id, result.machine, undefined);
+    res.json({ machine: result.machine, deleted: true });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === "ZUNION_MACHINE_QUEUED") return res.status(409).json({ message: (error as Error).message });
+    throw error;
+  }
 });
 
 app.delete("/api/orders/:id", requireAuth, requireRole("Master"), async (req, res) => {
