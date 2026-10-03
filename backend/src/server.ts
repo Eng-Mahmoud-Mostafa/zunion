@@ -1697,6 +1697,8 @@ app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper"
   res.json({ orders: rows });
 });
 
+// "الكل / جميع العملاء": no customer filter at all, so the statement covers every
+// customer's recorded work and payments.
 app.get("/api/customer-accounts/transactions", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const result = await listTransactions(null, {
     from: String(req.query.from ?? "") || undefined,
@@ -1704,6 +1706,7 @@ app.get("/api/customer-accounts/transactions", requireAuth, requireRole("Master"
     logo: String(req.query.logo ?? "") || undefined,
     entryType: String(req.query.entry_type ?? "") || undefined,
     q: String(req.query.q ?? "") || undefined,
+    orderId: String(req.query.order_id ?? "") || undefined,
     limit: Number(String(req.query.limit ?? "200") || 200),
     offset: Number(String(req.query.offset ?? "0") || 0),
   });
@@ -1718,9 +1721,11 @@ app.get("/api/customer-accounts/:id", requireAuth, requireRole("Master", "Helper
   res.json({ account_id: accountId });
 });
 
+// Scoped by customer id only. The order number is an optional refinement, never
+// a precondition for loading the account.
 app.get("/api/customer-accounts/:id/transactions", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const customerId = param(req.params.id);
-  const customer = await query("select * from customers where id=$1", [customerId]);
+  const customer = await query("select id from customers where id=$1", [customerId]);
   if (!customer.rows[0]) return res.status(404).json({ message: "Customer not found" });
   await ensureCustomerAccount(customerId);
   const result = await listTransactions(customerId, {
@@ -1729,6 +1734,7 @@ app.get("/api/customer-accounts/:id/transactions", requireAuth, requireRole("Mas
     logo: String(req.query.logo ?? "") || undefined,
     entryType: String(req.query.entry_type ?? "") || undefined,
     q: String(req.query.q ?? "") || undefined,
+    orderId: String(req.query.order_id ?? "") || undefined,
     limit: Number(String(req.query.limit ?? "200") || 200),
     offset: Number(String(req.query.offset ?? "0") || 0),
   });

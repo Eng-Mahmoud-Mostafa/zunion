@@ -232,9 +232,9 @@ export const customerTransactionSchema = z
   })
   .superRefine((txn, ctx) => {
     if (txn.entry_type === "charge") {
-      if (!txn.order_id) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["order_id"], message: "رقم الأوردر مطلوب لعملية الشغل" });
-      }
+      // The order number is an optional refinement, not a precondition: work can
+      // be posted without one. When it is omitted the row simply carries no
+      // order, and the per-order unique index does not apply.
       if (txn.quantity < 1) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["quantity"], message: "العدد يجب أن يكون 1 على الأقل" });
       }

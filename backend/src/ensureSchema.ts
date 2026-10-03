@@ -331,6 +331,52 @@ async function syncOrderNumberSequence(log: (msg: string) => void) {
 }
 
 /**
+ * The customer-account ledger tables are created here as well, because a
+ * database that predates the feature boots through `syncSchemaDrift` instead of
+ * the full 001_init.sql and would otherwise fail every statement query with
+ * "relation customer_account_transactions does not exist". Idempotent.
+ */
+async function syncCustomerAccountsTables(log: (msg: string) => void) {
+  await guarded(
+    () => query(`
+      create table if not exists customer_accounts (
+        id uuid primary key default gen_random_uuid(),
+        customer_id uuid not null unique,
+        opening_balance numeric not null default 0,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+      create table if not exists customer_account_transactions (
+        id uuid primary key default gen_random_uuid(),
+        account_id uuid not null,
+        customer_id uuid not null,
+        txn_date date not null,
+        entry_type text not null,
+        order_id uuid,
+        description text not null default '',
+        logo text not null default '',
+        quantity numeric not null default 0,
+        price numeric not null default 0,
+        debit numeric not null default 0,
+        credit numeric not null default 0,
+        client_key text,
+        created_by uuid references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      );
+      alter table customer_account_transactions add column if not exists logo text not null default '';
+      alter table customer_account_transactions drop constraint if exists customer_account_transactions_entry_type_check;
+      alter table customer_account_transactions add constraint customer_account_transactions_entry_type_check check (entry_type in ('charge', 'payment'));
+      create unique index if not exists customer_account_transactions_client_key_idx
+        on customer_account_transactions (client_key) where client_key is not null;
+      create unique index if not exists customer_account_transactions_order_uniq
+        on customer_account_transactions (order_id) where order_id is not null;
+    `),
+    log,
+    "customer accounts tables",
+  );
+}
+
+/**
  * Repairs schema drift on an existing database. Runs on every boot after the
  * full bootstrap: it cheaply diffs the orders table/catalog and adds whatever
  * is missing, so the backend never writes into a stale schema. All statements
@@ -346,6 +392,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncPhotosTable(log);
   await syncWorkersTable(log);
   await syncMachinesTable(log);
+  await syncCustomerAccountsTables(log);
   await syncOrderNumberSequence(log);
 }
 

@@ -24,13 +24,14 @@ type AccountOrder = {
 
 type AccountTransaction = {
   id: string;
-  account_id: string;
+  account_id?: string;
   customer_id: string;
   txn_date: string;
   txn_date_text?: string;
   entry_type: "charge" | "payment";
   order_id: string | null;
   order_number: string | null;
+  customer_name?: string | null;
   description: string;
   logo: string;
   quantity: number;
@@ -40,15 +41,21 @@ type AccountTransaction = {
   created_by: string | null;
   created_by_name?: string | null;
   created_at: string;
+  /** "order" rows come from saved orders and are read-only. */
+  source?: "ledger" | "order";
 };
 
 type StatementResponse = {
   transactions: AccountTransaction[];
   total: number;
+  hasMore?: boolean;
+  /** Totals over the whole matching dataset, not just the returned page. */
   totalDebit: number;
   totalCredit: number;
   openingDebit: number;
   openingCredit: number;
+  openingBalance?: number;
+  balance?: number;
 };
 
 type AccountSession = { email?: string; username?: string; fullName?: string; role: string };
@@ -130,6 +137,8 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   const [logo, setLogo] = useState("");
   const [q, setQ] = useState("");
   const [entryType, setEntryType] = useState("");
+  /** Optional refinement. Empty means every order for the current selection. */
+  const [orderFilter, setOrderFilter] = useState("");
   const [searchTick, setSearchTick] = useState(0);
   const [data, setData] = useState<StatementResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,24 +158,35 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   const userName = session?.fullName || session?.username || session?.email || "";
 
   const customerOrders = useMemo(() => {
-    if (!selectedCustomer) return [];
-    return orders.filter((order) =>
+    const mine = selectedCustomer ? orders.filter((order) =>
       order.customer_id === selectedCustomer.id ||
       (Boolean(selectedCustomer.client_code) && order.client_code === selectedCustomer.client_code) ||
       (Boolean(selectedCustomer.phone) && order.phone === selectedCustomer.phone),
-    ).sort((a, b) => String(b.order_number).localeCompare(String(a.order_number)));
+    ) : orders;
+    return [...mine].sort((a, b) => String(b.order_number).localeCompare(String(a.order_number)));
   }, [orders, selectedCustomer]);
+
+  /** Options for the optional order-number filter. */
+  const orderFilterOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const values: { id: string; label: string }[] = [];
+    for (const order of customerOrders) {
+      if (!order.id || seen.has(order.id)) continue;
+      seen.add(order.id);
+      values.push({ id: order.id, label: `#${order.order_number}` });
+    }
+    return values;
+  }, [customerOrders]);
 
   const logoOptions = useMemo(() => {
     const seen = new Set<string>();
     const values: string[] = [];
-    const source = selectedCustomer ? customerOrders : orders;
-    for (const order of source) {
+    for (const order of customerOrders) {
       const value = String(order.logo_place || order.logo_status || "").trim();
       if (value && !seen.has(value)) { seen.add(value); values.push(value); }
     }
     return values;
-  }, [customerOrders, orders, selectedCustomer]);
+  }, [customerOrders]);
 
   const sortedCustomers = useMemo(
     () => [...customers].sort((a, b) => a.client_name.localeCompare(b.client_name, "ar")),
@@ -174,6 +194,8 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
   );
 
   const chargedOrderIds = useMemo(() => {
+    // Any charge row represents the order, whether it was posted by hand or
+    // derived from the order itself, so the order can't be charged twice.
     const set = new Set<string>();
     for (const txn of data?.transactions ?? []) {
       if (txn.entry_type === "charge" && txn.order_id) set.add(txn.order_id);
@@ -186,27 +208,55 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     [customerOrders, chargedOrderIds],
   );
 
+  /**
+   * Loads the whole statement, not just the first page: the backend caps each
+   * page, so keep following `hasMore` until every matching row is collected.
+   * An empty customer id means "الكل", which is simply no customer filter.
+   */
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError("");
-    const query = new URLSearchParams();
-    if (from) query.set("from", from);
-    if (to) query.set("to", to);
-    if (logo) query.set("logo", logo);
-    if (entryType) query.set("entry_type", entryType);
-    if (q.trim()) query.set("q", q.trim());
-    query.set("limit", "100000");
-    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const base = new URLSearchParams();
+    if (from) base.set("from", from);
+    if (to) base.set("to", to);
+    if (logo) base.set("logo", logo);
+    if (entryType) base.set("entry_type", entryType);
+    if (q.trim()) base.set("q", q.trim());
+    if (orderFilter) base.set("order_id", orderFilter);
     const endpoint = customerId
-      ? `/api/customer-accounts/${encodeURIComponent(customerId)}/transactions${suffix}`
-      : `/api/customer-accounts/transactions${suffix}`;
-    backendJson<StatementResponse>(endpoint)
-      .then((result) => { if (active) setData(result); })
-      .catch((err) => { if (active) { setData(null); setError(err instanceof Error ? err.message : "تعذر تحميل الكشف."); } })
+      ? `/api/customer-accounts/${encodeURIComponent(customerId)}/transactions`
+      : `/api/customer-accounts/transactions`;
+    const pageSize = 500;
+    const collected: AccountTransaction[] = [];
+    let meta: StatementResponse | null = null;
+
+    const loadPage = async (offset: number): Promise<void> => {
+      const page = new URLSearchParams(base);
+      page.set("limit", String(pageSize));
+      page.set("offset", String(offset));
+      const result = await backendJson<StatementResponse>(`${endpoint}?${page.toString()}`);
+      meta = result;
+      collected.push(...result.transactions);
+      if (result.hasMore ?? collected.length < result.total) {
+        if (result.transactions.length === 0) return;
+        await loadPage(offset + result.transactions.length);
+      }
+    };
+
+    loadPage(0)
+      .then(() => {
+        if (!active || !meta) return;
+        setData({ ...(meta as StatementResponse), transactions: collected });
+      })
+      .catch((err) => {
+        if (!active) return;
+        setData(null);
+        setError(err instanceof Error ? err.message : "تعذر تحميل الكشف.");
+      })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [customerId, from, to, logo, entryType, q, searchTick]);
+  }, [customerId, from, to, logo, entryType, q, orderFilter, searchTick]);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -232,19 +282,28 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
     });
   }, [data, draft]);
 
-  const openingBalance = Number(data?.openingDebit ?? 0) - Number(data?.openingCredit ?? 0);
-  const totalDebit = rows.reduce((sum, row) => sum + row.debit, 0);
-  const totalCredit = rows.reduce((sum, row) => sum + row.credit, 0);
+  const openingBalance = Number(data?.openingBalance ?? (Number(data?.openingDebit ?? 0) - Number(data?.openingCredit ?? 0)));
+  const hasPendingEdits = Object.keys(draft).length > 0;
+  const computedDebit = rows.reduce((sum, row) => sum + row.debit, 0);
+  const computedCredit = rows.reduce((sum, row) => sum + row.credit, 0);
+  const computedBalance = rows.length ? rows[rows.length - 1].balance : openingBalance;
+  // Without pending edits the server's figures win: they cover the entire
+  // matching dataset, including any row the current page did not carry.
+  const totalDebit = hasPendingEdits ? computedDebit : Number(data?.totalDebit ?? computedDebit);
+  const totalCredit = hasPendingEdits ? computedCredit : Number(data?.totalCredit ?? computedCredit);
+  const finalBalance = hasPendingEdits ? computedBalance : Number(data?.balance ?? computedBalance);
   const totalQuantity = rows.reduce((sum, row) => sum + (row.entry_type === "charge" ? Number(row.effQty || 0) : 0), 0);
-  const finalBalance = rows.length ? rows[rows.length - 1].balance : openingBalance;
-  const lastBalance = rows.length ? rows[rows.length - 1].balance : openingBalance;
+  const lastBalance = computedBalance;
 
   const chargeDebit = round2((Number(charge.quantity) || 0) * (Number(charge.price) || 0));
   const paymentDebit = round2(Number(paymentAmount) || 0);
 
   function changeCustomer(id: string) {
+    // Changing the customer must clear the previous order restriction and any
+    // half-typed entry, but keeps the current table on screen until the new
+    // statement arrives so the view never flashes empty.
     setCustomerId(id);
-    setData(null);
+    setOrderFilter("");
     setDraft({});
     setPaymentAmount("");
     setCharge({ orderId: "", logo: "", quantity: "", price: "" });
@@ -254,12 +313,12 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
 
   function resetFilters() {
     setCustomerId("");
-    setData(null);
     setFrom("");
     setTo("");
     setLogo("");
     setQ("");
     setEntryType("");
+    setOrderFilter("");
     setDraft({});
     setPaymentAmount("");
     setCharge({ orderId: "", logo: "", quantity: "", price: "" });
@@ -326,7 +385,8 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
         if (patch.quantity !== undefined || patch.price !== undefined || patch.credit !== undefined) patches.push(patch);
       }
 
-      const hasCharge = Boolean(charge.orderId) && Number(charge.quantity) >= 1 && Number(charge.price) > 0;
+      // The order number is optional for a charge; quantity and price decide.
+      const hasCharge = Number(charge.quantity) >= 1 && Number(charge.price) > 0;
       const hasPayment = paymentDebit > 0;
       if (!patches.length && !hasCharge && !hasPayment) {
         setNotice({ text: "لا توجد تغييرات للحفظ.", ok: false });
@@ -435,6 +495,15 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
 
   const today = localToday();
 
+  // With a single customer selected the layout is exactly as before. "الكل"
+  // needs an extra column so each row can be attributed to its customer.
+  const showCustomer = !selectedCustomer;
+  const colCount = showCustomer ? 11 : 10;
+  const baseWidths = ["11.59%", "11.59%", "11.59%", "13.04%", "11.59%", "6.52%", "6.52%", "8.33%", "8.33%", "10.87%"];
+  const colWidths = showCustomer
+    ? ["14%", ...baseWidths.map((w) => `${(Number.parseFloat(w) * 0.86).toFixed(2)}%`)]
+    : baseWidths;
+
   return (
     <div className="stack ca-screen">
       <div className="ca-customer-row">
@@ -446,15 +515,16 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
         </label>
       </div>
 
-      {loading && !data && <p className="muted">جاري تحميل الكشف...</p>}
-      {!data && !loading && error && <ErrorText message={error} />}
-      {!data && !loading && !error && <p className="muted">لا توجد بيانات.</p>}
+{loading && <p className="muted">جاري تحميل الكشف...</p>}
+      {error && <ErrorText message={error} />}
+      {!loading && !error && !data && <p className="muted">لا توجد بيانات.</p>}
 
       {data && (<>
         <div className="ss-filters">
           <div className="ss-filter"><span>من تاريخ</span><div className="ss-date-wrap"><Calendar size={15} /><input type="date" value={normalizeDigitsToEnglish(from)} onChange={(event) => setFrom(normalizeDigitsToEnglish(event.target.value))} /></div></div>
           <div className="ss-filter"><span>إلى تاريخ</span><div className="ss-date-wrap"><Calendar size={15} /><input type="date" value={normalizeDigitsToEnglish(to)} onChange={(event) => setTo(normalizeDigitsToEnglish(event.target.value))} /></div></div>
           <div className="ss-filter"><span>البيان</span><select value={logo} onChange={(event) => setLogo(event.target.value)}><option value="">الكل</option>{logoOptions.map((value) => <option key={value} value={value}>{value}</option>)}</select></div>
+          <div className="ss-filter"><span>رقم الأوردر</span><select value={orderFilter} onChange={(event) => setOrderFilter(event.target.value)}><option value="">جميع الأوردرات</option>{orderFilterOptions.map((order) => <option key={order.id} value={order.id}>{order.label}</option>)}</select></div>
           <div className="ss-filter"><span>بحث في البيان</span><div className="ss-date-wrap"><Search size={15} /><input value={normalizeDigitsToEnglish(q)} onChange={(event) => setQ(normalizeDigitsToEnglish(event.target.value))} placeholder="إبحث في البيان" /></div></div>
           <div className="ss-filter"><span>نوع العملية</span><select value={entryType} onChange={(event) => setEntryType(event.target.value)}><option value="">الكل</option><option value="charge">شغل</option><option value="payment">دفعة</option></select></div>
           <div className="ss-filter-actions">
@@ -464,31 +534,22 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
           </div>
         </div>
 
-        {error && <ErrorText message={error} />}
         {notice && <p className={"ss-message " + (notice.ok ? "ok" : "err")}>{notice.text}</p>}
 
         <div className="ss-scroll">
           <table className="ss-table">
             <colgroup>
-              <col style={{ width: "11.59%" }} />
-              <col style={{ width: "11.59%" }} />
-              <col style={{ width: "11.59%" }} />
-              <col style={{ width: "13.04%" }} />
-              <col style={{ width: "11.59%" }} />
-              <col style={{ width: "6.52%" }} />
-              <col style={{ width: "6.52%" }} />
-              <col style={{ width: "8.33%" }} />
-              <col style={{ width: "8.33%" }} />
-              <col style={{ width: "10.87%" }} />
+              {colWidths.map((width, index) => <col key={index} style={{ width }} />)}
             </colgroup>
             <thead>
               <tr className="ss-top">
                 <td className="ss-save"><button type="button" className="ss-save-btn" onClick={saveDraft} disabled={saving || !canEdit}>{saving ? "جاري الحفظ..." : "حفظ"}</button></td>
-                <td className="ss-title" colSpan={8}>{selectedCustomer ? `حساب العميل — ${selectedCustomer.client_name}` : "العمليات"}</td>
+                <td className="ss-title" colSpan={colCount - 2}>{selectedCustomer ? `حساب العميل — ${selectedCustomer.client_name}` : "العمليات — جميع العملاء"}</td>
                 <td className="ss-balance-cell">{accountMoney(finalBalance)}</td>
               </tr>
               <tr className="ss-head">
                 <th>كتب بواسطة</th>
+                {showCustomer && <th>العميل</th>}
                 <th>تاريخ التسليم</th>
                 <th>رقم الأوردر</th>
                 <th>النوع</th>
@@ -501,20 +562,23 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
               </tr>
             </thead>
             <tbody className="ss-body">
-              {rows.length === 0 && <tr><td colSpan={10} className="ss-empty">لا توجد عمليات.</td></tr>}
-              {rows.map((row) => (
+              {!loading && !error && rows.length === 0 && <tr><td colSpan={colCount} className="ss-empty">لا توجد عمليات.</td></tr>}
+              {rows.map((row) => {
+                const editable = canEdit && (row.source ?? "ledger") === "ledger";
+                return (
                 <tr key={row.id} className={row.entry_type === "payment" ? "ss-pay-row" : undefined}>
                   <td className="grp-gray ss-name-cell">
                     <span className="ss-name">{row.created_by_name || "—"}</span>
-                    {session.role === "Master" && canEdit && (
+                    {session.role === "Master" && editable && (
                       <button type="button" className="ss-delete-row" onClick={() => deleteTransaction(row)} disabled={saving} aria-label="حذف"><Trash2 size={14} /></button>
                     )}
                   </td>
+                  {showCustomer && <td className="grp-gray">{row.customer_name || "—"}</td>}
                   <td className="grp-gray">{accountDay(row)}</td>
                   <td className="grp-gray">{row.order_number || "—"}</td>
                   <td className={"ss-type" + (row.entry_type === "payment" ? " ss-pay-type" : "")}>{row.entry_type === "payment" ? "دفعة" : "شغل"}</td>
                   <td>{row.logo || "—"}</td>
-                  {canEdit && row.entry_type === "charge" ? (
+                  {editable && row.entry_type === "charge" ? (
                     <>
                       <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={draft[row.id]?.quantity ?? String(row.quantity)} onChange={(event) => touchDraft(row.id, "quantity", normalizeDigitsToEnglish(event.target.value))} aria-label="العدد" /></td>
                       <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={draft[row.id]?.price ?? String(row.price)} onChange={(event) => touchDraft(row.id, "price", normalizeDigitsToEnglish(event.target.value))} aria-label="السعر" /></td>
@@ -526,17 +590,18 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
                     </>
                   )}
                   <td className="ss-num ss-debit-val">{accountMoney(row.debit)}</td>
-                  {canEdit && row.entry_type === "payment" ? (
+                  {editable && row.entry_type === "payment" ? (
                     <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={draft[row.id]?.credit ?? String(row.credit)} onChange={(event) => touchDraft(row.id, "credit", normalizeDigitsToEnglish(event.target.value))} aria-label="الدائن" /></td>
                   ) : (
                     <td className="ss-num">{row.entry_type === "payment" ? accountMoney(row.credit) : "—"}</td>
                   )}
                   <td className="ss-num ss-bal">{accountMoney(row.balance)}</td>
                 </tr>
-              ))}
+                );
+              })}
               {rows.length > 0 && (
                 <tr className="ss-total">
-                  <td className="grp-gray" colSpan={4}>الإجمالي</td>
+                  <td className="grp-gray" colSpan={showCustomer ? 5 : 4}>الإجمالي</td>
                   <td />
                   <td className="ss-num">{formatNumberLocal(totalQuantity)}</td>
                   <td />
@@ -548,10 +613,11 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
               {canEdit && (
                 <tr className="ss-entry ss-charge-entry">
                   <td className="grp-gray ss-name-cell"><span className="ss-name">{userName || "—"}</span></td>
+                  {showCustomer && <td className="grp-gray">—</td>}
                   <td className="grp-gray">{formatDateArabic(`${today}T00:00:00`)}</td>
                   <td className="grp-gray">
                     <select className="ss-select-cell" value={charge.orderId} onChange={(event) => pickChargeOrder(event.target.value)}>
-                      <option value="">اختر الأوردر</option>
+                      <option value="">بدون أوردر</option>
                       {availableOrders.map((order) => <option key={order.id} value={order.id}>#{order.order_number}</option>)}
                     </select>
                   </td>
@@ -567,6 +633,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
               {canEdit && (
                 <tr className="ss-entry ss-pay-entry">
                   <td className="grp-gray ss-name-cell"><span className="ss-name">{userName || "—"}</span></td>
+                  {showCustomer && <td className="grp-gray">—</td>}
                   <td className="ss-pay-date">{formatDateArabic(`${today}T00:00:00`)}</td>
                   <td className="grp-gray">—</td>
                   <td className="ss-pay-type">دفعة</td>
