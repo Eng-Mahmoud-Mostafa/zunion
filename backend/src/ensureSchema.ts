@@ -397,6 +397,21 @@ async function syncSchemaDrift(log: (msg: string) => void) {
 }
 
 /**
+ * PostgREST caches the exposed schema and only reloads it when the DDL itself
+ * arrives through PostgREST. Tables created here over a plain pg connection
+ * therefore stay invisible to every `supabaseRest()` call until the cache is
+ * dropped, which surfaces as a confusing 404/PGRST205 "table not found". A
+ * reload is cheap and idempotent, so do it whenever the drift sync ran.
+ */
+async function reloadPostgrestSchema(log: (msg: string) => void) {
+  await guarded(
+    () => query("notify pgrst, 'reload schema'"),
+    log,
+    "postgrest schema reload",
+  );
+}
+
+/**
  * Applies the idempotent schema (001_init.sql) when the backend database is
  * missing it, then always runs a lightweight drift sync so a partially-migrated
  * database self-heals. Safe to run on every boot: it short-circuits with cheap
@@ -421,6 +436,7 @@ export async function ensureSchema(log: (msg: string) => void = console.log) {
       }
     }
     await syncSchemaDrift(log);
+    await reloadPostgrestSchema(log);
   } catch (error) {
     log(`[schema] bootstrap failed: ${error instanceof Error ? error.message : error}`);
   }
