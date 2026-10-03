@@ -57,6 +57,7 @@ const REQUIRED_ORDER_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["updated_by", "uuid references users(id) on delete set null"],
   ["created_at", "timestamptz not null default now()"],
   ["updated_at", "timestamptz not null default now()"],
+  ["completed_at", "timestamptz"],
 ];
 
 const ORDER_STATUS_VALUES = [
@@ -110,6 +111,21 @@ async function syncOrdersColumns(log: (msg: string) => void) {
       `add column orders.${name}`,
     );
   }
+}
+
+/**
+ * Backfills `orders.completed_at` for orders that were already finished before
+ * the column existed. Their only trustworthy completion evidence is the last
+ * update that moved them into the completed stage, so that is what the archive
+ * shows for them. Runs after `syncOrdersColumns` so the column is guaranteed to
+ * exist, and is idempotent because it only touches rows that are still null.
+ */
+async function syncOrderCompletion(log: (msg: string) => void) {
+  await guarded(
+    () => query(`update orders set completed_at = updated_at where completed_at is null and work_stage = 'completed'`),
+    log,
+    "orders completed_at backfill",
+  );
 }
 
 async function syncWorkStageConstraint(log: (msg: string) => void) {
@@ -166,8 +182,21 @@ async function syncOrdersTriggers(log: (msg: string) => void) {
           return new;
         end;
       $$;
+      create or replace function set_order_completed_at() returns trigger language plpgsql as $$
+        begin
+          if new.work_stage = 'completed' and new.completed_at is null then
+            new.completed_at = now();
+          end if;
+          if new.work_stage is distinct from 'completed' then
+            new.completed_at = null;
+          end if;
+          return new;
+        end;
+      $$;
       drop trigger if exists calculate_orders_financials on orders;
       create trigger calculate_orders_financials before insert or update on orders for each row execute function calculate_order_financials();
+      drop trigger if exists set_orders_completed_at on orders;
+      create trigger set_orders_completed_at before insert or update on orders for each row execute function set_order_completed_at();
       drop trigger if exists set_orders_updated_at on orders;
       create trigger set_orders_updated_at before update on orders for each row execute function set_updated_at();`),
     log,
@@ -310,6 +339,7 @@ async function syncOrderNumberSequence(log: (msg: string) => void) {
  */
 async function syncSchemaDrift(log: (msg: string) => void) {
   await syncOrdersColumns(log);
+  await syncOrderCompletion(log);
   await syncWorkStageConstraint(log);
   await syncOrderStatusEnum(log);
   await syncOrdersTriggers(log);

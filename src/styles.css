@@ -7888,6 +7888,186 @@ tr.ws-row-highlight td {
 }
 
 /* ---------- orders list: continuous page scroll, no pagination ---------- */
+/* ================================================================
+   Archive (ارشيف) — finished orders
+   ================================================================ */
+.ar-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  background: #F1F5F8;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.ar-title {
+  margin: 0;
+  color: #0f2b46;
+  font-size: 34px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.ar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  background: #FFFFFF;
+  border: 1px solid #d9dee8;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.ar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  flex: 1 1 150px;
+}
+
+.ar-label {
+  color: #0f2b46;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ar-field input,
+.ar-field select {
+  height: 38px;
+  border: 1px solid #c7d2e0;
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #111827;
+  background: #FFFFFF;
+}
+
+.ar-field input:focus,
+.ar-field select:focus {
+  outline: 2px solid rgba(21, 96, 130, 0.25);
+  border-color: #156082;
+}
+
+.ar-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.ar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 8px;
+  background: var(--red, #ED1525);
+  color: #FFFFFF;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.ar-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.ar-btn-reset {
+  background: #6b7280;
+}
+
+.ar-table-wrap {
+  width: 100%;
+  background: #FFFFFF;
+  border: 1px solid #d9dee8;
+  border-radius: 10px;
+  overflow-x: auto;
+}
+
+.ar-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 1100px;
+  background: #FFFFFF;
+}
+
+.ar-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #E8EEF4;
+  color: #0f2b46;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: center;
+  padding: 10px 8px;
+  border-bottom: 1px solid #d9dee8;
+  white-space: nowrap;
+}
+
+.ar-table tbody td {
+  font-size: 14px;
+  color: #111827;
+  text-align: center;
+  padding: 10px 8px;
+  border-bottom: 1px solid #e8edf3;
+  white-space: nowrap;
+}
+
+.ar-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.ar-num {
+  font-weight: 700;
+}
+
+.ar-state {
+  padding: 26px 8px !important;
+  color: #6b7280 !important;
+  font-size: 15px !important;
+  font-weight: 600;
+}
+
+.ar-state-error {
+  color: #be123c !important;
+}
+
+.ar-view-btn {
+  border: none;
+  border-radius: 6px;
+  background: var(--red, #ED1525);
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .ar-title {
+    font-size: 26px;
+  }
+
+  .ar-filter-actions {
+    width: 100%;
+  }
+
+  .ar-btn {
+    flex: 1 1 auto;
+  }
+}
+
 .orders-list-table-wrap.orders-infinite-list {
   overflow: visible;
   max-height: none;

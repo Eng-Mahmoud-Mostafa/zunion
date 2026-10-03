@@ -993,6 +993,43 @@ app.get("/api/orders", requireAuth, async (req, res) => {
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
+/**
+ * Archive of finished orders. "Archived" is derived, never a separate flag:
+ * an order belongs here exactly when it reached the completed stage
+ * (`work_stage = 'completed'`, i.e. READY / CUSTOMER_MESSAGED / DELIVERED),
+ * which is the same rule the rest of the app uses to call an order finished.
+ * The date range filters the recorded `completed_at`, not `updated_at`.
+ * Registered before `/api/orders/:id` so "archive" is not matched as an id.
+ */
+app.get("/api/orders/archive", requireAuth, async (req, res) => {
+  const { order_number = "", customer = "", type = "", from = "", to = "" } = req.query as Record<string, string>;
+  const filters: string[] = ["work_stage = 'completed'", "draft = false"];
+  const params: unknown[] = [];
+  if (order_number) {
+    params.push(`%${order_number}%`);
+    filters.push(`order_number ilike $${params.length}`);
+  }
+  if (customer) {
+    params.push(`%${customer}%`);
+    filters.push(`customer_name_snapshot ilike $${params.length}`);
+  }
+  if (type) {
+    params.push(type);
+    filters.push(`type = $${params.length}`);
+  }
+  if (from) {
+    params.push(from);
+    filters.push(`completed_at::date >= $${params.length}::date`);
+  }
+  if (to) {
+    params.push(to);
+    filters.push(`completed_at::date <= $${params.length}::date`);
+  }
+  const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
+  const { rows } = await query(`select * from orders ${sqlWhere} order by completed_at desc, created_at desc`, params);
+  res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
+});
+
 app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const parsed = orderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid order", issues: parsed.error.issues });

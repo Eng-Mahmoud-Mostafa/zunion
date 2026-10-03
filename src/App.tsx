@@ -222,6 +222,7 @@ type Order = {
   internal_notes: string;
   created_at: string;
   updated_at: string;
+  completedAt: string;
 };
 
 const allowedEmail = "mahmoudmostafa3104@gmail.com";
@@ -1216,6 +1217,7 @@ const emptyOrder: Order = {
   internal_notes: "",
   created_at: "",
   updated_at: "",
+  completedAt: "",
 };
 
 const demoOrders: Order[] = [
@@ -1464,6 +1466,7 @@ function orderFromApi(row: Record<string, unknown>): Order {
     notes: String(row.notes ?? ""),
     created_at: String(row.created_at ?? new Date().toISOString()),
     updated_at: String(row.updated_at ?? row.created_at ?? new Date().toISOString()),
+    completedAt: String(row.completed_at ?? ""),
     operationItems: (() => {
       const attachments = Array.isArray(row.operation_attachments) ? row.operation_attachments : (() => {
         try {
@@ -8148,6 +8151,154 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   );
 }
 
+const archiveTypeOptions = ["تطريز", "طباعه", "خياطه"];
+
+type ArchiveFilters = {
+  orderNumber: string;
+  customer: string;
+  type: string;
+  from: string;
+  to: string;
+};
+
+const emptyArchiveFilters: ArchiveFilters = { orderNumber: "", customer: "", type: "", from: "", to: "" };
+
+/**
+ * Archive of finished orders. Rows come from /api/orders/archive, which only
+ * returns orders whose work_stage is "completed" — the same rule the rest of the
+ * app uses to call an order finished — so no local filtering decides what counts
+ * as archived. Filters are sent to the server, which matches them against the
+ * whole database rather than only the rows already loaded here.
+ */
+function ArchivePage({ customers, setOrders, session, setView, onCustomerClick }: {
+  customers: Customer[];
+  setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
+  session: Session;
+  setView: (view: View) => void;
+  onCustomerClick?: (code: string, name: string) => void;
+}) {
+  const [filters, setFilters] = useState<ArchiveFilters>(emptyArchiveFilters);
+  const [applied, setApplied] = useState<ArchiveFilters>(emptyArchiveFilters);
+  const [rows, setRows] = useState<Order[]>([]);
+  const [selected, setSelected] = useState<Order | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (applied.orderNumber.trim()) params.set("order_number", applied.orderNumber.trim());
+    if (applied.customer.trim()) params.set("customer", applied.customer.trim());
+    if (applied.type) params.set("type", applied.type);
+    if (applied.from) params.set("from", applied.from);
+    if (applied.to) params.set("to", applied.to);
+    const queryString = params.toString();
+    backendJson<{ orders: Array<Record<string, unknown>> }>(`/api/orders/archive${queryString ? `?${queryString}` : ""}`)
+      .then((data) => {
+        if (!active) return;
+        setRows(data.orders.map(orderFromApi));
+        setError("");
+      })
+      .catch((err) => {
+        if (!active) return;
+        setRows([]);
+        setError(err instanceof Error ? err.message : "تعذر تحميل الأوردرات المؤرشفة.");
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [applied]);
+
+  function updateFilter(key: keyof ArchiveFilters, value: string) {
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function resetFilters() {
+    setFilters(emptyArchiveFilters);
+    setApplied(emptyArchiveFilters);
+  }
+
+  const hasFilters = Boolean(applied.orderNumber.trim() || applied.customer.trim() || applied.type || applied.from || applied.to);
+
+  return (
+    <div className="ar-screen">
+      <h1 className="ar-title">ارشيف</h1>
+
+      <div className="ar-filters">
+        <label className="ar-field">
+          <span className="ar-label">رقم الأوردر</span>
+          <input type="text" value={filters.orderNumber} placeholder="أدخل رقم الأوردر" onChange={(event) => updateFilter("orderNumber", event.target.value)} />
+        </label>
+        <label className="ar-field">
+          <span className="ar-label">اسم العميل</span>
+          <input type="text" value={filters.customer} placeholder="أدخل اسم العميل" onChange={(event) => updateFilter("customer", event.target.value)} />
+        </label>
+        <label className="ar-field">
+          <span className="ar-label">نوع الأوردر</span>
+          <select value={filters.type} onChange={(event) => updateFilter("type", event.target.value)}>
+            <option value="">الكل</option>
+            {archiveTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>
+        <label className="ar-field">
+          <span className="ar-label">من تاريخ</span>
+          <input type="date" value={filters.from} onChange={(event) => updateFilter("from", event.target.value)} />
+        </label>
+        <label className="ar-field">
+          <span className="ar-label">إلى تاريخ</span>
+          <input type="date" value={filters.to} onChange={(event) => updateFilter("to", event.target.value)} />
+        </label>
+        <div className="ar-filter-actions">
+          <button type="button" className="ar-btn ar-btn-primary" disabled={loading} onClick={() => setApplied(filters)}>
+            <Search size={16} />
+            بحث
+          </button>
+          <button type="button" className="ar-btn ar-btn-reset" disabled={loading} onClick={resetFilters}>مسح الفلاتر</button>
+        </div>
+      </div>
+
+      <div className="ar-table-wrap">
+        <table className="ar-table">
+          <thead>
+            <tr>
+              <th>رقم الأوردر</th>
+              <th>اسم العميل</th>
+              <th>نوع الأوردر</th>
+              <th>النوع</th>
+              <th>العدد</th>
+              <th>تاريخ الإنهاء</th>
+              <th>الحالة</th>
+              <th>الإجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={8} className="ar-state">جارٍ تحميل الأوردرات المؤرشفة…</td></tr>}
+            {!loading && error && <tr><td colSpan={8} className="ar-state ar-state-error">{error}</td></tr>}
+            {!loading && !error && rows.length === 0 && (
+              <tr><td colSpan={8} className="ar-state">{hasFilters ? "لا توجد أوردرات مطابقة للفلاتر المحددة" : "لا توجد أوردرات مؤرشفة حتى الآن"}</td></tr>
+            )}
+            {!loading && !error && rows.map((order) => (
+              <tr key={order.id}>
+                <td className="ar-num">{order.order_number}</td>
+                <td>{order.client_name}</td>
+                <td>{orderDisplayType({ order_type: order.order_type } as OrdersListRecord)}</td>
+                <td>{orderDisplayType(order as unknown as OrdersListRecord)}</td>
+                <td>{formatNumber(order.quantity)}</td>
+                <td>{formatDateArabic(order.completedAt || order.updated_at)}</td>
+                <td><span className={listBadgeClass(orderStatusLabel(order))}>{orderStatusLabel(order)}</span></td>
+                <td>
+                  <button type="button" className="ar-view-btn" onClick={() => setSelected(order)}>عرض الأوردر</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <OrderDetailsDrawer open={!!selected} onClose={() => setSelected(null)} order={selected} customers={customers} setOrders={setOrders} session={session} setView={setView} onCustomerClick={onCustomerClick} />
+    </div>
+  );
+}
+
 function UnderConstructionPanel({ title }: { title: string }) {
   return (
     <section className="panel">
@@ -8586,7 +8737,7 @@ function ZunionApp() {
             {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "print" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="printing" goToOrderId={printingGoOrderId} onGoToOrderHandled={() => setPrintingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "sewing" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-            {view === "archive" && <UnderConstructionPanel title="ارشيف" />}
+            {view === "archive" && <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={setView} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
           {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
           {view === "customerAccounts" && <CustomerAccountsPage orders={orders} customers={customers} session={session} />}
           {view === "finance" && <FinancePageModern session={session} />}

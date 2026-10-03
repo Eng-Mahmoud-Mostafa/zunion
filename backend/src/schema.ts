@@ -210,9 +210,11 @@ create table if not exists orders (
   created_by uuid references users(id) on delete set null,
   updated_by uuid references users(id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz
 );
 
+alter table orders add column if not exists completed_at timestamptz;
 alter table orders add column if not exists details text;
 alter table orders add column if not exists draft boolean not null default false;
 alter table orders add column if not exists work_stage text not null default 'new';
@@ -253,6 +255,7 @@ set work_stage = case
   else 'new'
 end
 where work_stage is null or work_stage = 'new';
+update orders set completed_at = updated_at where completed_at is null and work_stage = 'completed';
 
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),

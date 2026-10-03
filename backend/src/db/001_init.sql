@@ -202,9 +202,11 @@ create table if not exists orders (
   created_by uuid references users(id) on delete set null,
   updated_by uuid references users(id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz
 );
 
+alter table orders add column if not exists completed_at timestamptz;
 alter table orders add column if not exists details text;
 alter table orders add column if not exists draft boolean not null default false;
 alter table orders add column if not exists work_stage text not null default 'new';
@@ -245,6 +247,7 @@ set work_stage = case
   else 'new'
 end
 where work_stage is null or work_stage = 'new';
+update orders set completed_at = updated_at where completed_at is null and work_stage = 'completed';
 
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
@@ -398,6 +401,23 @@ begin
 end;
 $$;
 
+-- Stamp the moment an order enters the completed stage. Kept in the database so
+-- every write path (order edit, status change, finishing hand-off) records it
+-- without each handler having to remember. Only fills a null value, so the
+-- original completion time survives later edits to a finished order.
+create or replace function set_order_completed_at()
+returns trigger language plpgsql as $$
+begin
+  if new.work_stage = 'completed' and new.completed_at is null then
+    new.completed_at = now();
+  end if;
+  if new.work_stage is distinct from 'completed' then
+    new.completed_at = null;
+  end if;
+  return new;
+end;
+$$;
+
 create or replace function calculate_order_item_total()
 returns trigger language plpgsql as $$
 begin
@@ -435,6 +455,9 @@ create trigger set_orders_updated_at before update on orders for each row execut
 
 drop trigger if exists calculate_orders_financials on orders;
 create trigger calculate_orders_financials before insert or update on orders for each row execute function calculate_order_financials();
+
+drop trigger if exists set_orders_completed_at on orders;
+create trigger set_orders_completed_at before insert or update on orders for each row execute function set_order_completed_at();
 
 drop trigger if exists set_order_items_updated_at on order_items;
 create trigger set_order_items_updated_at before update on order_items for each row execute function set_updated_at();
