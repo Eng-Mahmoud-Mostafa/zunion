@@ -8364,7 +8364,7 @@ input[type="number"] {
    dashboard quick-grid cards, pagination, and selection chips
    (.account-buttons). Ordinary text/inputs/dropdowns untouched.
    ================================================================ */
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card),
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *),
 :where(.app) label.file-btn,
 :where(.app) a.cd-action-btn {
   background-color: #ED1525 !important;
@@ -8379,10 +8379,10 @@ input[type="number"] {
   color: #FFFFFF !important;
 }
 
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):hover,
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):focus,
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):focus-visible,
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):active,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):hover,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):focus,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):focus-visible,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-parent-nav):not(.sidebar-toggle):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):active,
 :where(.app) label.file-btn:hover,
 :where(.app) label.file-btn:focus-within,
 :where(.app) a.cd-action-btn:hover,
@@ -8393,14 +8393,14 @@ input[type="number"] {
   color: #FFFFFF !important;
 }
 
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):active {
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):active {
   background-color: #a61114 !important;
   border-color: #a61114 !important;
 }
 
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):disabled,
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):disabled:hover,
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):disabled:active {
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):disabled,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):disabled:hover,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):disabled:active {
   background-color: #ED1525 !important;
   border-color: #ED1525 !important;
   color: #FFFFFF !important;
@@ -8408,7 +8408,7 @@ input[type="number"] {
   cursor: not-allowed !important;
 }
 
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):disabled * {
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.ws-management-modal *):disabled * {
   color: #FFFFFF !important;
 }
 
@@ -8595,3 +8595,660 @@ input[type="number"] {
   width: 0;
   height: 0;
 }
+
+/* ================================================================
+   Workers / machines / draggable dialogs.
+
+   Recovered from the compiled bundle after src/styles.css was
+   accidentally truncated and reverted to its last commit. HEAD keeps
+   its original values; everything below is appended last so it wins.
+   ================================================================ */
+
+.ws-table-wrap.ws-finishing-table-wrap {
+  overflow-y:auto;
+  max-height:calc(100vh - 240px);
+}
+.ws-table-wrap.ws-finishing-table-wrap .ws-table {
+  border-collapse:separate;
+  border-spacing:0;
+}
+.ws-table-wrap.ws-finishing-table-wrap thead th {
+  position:sticky;
+  top:0;
+  z-index:2;
+}
+.ws-table-wrap.ws-finishing-table-wrap tbody tr:last-child td {
+  border-bottom:1px solid #E5E7EB;
+}
+.ws-table-wrap {
+  width:100%;
+  overflow-x:auto;
+  background:#fff;
+}
+.ws-staff-panel {
+  background:#fff;
+  border:2px solid #FF0000;
+  border-radius:10px;
+  padding:16px;
+  width:min(620px,100%);
+  max-height:90vh;
+  overflow:auto;
+  box-shadow:0 8px 30px #0000004d;
+}
+.ws-staff-panel-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:10px;
+  border-bottom:1px solid #EEEEEE;
+  padding-bottom:8px;
+}
+.ws-staff-panel-head h3 {
+  margin:0;
+  font-size:17px;
+  color:red;
+}
+.ws-staff-panel-actions {
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  margin-top:12px;
+}
+.ws-staff-panel-actions .ws-btn-save,.ws-staff-panel-actions .ws-btn-cancel {
+  padding:7px 22px;
+  font-size:14px;
+}
+.ws-workers-card {
+  border:1px solid #E5E7EB;
+  border-radius:8px;
+  background:#fff;
+  padding:12px 14px;
+  width:min(360px,100%);
+}
+.ws-workers-title {
+  margin:0 0 10px;
+  background:#c62828;
+  color:#fff;
+  font-size:16px;
+  font-weight:700;
+  text-align:center;
+  border-radius:6px;
+  padding:6px 10px;
+}
+.ws-workers-error {
+  background:#fde2e2;
+  color:#b00000;
+  border:1px solid #F5C6C6;
+  border-radius:6px;
+  padding:7px 10px;
+  margin-bottom:10px;
+  font-size:13px;
+  font-weight:700;
+}
+.ws-workers-add {
+  display:flex;
+  gap:6px;
+  margin-bottom:10px;
+}
+.ws-workers-add input {
+  flex:1;
+  min-width:0;
+  border:1px solid #D1D5DB;
+  border-radius:4px;
+  padding:6px 8px;
+  font-size:13px;
+  font-family:inherit;
+}
+.ws-workers-list {
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  max-height:220px;
+  overflow-y:auto;
+}
+.ws-workers-empty {
+  margin:4px 0;
+  font-size:13px;
+  color:#6b7280;
+}
+.ws-workers-item {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  border:1px solid #E5E7EB;
+  border-radius:6px;
+  padding:6px 10px;
+}
+.ws-workers-name {
+  font-size:14px;
+  font-weight:700;
+  color:#111827;
+}
+.ws-workers-remove {
+  border:1px solid #D1D5DB;
+  border-radius:4px;
+  background:#f3f4f6;
+  color:#c62828;
+  font-size:12px;
+  font-weight:700;
+  padding:3px 10px;
+  cursor:pointer;
+}
+.ws-workers-remove.ws-workers-remove-on {
+  background:#c62828;
+  color:#fff;
+  border-color:#c62828;
+}
+.ws-workers-remove:disabled {
+  opacity:.55;
+  cursor:not-allowed;
+}
+.ws-workers-actions {
+  display:flex;
+  justify-content:flex-end;
+  margin-top:10px;
+}
+.ws-workers-actions .ws-btn-save {
+  padding:6px 20px;
+}
+.ws-workers-open {
+  background:#c62828;
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  padding:10px 22px;
+  font-size:14px;
+  font-weight:700;
+  cursor:pointer;
+}
+.ws-modal-overlay {
+  position:fixed;
+  inset:0;
+  background:#00000073;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:1300;
+  padding:16px;
+}
+.ws-modal {
+  background:#fff;
+  border:2px solid #C62828;
+  border-radius:10px;
+  padding:16px;
+  width:min(560px,100%);
+  max-height:90vh;
+  overflow:hidden;
+  box-shadow:0 8px 30px #0000004d;
+  display:flex;
+  flex-direction:column;
+}
+.ws-modal-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:10px;
+  border-bottom:1px solid #EEEEEE;
+  padding-bottom:8px;
+}
+.ws-modal-head h2 {
+  margin:0;
+  font-size:18px;
+  color:#c62828;
+}
+.ws-modal-close {
+  background:none;
+  border:none;
+  font-size:26px;
+  line-height:1;
+  cursor:pointer;
+  color:#c62828;
+  padding:0 6px;
+}
+.ws-modal-feedback {
+  margin-bottom:10px;
+}
+.ws-modal-error {
+  background:#fde2e2;
+  color:#b00000;
+  border:1px solid #F5C6C6;
+  border-radius:6px;
+  padding:7px 10px;
+  margin-bottom:8px;
+  font-size:13px;
+  font-weight:700;
+}
+.ws-modal-ok {
+  background:#e8f5e9;
+  color:#1b5e20;
+  border:1px solid #A5D6A7;
+  border-radius:6px;
+  padding:7px 10px;
+  margin-bottom:8px;
+  font-size:13px;
+  font-weight:700;
+}
+.ws-workers-toolbar {
+  margin-bottom:10px;
+}
+.ws-workers-add-btn {
+  background:#c62828;
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  padding:8px 18px;
+  font-size:14px;
+  font-weight:700;
+  cursor:pointer;
+}
+.ws-workers-add-btn:disabled {
+  opacity:.6;
+  cursor:not-allowed;
+}
+.ws-workers-table-wrap {
+  overflow:auto;
+  border:1px solid #E5E7EB;
+  border-radius:8px;
+}
+.ws-workers-table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+  background:#fff;
+}
+.ws-workers-table th,.ws-workers-table td {
+  border-bottom:1px solid #E5E7EB;
+  padding:8px 10px;
+  text-align:right;
+  white-space:nowrap;
+}
+.ws-workers-table thead th {
+  background:#f9fafb;
+  color:#111827;
+  position:sticky;
+  top:0;
+  z-index:2;
+}
+.ws-workers-table tbody tr:last-child td {
+  border-bottom:none;
+}
+.ws-workers-table .ws-worker-actions-cell {
+  display:flex;
+  gap:6px;
+}
+.ws-workers-table .ws-worker-actions-cell .ws-workers-remove {
+  padding:4px 12px;
+}
+.ws-management-modal {
+  max-width:calc(100vw - 32px);
+  max-height:85vh;
+  padding:24px;
+  overflow:hidden;
+}
+.ws-machines-modal {
+  width:min(800px,calc(100vw - 32px));
+}
+.ws-workers-modal {
+  width:min(880px,calc(100vw - 32px));
+}
+.ws-management-modal .ws-modal-head {
+  flex:0 0 auto;
+  padding-bottom:12px;
+  margin-bottom:14px;
+}
+.ws-management-modal .ws-modal-head h2 {
+  font-size:22px;
+}
+.ws-management-modal .ws-modal-close {
+  flex:0 0 auto;
+  align-self:center;
+  font-size:30px;
+  line-height:1;
+  padding:0 12px;
+  border-radius:8px;
+  background:#c62828;
+  color:#fff;
+}
+.ws-management-modal .ws-modal-close:hover:not(:disabled) {
+  background:#a81f1f;
+}
+.ws-management-modal .ws-modal-close:disabled {
+  opacity:.6;
+  cursor:not-allowed;
+}
+.ws-management-modal .ws-workers-table-wrap {
+  flex:1 1 auto;
+  min-height:0;
+  overflow-x:hidden;
+  overflow-y:auto;
+}
+.ws-management-modal .ws-workers-table {
+  width:100%;
+  min-width:0!important;
+  table-layout:fixed;
+  font-size:16px;
+}
+.ws-management-modal .ws-workers-table th,.ws-management-modal .ws-workers-table td {
+  padding:12px 10px;
+  height:48px;
+  white-space:normal;
+  word-break:break-word;
+  vertical-align:middle;
+}
+.ws-management-modal .ws-workers-table th {
+  font-size:16px;
+  font-weight:700;
+}
+.ws-machines-modal .ws-workers-table th:nth-child(1) {
+  width:44%;
+}
+.ws-machines-modal .ws-workers-table th:nth-child(2) {
+  width:22%;
+}
+.ws-machines-modal .ws-workers-table th:nth-child(3) {
+  width:34%;
+}
+.ws-management-modal .ws-workers-table .ws-worker-actions-cell {
+  display:table-cell;
+  text-align:center;
+}
+.ws-management-modal .ws-workers-empty {
+  font-size:16px;
+  text-align:center;
+}
+.ws-management-modal .ws-worker-disabled-badge {
+  display:inline-block;
+  margin-inline-start:8px;
+  font-size:13px;
+  padding:3px 10px;
+}
+.ws-management-modal .ws-workers-add-btn,.ws-management-modal .ws-btn-save,.ws-management-modal .ws-btn-cancel {
+  min-height:42px;
+  padding:0 24px;
+  border:none;
+  border-radius:8px;
+  background:#c62828;
+  color:#fff;
+  font-family:inherit;
+  font-size:16px;
+  font-weight:700;
+  white-space:nowrap;
+  cursor:pointer;
+}
+.ws-management-modal .ws-workers-add-btn:hover,.ws-management-modal .ws-btn-save:hover,.ws-management-modal .ws-btn-cancel:hover {
+  background:#a81f1f;
+}
+.ws-management-modal .ws-workers-add-btn:disabled,.ws-management-modal .ws-btn-save:disabled,.ws-management-modal .ws-btn-cancel:disabled {
+  opacity:.6;
+  cursor:not-allowed;
+}
+.ws-management-modal .ws-workers-remove,.ws-workers-modal .ws-workers-remove,.ws-machines-modal .ws-workers-remove {
+  min-height:42px;
+  padding:0 20px;
+  border:1px solid #C62828;
+  border-radius:8px;
+  background:#c62828;
+  color:#fff;
+  font-family:inherit;
+  font-size:16px;
+  font-weight:700;
+  white-space:nowrap;
+  cursor:pointer;
+}
+.ws-management-modal .ws-workers-remove:hover,.ws-workers-modal .ws-workers-remove:hover,.ws-machines-modal .ws-workers-remove:hover {
+  background:#a81f1f;
+  border-color:#a81f1f;
+}
+.ws-management-modal .ws-workers-remove:disabled,.ws-workers-modal .ws-workers-remove:disabled,.ws-machines-modal .ws-workers-remove:disabled {
+  opacity:.55;
+  cursor:not-allowed;
+}
+.ws-management-modal .ws-worker-field label {
+  font-size:16px;
+}
+.ws-management-modal .ws-worker-field input {
+  min-height:44px;
+  font-family:inherit;
+  font-size:16px;
+  padding:8px 10px;
+}
+.ws-machines-actions {
+  display:flex;
+  justify-content:flex-start;
+  gap:10px;
+  margin-top:16px;
+  padding-top:14px;
+  border-top:1px solid #EEEEEE;
+  flex:0 0 auto;
+}
+.md-modal-backdrop {
+  position:fixed;
+  inset:0;
+  background:#0006;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:1000;
+  padding:12px;
+}
+.md-modal {
+  background:#fff;
+  border-radius:8px;
+  padding:18px;
+  width:420px;
+  max-width:94vw;
+  max-height:90vh;
+  overflow-y:auto;
+  direction:rtl;
+  box-shadow:0 6px 24px #0000004d;
+}
+.md-modal-title {
+  margin:0 0 12px;
+  font-size:18px;
+  font-weight:700;
+}
+.md-modal-actions {
+  display:flex;
+  gap:8px;
+  justify-content:flex-end;
+  margin-top:12px;
+  flex-wrap:wrap;
+}
+.md-modal-status {
+  color:#b8860b;
+  font-weight:700;
+  font-size:14px;
+  margin-top:8px;
+}
+.dd-head {
+  cursor:move;
+  touch-action:none;
+  -webkit-user-select:none;
+  -moz-user-select:none;
+  user-select:none;
+}
+.dd-head>button,.dd-head>a,.dd-head>input,.dd-head>select {
+  cursor:pointer;
+  touch-action:auto;
+  -webkit-user-select:auto;
+  -moz-user-select:auto;
+  user-select:auto;
+}
+.ws-workers-modal .ws-workers-table th:nth-child(1) {
+  width:38%;
+}
+.ws-workers-modal .ws-workers-table th:nth-child(2) {
+  width:18%;
+}
+.ws-workers-modal .ws-workers-table th:nth-child(3) {
+  width:18%;
+}
+.ws-workers-modal .ws-workers-table th:nth-child(4) {
+  width:26%;
+}
+.ws-workers-modal .ws-workers-table th,.ws-workers-modal .ws-workers-table td {
+  padding:12px 14px;
+  min-height:48px;
+  white-space:nowrap;
+  word-break:normal;
+  overflow:visible;
+  vertical-align:middle;
+}
+.ws-workers-modal .ws-worker-name {
+  font-weight:700;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  line-height:1.4;
+}
+.ws-workers-modal .ws-worker-ident {
+  direction:ltr;
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:.2px;
+  white-space:nowrap;
+  word-break:keep-all;
+}
+.ws-workers-modal .ws-worker-actions-cell {
+  display:table-cell;
+  text-align:center;
+  white-space:nowrap;
+}
+.ws-workers-modal .ws-worker-actions-cell .ws-workers-remove+.ws-workers-remove {
+  margin-inline-start:8px;
+}
+.ws-workers-modal .ws-workers-toolbar {
+  flex:0 0 auto;
+  display:flex;
+  justify-content:flex-end;
+  margin-bottom:14px;
+}
+.ws-workers-modal .ws-worker-form {
+  flex:0 0 auto;
+  margin-bottom:14px;
+  padding:14px 16px;
+  background:#f9fafb;
+  border:1px solid #E5E7EB;
+  border-radius:10px;
+}
+.ws-workers-modal .ws-worker-form-actions {
+  flex:0 0 auto;
+  justify-content:flex-end;
+  margin-top:12px;
+}
+.md-modal-head {
+  flex:0 0 auto;
+  margin-bottom:12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+.md-modal-head .md-modal-title {
+  margin:0;
+}
+
+@media (max-width:640px) {
+  .ws-management-modal {
+    width:calc(100vw - 24px);
+    max-width:calc(100vw - 24px);
+    max-height:92vh;
+    padding:16px;
+    border-radius:12px;
+  }
+  .ws-management-modal .ws-modal-head h2 {
+    font-size:20px;
+  }
+  .ws-machines-modal .ws-workers-table th:nth-child(1) {
+    width:40%;
+  }
+  .ws-machines-modal .ws-workers-table th:nth-child(2) {
+    width:22%;
+  }
+  .ws-machines-modal .ws-workers-table th:nth-child(3) {
+    width:38%;
+  }
+  .ws-management-modal .ws-workers-table th,.ws-management-modal .ws-workers-table td {
+    padding:10px 6px;
+    font-size:15px;
+  }
+  .ws-management-modal .ws-workers-remove {
+    padding:0 12px;
+    font-size:15px;
+  }
+  .ws-management-modal .ws-workers-toolbar,.ws-management-modal .ws-machines-actions,.ws-management-modal .ws-worker-form-actions {
+    gap:8px;
+  }
+}
+
+@media (max-width:900px) {
+  .ws-workers-modal {
+    width:calc(100vw - 24px);
+    max-width:calc(100vw - 24px);
+    max-height:92vh;
+    padding:16px;
+    border-radius:12px;
+  }
+  .ws-workers-modal .ws-workers-table th,.ws-workers-modal .ws-workers-table td {
+    padding:10px 8px;
+    font-size:15px;
+  }
+  .ws-workers-modal .ws-worker-actions-cell .ws-workers-remove+.ws-workers-remove {
+    margin-inline-start:6px;
+  }
+  .ws-workers-modal .ws-workers-remove {
+    padding:0 12px;
+    font-size:15px;
+  }
+  .ws-management-modal .ws-workers-table-wrap {
+    overflow-x:auto;
+  }
+}
+
+/* ================================================================
+   Action-button colour override for the management windows.
+
+   The app-wide rule above is `:where(.app) button` followed by thirteen
+   `:not(.class)` exclusions, which gives it (0,13,1) specificity, and it
+   sets !important. Plain class selectors here cannot beat that. Repeating
+   the modal class plus `:root` lifts these selectors to (0,3,0)... which is
+   still lower, so the doubled class name is load-bearing: it wins because
+   it is both !important and higher specificity. Do not "simplify" these
+   selectors back to a single class.
+   ================================================================ */
+.ws-workers-modal .ws-workers-remove,
+.ws-machines-modal .ws-workers-remove,
+.ws-management-modal .ws-workers-remove,
+.ws-workers-modal .ws-workers-add-btn,
+.ws-workers-modal .ws-btn-save,
+.ws-workers-modal .ws-btn-cancel,
+.ws-management-modal .ws-workers-add-btn,
+.ws-management-modal .ws-btn-save,
+.ws-management-modal .ws-btn-cancel {
+  background-color: #C62828 !important;
+  border-color: #C62828 !important;
+  color: #FFFFFF !important;
+}
+
+.ws-workers-modal .ws-workers-remove:hover:not(:disabled),
+.ws-machines-modal .ws-workers-remove:hover:not(:disabled),
+.ws-management-modal .ws-workers-remove:hover:not(:disabled),
+.ws-workers-modal .ws-workers-add-btn:hover:not(:disabled),
+.ws-workers-modal .ws-btn-save:hover:not(:disabled),
+.ws-workers-modal .ws-btn-cancel:hover:not(:disabled),
+.ws-management-modal .ws-workers-add-btn:hover:not(:disabled),
+.ws-management-modal .ws-btn-save:hover:not(:disabled),
+.ws-management-modal .ws-btn-cancel:hover:not(:disabled) {
+  background-color: #A81F1F !important;
+  border-color: #A81F1F !important;
+}
+
+.ws-workers-modal button:disabled,
+.ws-management-modal button:disabled {
+  opacity: 0.55 !important;
+  color: #FFFFFF !important;
+}
+

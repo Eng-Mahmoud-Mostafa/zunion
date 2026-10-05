@@ -16,7 +16,7 @@ import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { activateMachine, createOrReactivateMachine, deactivateMachine, findMachineByName, listMachines, loadMachine, removeMachine, renameMachine } from "./machines.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions, updateTransaction } from "./customerAccounts.js";
-import { effectivePermissions, validatePermissions, type PermissionKey } from "./permissions.js";
+import { effectivePermissions, isReservedRoleName, roleUpdateRejection, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
 import { ensureSchema } from "./ensureSchema.js";
@@ -76,6 +76,14 @@ app.get("/api/health", async (_req, res) => {
 
 const passwordCodeRate = new Map<string, number[]>();
 const resetAttemptRate = new Map<string, number[]>();
+
+/**
+ * Bulk password reset. The password lives only here and is never returned to a
+ * client; the confirmation phrase is deliberately password-free so the secret
+ * cannot leak through prompts, UI copy, logs, or network payloads.
+ */
+const BULK_RESET_PASSWORD = process.env.BULK_RESET_PASSWORD || "1234";
+const BULK_RESET_CONFIRMATION = "RESET";
 const upload = multer({
   dest: config.uploadDir,
   limits: { fileSize: 10 * 1024 * 1024, files: 5 },
@@ -374,6 +382,79 @@ async function loadProfileById(id: string) {
     console.warn("Local users id lookup failed.", error instanceof Error ? error.message : error);
   }
   return null;
+}
+
+/**
+ * Counts active Master accounts. Fails closed: if neither data source can be
+ * read we cannot prove a Master would remain, so the caller must abort rather
+ * than assume the operation is safe.
+ */
+async function countActiveMasters(excludeId?: string): Promise<number> {
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      const rows = await supabaseRest<AppUser[]>("users_profile?is_active=eq.true&role=eq.Master&select=id");
+      return rows.filter((row) => (excludeId ? row.id !== excludeId : true)).length;
+    } catch (error) {
+      console.warn("Supabase users_profile Master count failed; trying local users table fallback.", error instanceof Error ? error.message : error);
+    }
+  }
+  try {
+    const { rows } = await query<{ n: number }>(`select count(*)::int as n from users where is_active = true and role::text = 'Master'`);
+    const total = rows[0]?.n ?? 0;
+    if (!excludeId) return total;
+    const target = await query<AppUser>(`select role::text as role, is_active from users where id = $1 limit 1`, [excludeId]);
+    const row = target.rows[0];
+    if (row && row.role === "Master" && row.is_active !== false) return Math.max(total - 1, 0);
+    return total;
+  } catch (error) {
+    console.warn("Local users Master count failed.", error instanceof Error ? error.message : error);
+  }
+  throw guardedError("تعذر التحقق من حسابات Master المتبقية، تم إيقاف العملية مؤقتًا", 503);
+}
+
+function guardedError(message: string, status = 409) {
+  return Object.assign(new Error(message), { status });
+}
+
+type RoleRow = { id: string; name: string; status?: string | null; permissions?: string[] | null; is_system_role?: boolean | null };
+
+/** Reads a role from Supabase with the same local-table fallback as GET /api/roles. */
+async function loadRoleById(id: string): Promise<RoleRow | null> {
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      const rows = await supabaseRest<RoleRow[]>(`roles?id=eq.${encodeURIComponent(id)}&select=id,name,status,permissions,is_system_role&limit=1`);
+      if (rows[0]) return rows[0];
+    } catch (error) {
+      console.warn("Supabase role read failed; trying local roles table fallback.", error instanceof Error ? error.message : error);
+    }
+  }
+  try {
+    const { rows } = await query<RoleRow>(`select id, name, status, permissions, is_system_role from roles where id = $1 limit 1`, [id]);
+    return rows[0] ?? null;
+  } catch (error) {
+    console.warn("Local role read failed.", error instanceof Error ? error.message : error);
+  }
+  return null;
+}
+
+async function assertMasterNotOrphaned(targetId: string, nextRole?: string, nextActive?: boolean) {
+  const profile = await loadProfileById(targetId);
+  if (!profile) throw guardedError("تعذر العثور على حساب المستخدم", 404);
+  const isActiveMaster = profile.role === "Master" && profile.is_active !== false;
+  if (!isActiveMaster) return profile;
+  const dropsMaster = (nextRole !== undefined && nextRole !== "Master") || nextActive === false;
+  if (!dropsMaster) return profile;
+  const remaining = await countActiveMasters(targetId);
+  if (remaining <= 0) throw guardedError("لا يمكن تعطيل آخر حساب Master فعال في النظام");
+  return profile;
+}
+
+function sendRouteError(res: any, error: unknown, fallbackMessage: string) {
+  const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 500;
+  const message = error instanceof Error && error.message ? error.message : fallbackMessage;
+  const payload: Record<string, unknown> = { message };
+  if (status >= 500) payload.details = error instanceof Error ? error.message : String(error);
+  return res.status(status).json(payload);
 }
 
 async function persistProfilePassword(profile: AppUser, password: string, mustChangePassword: boolean, tokenVersion = nextTokenVersion(profile.token_version)) {
@@ -779,6 +860,12 @@ app.patch("/api/users/:id", requireAppPermission("users.edit"), async (req, res)
   const parsed = userAdminSchema.omit({ password: true }).partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "بيانات المستخدم غير صحيحة", issues: parsed.error.issues });
   try {
+    if (id === req.user!.id) throw guardedError("لا يمكنك تعديل حسابك الحالي", 403);
+    await assertMasterNotOrphaned(
+      id,
+      parsed.data.roleId,
+      parsed.data.status ? parsed.data.status === "active" : undefined,
+    );
     if (parsed.data.permissionOverrides) {
       validatePermissions(parsed.data.permissionOverrides.allow);
       validatePermissions(parsed.data.permissionOverrides.deny);
@@ -794,7 +881,7 @@ app.patch("/api/users/:id", requireAppPermission("users.edit"), async (req, res)
     await audit(null, parsed.data.roleId ? "USER_ROLE_CHANGED" : "USER_UPDATED", "users_profile", id, undefined, body);
     return res.json({ user: rows });
   } catch (error) {
-    return res.status(500).json({ message: "تعذر تحديث المستخدم", details: error instanceof Error ? error.message : String(error) });
+    return sendRouteError(res, error, "تعذر تحديث المستخدم");
   }
 });
 
@@ -815,13 +902,15 @@ app.post("/api/users/:id/reset-password", requireAppPermission("users.resetPassw
 
 app.post("/api/users/reset-all-passwords", requireAppPermission("users.resetAllPasswords"), async (req, res) => {
   const session = loadAppSessionCookie(req) as { username?: string; role?: string } | null;
-  const parsed = z.object({ confirmation: z.literal("RESET 1234") }).safeParse(req.body);
+  // The confirmation is a neutral phrase so the reset password is never sent
+  // from, typed into, or displayed by the client.
+  const parsed = z.object({ confirmation: z.literal(BULK_RESET_CONFIRMATION) }).safeParse(req.body);
   if (!session || session.role !== "Master") return res.status(403).json({ message: "غير مصرح لك بتنفيذ هذا الإجراء" });
   if (!parsed.success) return res.status(400).json({ message: "قيمة التأكيد غير صحيحة" });
   try {
     const salt = randomToken(12);
     const tokenVersion = nextTokenVersion();
-    const password_hash = passwordHash("1234", salt);
+    const password_hash = passwordHash(BULK_RESET_PASSWORD, salt);
     let affectedUsers = 0;
     if (config.supabaseUrl && config.supabaseServiceKey) {
       const activeUsers = await supabaseRest<Array<{ id: string; username: string }>>("users_profile?is_active=eq.true&select=id,username");
@@ -868,22 +957,28 @@ app.patch("/api/users/:id/status", requireAppPermission("users.deactivate"), asy
   const parsed = z.object({ status: z.enum(["active", "inactive"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "حالة المستخدم غير صحيحة" });
   try {
+    if (id === req.user!.id) throw guardedError("لا يمكنك إيقاف حسابك الحالي", 403);
+    await assertMasterNotOrphaned(id, undefined, parsed.data.status === "active");
     await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ is_active: parsed.data.status === "active" }) });
     await audit(null, parsed.data.status === "active" ? "USER_ACTIVATED" : "USER_DEACTIVATED", "users_profile", id, undefined, parsed.data);
     return res.json({ ok: true });
   } catch (error) {
-    return res.status(500).json({ message: "تعذر تغيير حالة المستخدم", details: error instanceof Error ? error.message : String(error) });
+    return sendRouteError(res, error, "تعذر تغيير حالة المستخدم");
   }
 });
 
 app.delete("/api/users/:id", requireAppPermission("users.delete"), async (req, res) => {
   const id = param(req.params.id);
   try {
+    if (id === req.user!.id) throw guardedError("لا يمكنك حذف حسابك الحالي", 403);
+    await assertMasterNotOrphaned(id, undefined, false);
     await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
     await audit(null, "USER_DELETED", "users_profile", id);
     return res.json({ ok: true });
   } catch (error) {
-    return res.status(409).json({ message: "لا يمكن حذف هذا المستخدم لوجود بيانات مرتبطة به", details: error instanceof Error ? error.message : String(error) });
+    const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 409;
+    const message = error instanceof Error && error.message ? error.message : "تعذر حذف المستخدم";
+    return res.status(status).json({ message, details: error instanceof Error ? error.message : String(error) });
   }
 });
 
@@ -907,8 +1002,13 @@ app.post("/api/roles", requireAppPermission("roles.create"), async (req, res) =>
   if (!parsed.success) return res.status(400).json({ message: "بيانات الدور غير صحيحة", issues: parsed.error.issues });
   try {
     const permissions = validatePermissions(parsed.data.permissions);
-    if (parsed.data.name.trim() !== "Master" && permissions.includes("users.resetAllPasswords")) {
+    const requestedName = parsed.data.name.trim();
+    if (requestedName !== "Master" && permissions.includes("users.resetAllPasswords")) {
       return res.status(403).json({ message: "صلاحية إعادة تعيين كل كلمات المرور محمية لدور Master فقط" });
+    }
+    // A second role called "Master" could shadow the real one in role lookups.
+    if (isReservedRoleName(requestedName)) {
+      return res.status(409).json({ message: "اسم الدور Master محجوز ولا يمكن استخدامه لدور جديد" });
     }
     const rows = await supabaseRest("roles", { method: "POST", body: JSON.stringify([{ name: parsed.data.name.trim(), description: parsed.data.description, status: parsed.data.status, permissions, is_system_role: false }]) });
     await audit(null, "ROLE_CREATED", "roles", undefined, undefined, { name: parsed.data.name });
@@ -923,24 +1023,33 @@ app.patch("/api/roles/:id", requireAppPermission("roles.edit"), async (req, res)
   const parsed = roleAdminSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "بيانات الدور غير صحيحة", issues: parsed.error.issues });
   try {
+    const current = await loadRoleById(id);
+    if (!current) throw guardedError("تعذر العثور على الدور", 404);
+
     const body: Record<string, unknown> = {};
-    if (parsed.data.name) body.name = parsed.data.name.trim();
+    // A blank submitted name must never overwrite the stored one.
+    if (parsed.data.name && parsed.data.name.trim()) body.name = parsed.data.name.trim();
     if (typeof parsed.data.description === "string") body.description = parsed.data.description;
     if (parsed.data.status) body.status = parsed.data.status;
-    if (parsed.data.permissions) {
-      const permissions = validatePermissions(parsed.data.permissions);
-      const currentRows = await supabaseRest<Array<{ name: string }>>(`roles?id=eq.${encodeURIComponent(id)}&select=name&limit=1`);
-      const roleName = String(body.name || currentRows[0]?.name || "");
-      if (roleName !== "Master" && permissions.includes("users.resetAllPasswords")) {
-        return res.status(403).json({ message: "صلاحية إعادة تعيين كل كلمات المرور محمية لدور Master فقط" });
-      }
-      body.permissions = permissions;
-    }
+
+    const nextPermissions = parsed.data.permissions ? validatePermissions(parsed.data.permissions) : null;
+
+    // Master is decided from the STORED name, never from the incoming one, so
+    // renaming the role cannot slip past the protections below.
+    const rejection = roleUpdateRejection({
+      currentName: current.name,
+      nextName: parsed.data.name,
+      status: parsed.data.status,
+      permissions: nextPermissions ?? undefined,
+    });
+    if (rejection) throw guardedError(rejection, 403);
+    if (nextPermissions) body.permissions = nextPermissions;
+
     await supabaseRest(`roles?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
-    await audit(null, parsed.data.permissions ? "ROLE_PERMISSIONS_CHANGED" : "ROLE_UPDATED", "roles", id, undefined, body);
+    await audit(null, nextPermissions ? "ROLE_PERMISSIONS_CHANGED" : "ROLE_UPDATED", "roles", id, undefined, body);
     return res.json({ ok: true });
   } catch (error) {
-    return res.status(500).json({ message: "تعذر تحديث الدور", details: error instanceof Error ? error.message : String(error) });
+    return sendRouteError(res, error, "تعذر تحديث الدور");
   }
 });
 
@@ -951,7 +1060,9 @@ app.delete("/api/roles/:id", requireAppPermission("roles.delete"), async (req, r
     await audit(null, "ROLE_DELETED", "roles", id);
     return res.json({ ok: true });
   } catch (error) {
-    return res.status(409).json({ message: "لا يمكن حذف دور مرتبط بمستخدمين", details: error instanceof Error ? error.message : String(error) });
+    const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 409;
+    const message = error instanceof Error && error.message ? error.message : "لا يمكن حذف دور مرتبط بمستخدمين";
+    return res.status(status).json({ message, details: error instanceof Error ? error.message : String(error) });
   }
 });
 

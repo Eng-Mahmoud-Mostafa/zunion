@@ -60,6 +60,8 @@ import {
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
 import CustomerAccountsPage from "./components/CustomerAccountsPage";
+import { DraggableDialog } from "./components/DraggableDialog";
+import SettingsPage, { type SettingsCapabilities } from "./components/SettingsPage";
 import { formatDateArabic, formatDateTimeCairo, formatDateTimeEnglish, formatMoney, formatNumber, normalizeDigitsToEnglish } from "./utils/formatters";
 import {
   getDashboardStats,
@@ -73,7 +75,7 @@ import {
   type OperationStats,
   type ReportsData,
 } from "./services/statsService";
-import { allPermissionKeys, masterProtectedPermissions, roleDefaultPermissions, type PermissionKey } from "../shared/permissions";
+import { allPermissionKeys, roleDefaultPermissions, type PermissionKey } from "../shared/permissions";
 
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
@@ -449,10 +451,6 @@ function loadManagedUsers(): ManagedUser[] {
 
 function saveManagedUsers(users: ManagedUser[]) {
   localStorage.setItem(managedUsersKey, JSON.stringify(users));
-}
-
-function activeMasterCount(users = loadManagedUsers()) {
-  return users.filter((user) => user.role === "Master" && user.status === "active").length;
 }
 
 function loadLocalPasswords(): Record<string, { password: string; mustChangePassword: boolean }> {
@@ -5368,75 +5366,77 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
       return String(a.active ? 0 : 1).localeCompare(String(b.active ? 0 : 1));
     });
     return (
-      <div className="ws-modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) closeMachinesModal(); }}>
-        <div className="ws-modal ws-machines-modal" role="dialog" aria-modal="true">
-          <div className="ws-modal-head">
-            <h2>الماكينات</h2>
-            <button type="button" className="ws-modal-close" aria-label="إغلاق" disabled={machinesSaving} onClick={closeMachinesModal}>×</button>
-          </div>
-          <div className="ws-modal-feedback">
-            {machinesError && <div className="ws-modal-error">{machinesError}</div>}
-          </div>
-          {!machinesAddOpen && (
-            <div className="ws-workers-toolbar">
-              <button type="button" className="ws-workers-add-btn" disabled={machinesSaving} onClick={() => { setMachinesError(""); setMachinesAddOpen(true); }}>
-                إضافة مكنه
-              </button>
-            </div>
-          )}
-          {machinesAddOpen && (
-            <div className="ws-worker-form">
-              <div className="ws-worker-field">
-                <label>اسم المكنة</label>
-                <input autoFocus value={machinesAddName} onChange={(event) => setMachinesAddName(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); stageAddMachine(); } }} />
-              </div>
-              <div className="ws-worker-form-actions">
-                <button type="button" className="ws-btn-save" disabled={machinesSaving} onClick={stageAddMachine}>إضافة</button>
-                <button type="button" className="ws-btn-cancel" disabled={machinesSaving} onClick={() => { setMachinesAddOpen(false); setMachinesAddName(""); setMachinesError(""); }}>إلغاء</button>
-              </div>
-            </div>
-          )}
-          <div className="ws-workers-table-wrap">
-            <table className="ws-workers-table">
-              <thead>
-                <tr>
-                  <th>الاسم</th>
-                  <th>الحالة</th>
-                  <th>الإجراءات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.length === 0 && (
-                  <tr><td colSpan={3} className="ws-workers-empty">لا توجد ماكينات بعد</td></tr>
-                )}
-                {sorted.map((row) => (
-                  <tr key={row.id ?? row.name} className={row.remove ? "ws-worker-inactive" : !row.active && !row.isNew ? "ws-worker-inactive" : undefined}>
-                    <td>
-                      {row.name}
-                      {row.remove && <span className="ws-worker-disabled-badge">سيتم مسحها</span>}
-                      {!row.active && !row.isNew && !row.remove && <span className="ws-worker-disabled-badge">معطّلة</span>}
-                      {row.isNew && <span className="ws-worker-disabled-badge">جديدة</span>}
-                    </td>
-                    <td>{row.isNew ? "جديدة (لم تُحفظ بعد)" : row.active ? "فعالة" : "معطّلة"}</td>
-                    <td className="ws-worker-actions-cell">
-                      <button type="button" className="ws-workers-remove" disabled={machinesSaving} onClick={() => toggleRemoveMachine(row.name)}>
-                        {row.remove ? "تراجع" : "مسح مكنه"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="ws-worker-form-actions ws-machines-actions">
-            <button type="button" className="ws-btn-save" disabled={machinesSaving} onClick={() => void saveMachines()}>
-              {machinesSaving ? "جارِ الحفظ…" : "حفظ"}
-            </button>
-            <button type="button" className="ws-btn-cancel" disabled={machinesSaving} onClick={closeMachinesModal}>إلغاء</button>
-          </div>
+      <DraggableDialog
+        overlayClassName="ws-modal-overlay"
+        dialogClassName="ws-modal ws-management-modal ws-machines-modal"
+        headClassName="ws-modal-head"
+        closeDisabled={machinesSaving}
+        ariaLabel="الماكينات"
+        onClose={closeMachinesModal}
+        title={<h2>الماكينات</h2>}
+      >
+        <div className="ws-modal-feedback">
+          {machinesError && <div className="ws-modal-error">{machinesError}</div>}
         </div>
-      </div>
+        {!machinesAddOpen && (
+          <div className="ws-workers-toolbar">
+            <button type="button" className="ws-workers-add-btn" disabled={machinesSaving} onClick={() => { setMachinesError(""); setMachinesAddOpen(true); }}>
+              إضافة مكنه
+            </button>
+          </div>
+        )}
+        {machinesAddOpen && (
+          <div className="ws-worker-form">
+            <div className="ws-worker-field">
+              <label>اسم المكنة</label>
+              <input autoFocus value={machinesAddName} onChange={(event) => setMachinesAddName(event.target.value)}
+                onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); stageAddMachine(); } }} />
+            </div>
+            <div className="ws-worker-form-actions">
+              <button type="button" className="ws-btn-save" disabled={machinesSaving} onClick={stageAddMachine}>إضافة</button>
+              <button type="button" className="ws-btn-cancel" disabled={machinesSaving} onClick={() => { setMachinesAddOpen(false); setMachinesAddName(""); setMachinesError(""); }}>إلغاء</button>
+            </div>
+          </div>
+        )}
+        <div className="ws-workers-table-wrap">
+          <table className="ws-workers-table">
+            <thead>
+              <tr>
+                <th>الاسم</th>
+                <th>الحالة</th>
+                <th>الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.length === 0 && (
+                <tr><td colSpan={3} className="ws-workers-empty">لا توجد ماكينات بعد</td></tr>
+              )}
+              {sorted.map((row) => (
+                <tr key={row.id ?? row.name} className={row.remove ? "ws-worker-inactive" : !row.active && !row.isNew ? "ws-worker-inactive" : undefined}>
+                  <td>
+                    {row.name}
+                    {row.remove && <span className="ws-worker-disabled-badge">سيتم مسحها</span>}
+                    {!row.active && !row.isNew && !row.remove && <span className="ws-worker-disabled-badge">معطّلة</span>}
+                    {row.isNew && <span className="ws-worker-disabled-badge">جديدة</span>}
+                  </td>
+                  <td>{row.isNew ? "جديدة (لم تُحفظ بعد)" : row.active ? "فعالة" : "معطّلة"}</td>
+                  <td className="ws-worker-actions-cell">
+                    <button type="button" className="ws-workers-remove" disabled={machinesSaving} onClick={() => toggleRemoveMachine(row.name)}>
+                      {row.remove ? "تراجع" : "مسح مكنه"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="ws-worker-form-actions ws-machines-actions">
+          <button type="button" className="ws-btn-save" disabled={machinesSaving} onClick={() => void saveMachines()}>
+            {machinesSaving ? "جارِ الحفظ…" : "حفظ"}
+          </button>
+          <button type="button" className="ws-btn-cancel" disabled={machinesSaving} onClick={closeMachinesModal}>إلغاء</button>
+        </div>
+      </DraggableDialog>
     );
   }
 
@@ -5448,9 +5448,15 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const selectedOrder = selectedOrderId ? orderById.get(selectedOrderId) : undefined;
     const positionOptions = modal.machine ? Array.from({ length: (byMachine[modal.machine]?.size ?? 0) + 1 }, (_, index) => index + 1) : [];
     return (
-      <div className="md-modal-backdrop" onClick={closeModal}>
-        <div className="md-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 className="md-modal-title">{modal.machine ? `إضافة أوردر إلى ${modal.machine}` : "توزيع أوردر على المكن"}</h3>
+      <DraggableDialog
+        overlayClassName="md-modal-backdrop"
+        dialogClassName="md-modal"
+        headClassName="md-modal-head"
+        showCloseButton={false}
+        ariaLabel={modal.machine ? `إضافة أوردر إلى ${modal.machine}` : "توزيع أوردر على المكن"}
+        onClose={closeModal}
+        title={<h3 className="md-modal-title">{modal.machine ? `إضافة أوردر إلى ${modal.machine}` : "توزيع أوردر على المكن"}</h3>}
+      >
           <input className="md-search-input" autoFocus placeholder="ابحث برقم الأوردر…" value={searchQuery}
             onChange={(e) => { setSearchQuery(e.target.value); setSelectedOrderId(null); }} />
           <div className="md-search-list">
@@ -5489,8 +5495,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
             <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeModal}>إلغاء</button>
           </div>
           {busy && <div className="md-modal-status">جارِ الحفظ…</div>}
-        </div>
-      </div>
+      </DraggableDialog>
     );
   }
 
@@ -5502,9 +5507,15 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const index = queue.findIndex((item) => item.id === assignment.id);
     const order = orderById.get(assignment.order_id);
     return (
-      <div className="md-modal-backdrop" onClick={closeModal}>
-        <div className="md-modal" onClick={(e) => e.stopPropagation()}>
-          <h3 className="md-modal-title">تعديل توزيع المكن</h3>
+      <DraggableDialog
+        overlayClassName="md-modal-backdrop"
+        dialogClassName="md-modal"
+        headClassName="md-modal-head"
+        showCloseButton={false}
+        ariaLabel="تعديل توزيع المكن"
+        onClose={closeModal}
+        title={<h3 className="md-modal-title">تعديل توزيع المكن</h3>}
+      >
           <div className="md-edit-order">
             <div className="md-line md-line-num">{order?.order_number ?? assignment.order_id}</div>
             <div className="md-line">{order?.order_type || order?.productName || ""}</div>
@@ -5534,8 +5545,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
             <button type="button" className="md-btn md-btn-open" disabled={busy} onClick={() => onOrderClick?.(order.order_number)}>فتح الأوردر</button>
           )}
           {busy && <div className="md-modal-status">جارِ الحفظ…</div>}
-        </div>
-      </div>
+      </DraggableDialog>
     );
   }
 
@@ -6399,7 +6409,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       { key: "worker", label: "اسم العامل", cls: "ws-hd" },
       { key: "problem", label: "مشكله", cls: "ws-hd" },
       { key: "done", label: "انتهى", cls: "ws-hd ws-hd-end" },
-      { key: "ready", label: "شغل جاهز", cls: "ws-hd" },
     ];
 
     return (
@@ -6415,7 +6424,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={11} />}
+              {rows.length === 0 && <EmptyRow colSpan={10} />}
               {rows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
@@ -6466,9 +6475,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                       <button type="button" className="ws-cell-edit ws-hd-end" disabled={Boolean(cellSaving[`${row.id}:finishing`])} onClick={() => saveFinishingCell(row.id, { finishing_status: "done", work_stage: "completed", status: "READY" })}>إنهاء</button>
                     )}
                     {finishingCellFeedback(row.id)}
-                  </td>
-                  <td className="ws-cell-action">
-                    <span className={listBadgeClass(row.ready ? "جاهز" : "غير جاهز")}>{row.ready ? "جاهز" : "غير جاهز"}</span>
                   </td>
                 </tr>
               ))}
@@ -6655,13 +6661,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       const allWorkers = Array.from(new Set([...workerNameOptions(), ...(current.operationWorkers ?? [])])).filter((name) => name.trim().length > 0);
       const allSupervisors = Array.from(new Set([...supervisorNameOptions(), ...(current.operationSupervisors ?? [])])).filter((name) => name.trim().length > 0);
       return (
-        <div className="ws-staff-overlay" onClick={(event) => { if (event.target === event.currentTarget) setStaffOpenId(null); }}>
-          <div className="ws-staff-panel">
-            <div className="ws-staff-panel-head">
-              <h3>تفاصيل الأوردر رقم {current.order_number}</h3>
-              <button type="button" className="ws-staff-close" aria-label="إغلاق" onClick={() => setStaffOpenId(null)}>×</button>
-            </div>
-            <div className="ws-staff-meta">
+        <DraggableDialog
+          overlayClassName="ws-staff-overlay"
+          dialogClassName="ws-staff-panel"
+          headClassName="ws-staff-panel-head"
+          closeClassName="ws-staff-close"
+          ariaLabel={`تفاصيل الأوردر رقم ${current.order_number}`}
+          onClose={() => setStaffOpenId(null)}
+          title={<h3>تفاصيل الأوردر رقم {current.order_number}</h3>}
+        >
+          <div className="ws-staff-meta">
               <span><strong>العميل:</strong> {current.client_name}</span>
               <span><strong>الطرف:</strong> {current.source_person}</span>
               <span><strong>النوع:</strong> {current.order_type || current.productName || ""}</span>
@@ -6706,8 +6715,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </button>
               <button type="button" className="ws-btn-cancel" onClick={() => setStaffOpenId(null)}>إلغاء</button>
             </div>
-          </div>
-        </div>
+        </DraggableDialog>
       );
     }
 
@@ -6822,80 +6830,81 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     if (!workersDept) return null;
     const departmentWorkers = workersRegistry.filter((worker) => worker.department === workersDept);
     return (
-      <div className="ws-modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) closeWorkersModal(); }}>
-        <div className="ws-modal" role="dialog" aria-modal="true">
-          <div className="ws-modal-head">
-            <h2>عمال {workerDepartmentLabel(workersDept)}</h2>
-            <button type="button" className="ws-modal-close" aria-label="إغلاق" onClick={closeWorkersModal}>×</button>
-          </div>
-          <div className="ws-modal-feedback">
-            {workersError && <div className="ws-modal-error">{workersError}</div>}
-            {workersFeedback && <div className="ws-modal-ok">{workersFeedback}</div>}
-          </div>
-          {canManageWorkers && (
-            <div className="ws-workers-toolbar">
-              <button type="button" className="ws-workers-add-btn" disabled={workersSaving || workerForm !== null} onClick={() => openWorkerForm()}>
-                إضافة عامل
-              </button>
-            </div>
-          )}
-          {canManageWorkers && workerForm && (
-            <div className="ws-worker-form">
-              <div className="ws-worker-field">
-                <label>الاسم</label>
-                <input value={workerForm.name} onChange={(event) => setWorkerForm({ ...workerForm, name: event.target.value })} />
-              </div>
-              <div className="ws-worker-field">
-                <label>رقم البطاقة</label>
-                <input type="text" inputMode="numeric" dir="ltr" value={workerForm.card_id} onChange={(event) => setWorkerForm({ ...workerForm, card_id: event.target.value })} />
-              </div>
-              <div className="ws-worker-field">
-                <label>رقم التليفون</label>
-                <input type="text" inputMode="tel" dir="ltr" value={workerForm.phone} onChange={(event) => setWorkerForm({ ...workerForm, phone: event.target.value })} />
-              </div>
-              <div className="ws-worker-form-actions">
-                <button type="button" className="ws-btn-save" disabled={workersSaving} onClick={saveWorkerForm}>
-                  {workersSaving ? "جارِ الحفظ…" : "حفظ"}
-                </button>
-                <button type="button" className="ws-btn-cancel" disabled={workersSaving} onClick={() => setWorkerForm(null)}>إلغاء</button>
-              </div>
-            </div>
-          )}
-          <div className="ws-workers-table-wrap">
-            <table className="ws-workers-table">
-              <thead>
-                <tr>
-                  <th>الاسم</th>
-                  <th>رقم البطاقة</th>
-                  <th>رقم التليفون</th>
-                  <th>الإجراءات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {departmentWorkers.length === 0 && (
-                  <tr><td colSpan={4} className="ws-workers-empty">لا يوجد عمال بعد</td></tr>
-                )}
-                {departmentWorkers.map((worker) => (
-                  <tr key={worker.id} className={worker.active ? undefined : "ws-worker-inactive"}>
-                    <td>{worker.name}{!worker.active && <span className="ws-worker-disabled-badge">معطّل</span>}</td>
-                    <td dir="ltr">{worker.card_id || "—"}</td>
-                    <td dir="ltr">{worker.phone || "—"}</td>
-                    <td className="ws-worker-actions-cell">
-                      {canManageWorkers && (
-                        <>
-                          <button type="button" className="ws-workers-remove" disabled={workersSaving} onClick={() => openWorkerForm(worker)}>تعديل</button>
-                          <button type="button" className="ws-workers-remove" disabled={workersSaving || !worker.active} onClick={() => removeWorker(worker)}>مسح</button>
-                        </>
-                      )}
-                      {!canManageWorkers && <span className="ws-workers-empty">—</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <DraggableDialog
+        overlayClassName="ws-modal-overlay"
+        dialogClassName="ws-modal ws-management-modal ws-workers-modal"
+        headClassName="ws-modal-head"
+        ariaLabel={`عمال ${workerDepartmentLabel(workersDept)}`}
+        onClose={closeWorkersModal}
+        title={<h2>عمال {workerDepartmentLabel(workersDept)}</h2>}
+      >
+        <div className="ws-modal-feedback">
+          {workersError && <div className="ws-modal-error">{workersError}</div>}
+          {workersFeedback && <div className="ws-modal-ok">{workersFeedback}</div>}
         </div>
-      </div>
+        {canManageWorkers && (
+          <div className="ws-workers-toolbar">
+            <button type="button" className="ws-workers-add-btn" disabled={workersSaving || workerForm !== null} onClick={() => openWorkerForm()}>
+              إضافة عامل
+            </button>
+          </div>
+        )}
+        {canManageWorkers && workerForm && (
+          <div className="ws-worker-form">
+            <div className="ws-worker-field">
+              <label>الاسم</label>
+              <input value={workerForm.name} onChange={(event) => setWorkerForm({ ...workerForm, name: event.target.value })} />
+            </div>
+            <div className="ws-worker-field">
+              <label>رقم البطاقة</label>
+              <input type="text" inputMode="numeric" dir="ltr" value={workerForm.card_id} onChange={(event) => setWorkerForm({ ...workerForm, card_id: event.target.value })} />
+            </div>
+            <div className="ws-worker-field">
+              <label>رقم التليفون</label>
+              <input type="text" inputMode="tel" dir="ltr" value={workerForm.phone} onChange={(event) => setWorkerForm({ ...workerForm, phone: event.target.value })} />
+            </div>
+            <div className="ws-worker-form-actions">
+              <button type="button" className="ws-btn-save" disabled={workersSaving} onClick={saveWorkerForm}>
+                {workersSaving ? "جارِ الحفظ…" : "حفظ"}
+              </button>
+              <button type="button" className="ws-btn-cancel" disabled={workersSaving} onClick={() => setWorkerForm(null)}>إلغاء</button>
+            </div>
+          </div>
+        )}
+        <div className="ws-workers-table-wrap">
+          <table className="ws-workers-table">
+            <thead>
+              <tr>
+                <th>الاسم</th>
+                <th>رقم البطاقة</th>
+                <th>رقم التليفون</th>
+                <th>الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {departmentWorkers.length === 0 && (
+                <tr><td colSpan={4} className="ws-workers-empty">لا يوجد عمال بعد</td></tr>
+              )}
+              {departmentWorkers.map((worker) => (
+                <tr key={worker.id} className={worker.active ? undefined : "ws-worker-inactive"}>
+                  <td className="ws-worker-name">{worker.name}{!worker.active && <span className="ws-worker-disabled-badge">معطّل</span>}</td>
+                  <td className="ws-worker-ident" dir="ltr">{worker.card_id || "—"}</td>
+                  <td className="ws-worker-ident" dir="ltr">{worker.phone || "—"}</td>
+                  <td className="ws-worker-actions-cell">
+                    {canManageWorkers && (
+                      <>
+                        <button type="button" className="ws-workers-remove" disabled={workersSaving} onClick={() => openWorkerForm(worker)}>تعديل</button>
+                        <button type="button" className="ws-workers-remove" disabled={workersSaving || !worker.active} onClick={() => removeWorker(worker)}>مسح</button>
+                      </>
+                    )}
+                    {!canManageWorkers && <span className="ws-workers-empty">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </DraggableDialog>
     );
   }
 
@@ -7434,501 +7443,6 @@ function excelDate(value: string | number) {
     return date ? `${date.y}-${String(date.m).padStart(2, "0")}-${String(date.d).padStart(2, "0")}` : "";
   }
   return String(value || "").slice(0, 10);
-}
-
-type ServerUserRow = {
-  id: string;
-  username: string;
-  full_name?: string;
-  email?: string;
-  role?: string;
-  is_active?: boolean;
-  must_change_password?: boolean;
-  permission_overrides?: PermissionOverride;
-  created_at?: string;
-  last_login_at?: string;
-};
-
-type ServerRoleRow = {
-  id: string;
-  name: string;
-  description?: string;
-  status?: "active" | "inactive";
-  permissions?: PermissionKey[];
-  is_system_role?: boolean;
-  created_at?: string;
-  updated_at?: string;
-};
-
-async function settingsRequest<T>(url: string, init: RequestInit = {}) {
-  const response = await fetch(url, {
-    ...init,
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...init.headers },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.message || payload.error || "تعذر حفظ بيانات الإعدادات");
-  return payload as T;
-}
-
-function normalizePermissionOverride(value?: PermissionOverride): PermissionOverride {
-  return {
-    allow: (value?.allow || []).filter((key): key is PermissionKey => allPermissionKeys.includes(key as PermissionKey)),
-    deny: (value?.deny || []).filter((key): key is PermissionKey => allPermissionKeys.includes(key as PermissionKey)),
-  };
-}
-
-function managedUserFromServer(row: ServerUserRow): ManagedUser {
-  return {
-    id: row.id,
-    username: row.username,
-    fullName: row.full_name || row.username,
-    email: row.email || `${row.username}@zunion.local`,
-    role: row.role || "Operator",
-    password: "",
-    status: row.is_active === false ? "inactive" : "active",
-    mustChangePassword: Boolean(row.must_change_password),
-    permissionOverrides: normalizePermissionOverride(row.permission_overrides),
-    createdAt: row.created_at || new Date().toISOString(),
-    lastLoginAt: row.last_login_at,
-  };
-}
-
-function managedRoleFromServer(row: ServerRoleRow): ManagedRole {
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description || "",
-    status: row.status || "active",
-    permissions: (row.permissions || []).filter((key): key is PermissionKey => allPermissionKeys.includes(key as PermissionKey)),
-    isSystemRole: Boolean(row.is_system_role),
-    createdAt: row.created_at || new Date().toISOString(),
-    updatedAt: row.updated_at || row.created_at || new Date().toISOString(),
-  };
-}
-
-function SettingsPage({ session }: { session: Session }) {
-  const [users, setUsers] = useState<ManagedUser[]>(() => loadManagedUsers());
-  const [roles, setRoles] = useState<ManagedRole[]>(() => loadManagedRoles());
-  const [userForm, setUserForm] = useState({ username: "", fullName: "", password: "", confirmPassword: "", role: "Operator", status: "active" as "active" | "inactive", mustChangePassword: false });
-  const [roleForm, setRoleForm] = useState({ name: "", description: "" });
-  const [message, setMessage] = useState("");
-  const [permissionSearch, setPermissionSearch] = useState("");
-  const isMaster = session.role === "Master";
-  const useRemoteSettings = useServerAuth || !isLocalHost;
-
-  useEffect(() => {
-    if (!useRemoteSettings || !isMaster) return;
-    let mounted = true;
-    Promise.all([
-      settingsRequest<{ users: ServerUserRow[] }>("/api/users"),
-      settingsRequest<{ roles: ServerRoleRow[] }>("/api/roles"),
-    ]).then(([usersPayload, rolesPayload]) => {
-      if (!mounted) return;
-      const nextUsers = usersPayload.users.map(managedUserFromServer);
-      const nextRoles = rolesPayload.roles.map(managedRoleFromServer);
-      setUsers(nextUsers);
-      setRoles(nextRoles);
-      saveManagedUsers(nextUsers);
-      saveManagedRoles(nextRoles);
-    }).catch((error) => {
-      if (mounted) setMessage(error instanceof Error ? error.message : "تعذر تحميل بيانات المستخدمين من الخادم");
-    });
-    return () => { mounted = false; };
-  }, [useRemoteSettings, isMaster]);
-
-  function persistUsers(next: ManagedUser[], action: string, target?: string, details?: unknown) {
-    setUsers(next);
-    saveManagedUsers(next);
-    addAudit(session, action, "users", target, undefined, details);
-  }
-
-  function persistRoles(next: ManagedRole[], action: string, target?: string, details?: unknown) {
-    setRoles(next);
-    saveManagedRoles(next);
-    addAudit(session, action, "roles", target, undefined, details);
-  }
-
-  async function resetAllPasswords() {
-    const typed = window.prompt("سيتم تغيير كلمة مرور جميع المستخدمين النشطين إلى 1234، وتسجيل خروج الجلسة الحالية للأمان. لن يتم إجبار المستخدمين على تغييرها عند تسجيل الدخول القادم.\n\nاكتب RESET 1234 للتأكيد");
-    if (typed !== "RESET 1234") return setMessage("قيمة التأكيد غير صحيحة");
-    if (useRemoteSettings) {
-      try {
-        const payload = await settingsRequest<{ affectedUsers: number }>("/api/users/reset-all-passwords", {
-          method: "POST",
-          body: JSON.stringify({ confirmation: typed }),
-        });
-        setMessage(`تمت إعادة تعيين كلمات مرور ${payload.affectedUsers} مستخدم. يجب تسجيل الدخول مرة أخرى.`);
-        localStorage.removeItem(sessionKey);
-        window.setTimeout(() => window.location.reload(), 800);
-        return;
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر إعادة تعيين كلمات المرور");
-      }
-    }
-
-    const next = users.map((user) => user.status === "active" ? { ...user, password: "1234", mustChangePassword: false } : user);
-    persistUsers(next, "BULK_PASSWORD_RESET", undefined, { actingMaster: session.username, affectedUsers: next.filter((user) => user.status === "active").length, at: new Date().toISOString() });
-    localStorage.removeItem(sessionKey);
-    setMessage("تمت إعادة تعيين كلمات المرور. يجب تسجيل الدخول مرة أخرى.");
-    window.setTimeout(() => window.location.reload(), 800);
-  }
-
-  async function createUser(event: React.FormEvent) {
-    event.preventDefault();
-    const username = userForm.username.trim().toLowerCase();
-    if (!username) return setMessage("اسم المستخدم مطلوب");
-    if (users.some((user) => user.username === username)) return setMessage("اسم المستخدم مستخدم بالفعل");
-    if (!userForm.fullName.trim()) return setMessage("الاسم مطلوب");
-    if (!userForm.password) return setMessage("كلمة المرور مطلوبة");
-    if (userForm.password !== userForm.confirmPassword) return setMessage("كلمتا المرور غير متطابقتين");
-    if (!roles.some((role) => role.name === userForm.role)) return setMessage("يجب اختيار الدور");
-    const now = new Date().toISOString();
-    let nextUser: ManagedUser = {
-      id: createId(),
-      username,
-      fullName: userForm.fullName.trim(),
-      email: `${username.replace(/\s+/g, ".")}@zunion.local`,
-      role: userForm.role,
-      password: userForm.password,
-      status: userForm.status,
-      mustChangePassword: userForm.mustChangePassword,
-      permissionOverrides: { allow: [], deny: [] },
-      createdAt: now,
-    };
-    if (useRemoteSettings) {
-      try {
-        const payload = await settingsRequest<{ user?: ServerUserRow }>("/api/users", {
-          method: "POST",
-          body: JSON.stringify({
-            username,
-            name: nextUser.fullName,
-            password: userForm.password,
-            roleId: nextUser.role,
-            status: nextUser.status,
-            mustChangePassword: nextUser.mustChangePassword,
-            permissionOverrides: nextUser.permissionOverrides,
-          }),
-        });
-        if (payload.user) nextUser = managedUserFromServer(payload.user);
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر إنشاء المستخدم");
-      }
-    }
-    persistUsers([nextUser, ...users], "USER_CREATED", nextUser.id, { username, role: nextUser.role });
-    setUserForm({ username: "", fullName: "", password: "", confirmPassword: "", role: "Operator", status: "active", mustChangePassword: false });
-    setMessage("تم إضافة المستخدم بنجاح");
-  }
-
-  async function resetPassword(user: ManagedUser) {
-    const password = window.prompt(`كلمة المرور الجديدة للمستخدم ${user.username}`);
-    if (!password) return;
-    if (password.length < 4) return setMessage("كلمة المرور الجديدة يجب ألا تقل عن 4 أحرف");
-    if (useRemoteSettings) {
-      try {
-        await settingsRequest(`/api/users/${encodeURIComponent(user.id)}/reset-password`, {
-          method: "POST",
-          body: JSON.stringify({ password, mustChangePassword: false }),
-        });
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر تغيير كلمة المرور");
-      }
-    }
-    persistUsers(users.map((item) => item.id === user.id ? { ...item, password, mustChangePassword: false } : item), "PASSWORD_RESET_BY_MASTER", user.id, { username: user.username });
-    setMessage("تم تغيير كلمة المرور بنجاح");
-  }
-
-  async function toggleUserStatus(user: ManagedUser) {
-    if (user.username === session.username) return setMessage("لا يمكنك إيقاف حسابك الحالي");
-    if (user.role === "Master" && user.status === "active" && activeMasterCount(users) <= 1) return setMessage("لا يمكن حذف آخر حساب Master فعال");
-    const status = user.status === "active" ? "inactive" : "active";
-    if (useRemoteSettings) {
-      try {
-        await settingsRequest(`/api/users/${encodeURIComponent(user.id)}/status`, {
-          method: "PATCH",
-          body: JSON.stringify({ status }),
-        });
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر تغيير حالة المستخدم");
-      }
-    }
-    persistUsers(users.map((item) => item.id === user.id ? { ...item, status } : item), status === "active" ? "USER_ACTIVATED" : "USER_DEACTIVATED", user.id, { username: user.username, status });
-    setMessage(status === "active" ? "تم تفعيل المستخدم بنجاح" : "تم إيقاف المستخدم بنجاح");
-  }
-
-  async function deleteUser(user: ManagedUser) {
-    if (user.username === session.username) return setMessage("لا يمكنك حذف حسابك الحالي");
-    if (user.role === "Master" && user.status === "active" && activeMasterCount(users) <= 1) return setMessage("لا يمكن حذف آخر حساب Master فعال");
-    const typed = window.prompt("هل أنت متأكد من حذف هذا المستخدم؟ اكتب اسم المستخدم للتأكيد");
-    if (typed !== user.username) return;
-    if (useRemoteSettings) {
-      try {
-        await settingsRequest(`/api/users/${encodeURIComponent(user.id)}`, { method: "DELETE" });
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر حذف المستخدم");
-      }
-    }
-    persistUsers(users.filter((item) => item.id !== user.id), "USER_DELETED", user.id, { username: user.username });
-    setMessage("تم حذف المستخدم بنجاح");
-  }
-
-  async function updateUser(id: string, patch: Partial<ManagedUser>) {
-    const oldUser = users.find((user) => user.id === id);
-    if (useRemoteSettings) {
-      try {
-        await settingsRequest(`/api/users/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            username: patch.username,
-            name: patch.fullName,
-            roleId: patch.role,
-            status: patch.status,
-            mustChangePassword: patch.mustChangePassword,
-            permissionOverrides: patch.permissionOverrides,
-          }),
-        });
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر تحديث المستخدم");
-      }
-    }
-    const next = users.map((user) => user.id === id ? { ...user, ...patch } : user);
-    persistUsers(next, patch.role && patch.role !== oldUser?.role ? "USER_ROLE_CHANGED" : "USER_UPDATED", id, patch);
-  }
-
-  async function toggleUserOverride(userId: string, mode: "allow" | "deny", permission: PermissionKey) {
-    const next = users.map((user) => {
-      if (user.id !== userId) return user;
-      const allow = new Set(user.permissionOverrides.allow);
-      const deny = new Set(user.permissionOverrides.deny);
-      if (mode === "allow") {
-        allow.has(permission) ? allow.delete(permission) : allow.add(permission);
-        deny.delete(permission);
-      } else {
-        deny.has(permission) ? deny.delete(permission) : deny.add(permission);
-        allow.delete(permission);
-      }
-      return { ...user, permissionOverrides: { allow: Array.from(allow), deny: Array.from(deny) } };
-    });
-    const target = next.find((user) => user.id === userId);
-    if (useRemoteSettings && target) {
-      try {
-        await settingsRequest(`/api/users/${encodeURIComponent(userId)}`, {
-          method: "PATCH",
-          body: JSON.stringify({ permissionOverrides: target.permissionOverrides }),
-        });
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر تحديث صلاحيات المستخدم");
-      }
-    }
-    persistUsers(next, "USER_PERMISSIONS_CHANGED", userId, { permission, mode });
-  }
-
-  async function createRole(event: React.FormEvent) {
-    event.preventDefault();
-    const name = roleForm.name.trim();
-    if (!name) return setMessage("اسم الدور مطلوب");
-    if (roles.some((role) => role.name.toLowerCase() === name.toLowerCase())) return setMessage("اسم الدور موجود بالفعل");
-    const now = new Date().toISOString();
-    let role: ManagedRole = { id: createId(), name, description: roleForm.description.trim(), status: "active", permissions: ["dashboard.view"], isSystemRole: false, createdAt: now, updatedAt: now };
-    if (useRemoteSettings) {
-      try {
-        const payload = await settingsRequest<{ role?: ServerRoleRow | ServerRoleRow[] }>("/api/roles", {
-          method: "POST",
-          body: JSON.stringify({ name: role.name, description: role.description, status: role.status, permissions: role.permissions }),
-        });
-        const serverRole = Array.isArray(payload.role) ? payload.role[0] : payload.role;
-        if (serverRole) role = managedRoleFromServer(serverRole);
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر إنشاء الدور");
-      }
-    }
-    persistRoles([role, ...roles], "ROLE_CREATED", role.id, { name });
-    setRoleForm({ name: "", description: "" });
-    setMessage("تم إنشاء الدور بنجاح");
-  }
-
-  async function updateRole(roleId: string, patch: Partial<ManagedRole>) {
-    const target = roles.find((role) => role.id === roleId);
-    if (!target) return;
-    if (target.name === "Master" && patch.permissions && !masterProtectedPermissions.every((key) => patch.permissions?.includes(key))) return setMessage("لا يمكن إزالة صلاحيات الإدارة من دور Master");
-    if (target.name !== "Master" && patch.permissions?.includes("users.resetAllPasswords")) return setMessage("صلاحية إعادة تعيين كل كلمات المرور محمية لدور Master فقط");
-    if (useRemoteSettings) {
-      try {
-        await settingsRequest(`/api/roles/${encodeURIComponent(roleId)}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            name: patch.name,
-            description: patch.description,
-            status: patch.status,
-            permissions: patch.permissions,
-          }),
-        });
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر تحديث الدور");
-      }
-    }
-    persistRoles(roles.map((role) => role.id === roleId ? { ...role, ...patch, updatedAt: new Date().toISOString() } : role), patch.permissions ? "ROLE_PERMISSIONS_CHANGED" : "ROLE_UPDATED", roleId, patch);
-  }
-
-  function toggleRolePermission(roleId: string, permission: PermissionKey) {
-    const role = roles.find((item) => item.id === roleId);
-    if (!role) return;
-    const set = new Set(role.permissions);
-    set.has(permission) ? set.delete(permission) : set.add(permission);
-    updateRole(roleId, { permissions: Array.from(set) });
-  }
-
-  async function deleteRole(role: ManagedRole) {
-    if (role.name === "Master" || role.isSystemRole) return setMessage("لا يمكن حذف الأدوار الأساسية");
-    if (users.some((user) => user.role === role.name)) return setMessage("لا يمكن حذف دور مرتبط بمستخدمين");
-    if (useRemoteSettings) {
-      try {
-        await settingsRequest(`/api/roles/${encodeURIComponent(role.id)}`, { method: "DELETE" });
-      } catch (error) {
-        return setMessage(error instanceof Error ? error.message : "تعذر حذف الدور");
-      }
-    }
-    persistRoles(roles.filter((item) => item.id !== role.id), "ROLE_DELETED", role.id, { name: role.name });
-  }
-
-  const filteredPermissionGroups = permissionGroups.map((group) => ({
-    ...group,
-    permissions: group.permissions.filter((permission) => `${group.group} ${permission.label} ${permission.action} ${permission.key}`.toLowerCase().includes(permissionSearch.trim().toLowerCase())),
-  })).filter((group) => group.permissions.length);
-
-  if (!isMaster) return <div className="stack"><OptionalPasswordChangePanel session={session} /></div>;
-
-  return (
-    <div className="stack">
-      <section className="panel">
-        <div className="panel-head">
-          <h2>الإعدادات</h2>
-          <span className="badge badge-red">Master فقط</span>
-        </div>
-        <div className="settings-danger-zone">
-          <div>
-            <strong>إعادة تعيين كلمات مرور جميع المستخدمين</strong>
-            <p className="muted">سيتم ضبط كلمة المرور إلى 1234 للمستخدمين النشطين بدون إجبارهم على تغييرها عند تسجيل الدخول القادم.</p>
-          </div>
-          {hasPermission(session, "users.resetAllPasswords") && <button type="button" className="primary-btn" onClick={resetAllPasswords}>إعادة تعيين كلمات مرور جميع المستخدمين</button>}
-        </div>
-        <div className="stats-grid">
-          <StatCard title="عدد المستخدمين" value={users.length} icon={Users} />
-          <StatCard title="كلمة المرور الافتراضية" value="1234" icon={KeyRound} />
-          <StatCard title="حسابات" icon={WalletCards} value={<span className="account-pills"><i>سامح</i><i>أحمد</i><i>شيكات</i><i>بنك</i></span>} />
-          <StatCard title="الشعار" icon={Image} value={<span className="logo-preview-value"><BrandLogo /><small>src/assets/logo.png</small></span>} />
-        </div>
-      </section>
-      <OptionalPasswordChangePanel session={session} />
-      <section className="panel">
-        <div className="panel-head">
-          <h2>إدارة المستخدمين</h2>
-          <span className="badge badge-red">Master</span>
-        </div>
-        <form className="settings-form" onSubmit={createUser}>
-          <input placeholder="اسم المستخدم" value={userForm.username} onChange={(event) => setUserForm((current) => ({ ...current, username: event.target.value }))} />
-          <input placeholder="الاسم" value={userForm.fullName} onChange={(event) => setUserForm((current) => ({ ...current, fullName: event.target.value }))} />
-          <input placeholder="كلمة المرور" type="password" value={userForm.password} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} />
-          <input placeholder="تأكيد كلمة المرور" type="password" value={userForm.confirmPassword} onChange={(event) => setUserForm((current) => ({ ...current, confirmPassword: event.target.value }))} />
-          <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}>{roles.map((role) => <option key={role.id}>{role.name}</option>)}</select>
-          <select value={userForm.status} onChange={(event) => setUserForm((current) => ({ ...current, status: event.target.value as "active" | "inactive" }))}><option value="active">مفعل</option><option value="inactive">موقوف</option></select>
-          <button className="primary-btn">إضافة مستخدم جديد</button>
-        </form>
-        {message && <p className="notice">{message}</p>}
-        <div className="table-wrap accounts-table">
-          <table>
-            <thead>
-              <tr>
-                <th>اسم المستخدم</th>
-                <th>الاسم</th>
-                <th>الدور</th>
-                <th>الحالة</th>
-                <th>صلاحيات مخصصة</th>
-                <th>آخر تسجيل دخول</th>
-                <th>تاريخ الإنشاء</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <tr key={user.id}>
-                  <td>{user.username}</td>
-                  <td><input value={user.fullName} onChange={(event) => updateUser(user.id, { fullName: event.target.value })} /></td>
-                  <td><select value={user.role} onChange={(event) => updateUser(user.id, { role: event.target.value })}>{roles.map((role) => <option key={role.id}>{role.name}</option>)}</select></td>
-                  <td><span className={user.status === "active" ? "badge badge-green" : "badge badge-gray"}>{user.status === "active" ? "مفعل" : "موقوف"}</span></td>
-                  <td>{user.permissionOverrides.allow.length + user.permissionOverrides.deny.length}</td>
-                  <td>{user.lastLoginAt ? formatDateTimeEnglish(user.lastLoginAt) : "-"}</td>
-                  <td>{formatDateArabic(user.createdAt)}</td>
-                  <td className="actions">
-                    <button type="button" onClick={() => resetPassword(user)}>تغيير كلمة المرور</button>
-                    <button type="button" onClick={() => toggleUserStatus(user)}>{user.status === "active" ? "إيقاف المستخدم" : "تفعيل المستخدم"}</button>
-                    <button type="button" className="danger-text" onClick={() => deleteUser(user)}>حذف المستخدم</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section className="panel">
-        <div className="panel-head"><h2>إدارة الأدوار والصلاحيات</h2><input placeholder="بحث الصلاحيات" value={permissionSearch} onChange={(event) => setPermissionSearch(event.target.value)} /></div>
-        <form className="settings-form" onSubmit={createRole}>
-          <input placeholder="اسم الدور" value={roleForm.name} onChange={(event) => setRoleForm((current) => ({ ...current, name: event.target.value }))} />
-          <input placeholder="وصف الدور" value={roleForm.description} onChange={(event) => setRoleForm((current) => ({ ...current, description: event.target.value }))} />
-          <button className="primary-btn">إنشاء دور</button>
-        </form>
-        <div className="role-grid">
-          {roles.map((role) => (
-            <div className="role-card" key={role.id}>
-              <div className="panel-head">
-                <h3>{role.name}</h3>
-                <span className={role.status === "active" ? "badge badge-green" : "badge badge-gray"}>{role.status === "active" ? "مفعل" : "موقوف"}</span>
-              </div>
-              <input value={role.description} placeholder="وصف الدور" onChange={(event) => updateRole(role.id, { description: event.target.value })} />
-              <div className="actions">
-                <button type="button" onClick={() => updateRole(role.id, { permissions: allPermissionKeys })}>تحديد الكل</button>
-                <button type="button" onClick={() => updateRole(role.id, { permissions: role.name === "Master" ? masterProtectedPermissions : [] })}>إلغاء تحديد الكل</button>
-                <button type="button" onClick={() => updateRole(role.id, { status: role.status === "active" ? "inactive" : "active" })}>{role.status === "active" ? "إيقاف" : "تفعيل"}</button>
-                {!role.isSystemRole && <button type="button" className="danger-text" onClick={() => deleteRole(role)}>حذف الدور</button>}
-              </div>
-              <p className="muted">عدد الصلاحيات: {role.permissions.length}</p>
-              <div className="permission-matrix">
-                {filteredPermissionGroups.map((group) => (
-                  <div className="permission-group" key={`${role.id}-${group.group}`}>
-                    <strong>{group.group}</strong>
-                    <button type="button" className="ghost-btn compact" onClick={() => updateRole(role.id, { permissions: Array.from(new Set([...role.permissions, ...group.permissions.map((permission) => permission.key)])) })}>تحديد القسم بالكامل</button>
-                    {group.permissions.map((permission) => (
-                      <label className="check permission-check" key={permission.key}>
-                        <input type="checkbox" checked={role.permissions.includes(permission.key)} onChange={() => toggleRolePermission(role.id, permission.key)} />
-                        {permission.label} - {permission.action}
-                      </label>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-      <section className="panel">
-        <div className="panel-head"><h2>صلاحيات مخصصة للمستخدمين</h2></div>
-        <div className="role-grid">
-          {users.map((user) => (
-            <div className="role-card" key={`override-${user.id}`}>
-              <h3>{user.username}</h3>
-              {permissionGroups.flatMap((group) => group.permissions).slice(0, 18).map((permission) => (
-                <div className="permission-override-row" key={`${user.id}-${permission.key}`}>
-                  <span>{permission.label} - {permission.action}</span>
-                  <button type="button" className={user.permissionOverrides.allow.includes(permission.key) ? "primary-btn compact" : "ghost-btn compact"} onClick={() => toggleUserOverride(user.id, "allow", permission.key)}>سماح</button>
-                  <button type="button" className={user.permissionOverrides.deny.includes(permission.key) ? "primary-btn compact" : "ghost-btn compact"} onClick={() => toggleUserOverride(user.id, "deny", permission.key)}>منع</button>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
 }
 
 class AppErrorBoundary extends Component<{ children: ReactNode }, { message: string }> {
@@ -8681,6 +8195,18 @@ function ZunionApp() {
 
   if (!session) return <Login onLogin={setSession} />;
   const routeAllowed = canAccessView(session, view);
+  const settingsCapabilities: SettingsCapabilities = {
+    createUsers: hasPermission(session, "users.create"),
+    editUsers: hasPermission(session, "users.edit"),
+    deleteUsers: hasPermission(session, "users.delete"),
+    deactivateUsers: hasPermission(session, "users.deactivate"),
+    resetPassword: hasPermission(session, "users.resetPassword"),
+    resetAllPasswords: hasPermission(session, "users.resetAllPasswords"),
+    createRoles: hasPermission(session, "roles.create"),
+    editRoles: hasPermission(session, "roles.edit"),
+    deleteRoles: hasPermission(session, "roles.delete"),
+    managePermissions: hasPermission(session, "permissions.manage"),
+  };
 
   return (
     <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
@@ -8744,7 +8270,19 @@ function ZunionApp() {
           {view === "reports" && <ReportsPage session={session} />}
           {view === "import" && <ImportExport orders={orders} setOrders={setOrders} session={session} />}
           {view === "audit" && <AuditLog />}
-          {view === "settings" && <SettingsPage session={session} />}
+          {view === "settings" && (
+          <SettingsPage
+            username={session.username || ""}
+            role={session.role}
+            isMaster={session.role === "Master"}
+            useRemoteSettings={useServerAuth || !isLocalHost}
+            permissionGroups={permissionGroups}
+            capabilities={settingsCapabilities}
+            accountPanel={<OptionalPasswordChangePanel session={session} />}
+            localMachines={machines}
+            onAudit={(action, entityType, entityId, oldValue, newValue) => addAudit(session, action, entityType, entityId, oldValue, newValue)}
+          />
+        )}
           {view === "alerts" && <section className="panel"><h2>تنبيهات التسليم</h2><div className="alerts-list">{buildAlerts(visibleOrders, canManageFinancials(session.role)).map((alert, index) => <AlertItem key={`${alert.order.id}-${index}`} alert={alert} />)}</div></section>}
           </>}
         </section>
@@ -8764,4 +8302,3 @@ export default function App() {
     </AppErrorBoundary>
   );
 }
-
