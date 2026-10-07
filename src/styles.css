@@ -1,4 +1,4 @@
-@tailwind base;
+﻿@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -13,9 +13,9 @@
   --line: #e4e4e7;
   --bg: #f4f4f5;
   --panel: #ffffff;
-  --control-height: 33px;
+  --control-height: 36px;
   --control-padding-x: 9px;
-  --control-font-size: 13px;
+  --control-font-size: 14px;
   --form-gap: 9px;
   --section-padding: 11px 12px;
   color: var(--dark);
@@ -1325,7 +1325,7 @@ body {
   border-radius: 9px;
   padding: 12px 18px;
   color: rgba(255, 255, 255, .92);
-  font-size: 15px;
+  font-size: 14px;
   transition: background .15s ease, transform .15s ease;
 }
 
@@ -2112,7 +2112,7 @@ textarea {
   height: 46px;
   max-width: 100%;
   padding: 0 14px;
-  font-size: 15px;
+  font-size: 14px;
   border-radius: 10px;
 }
 
@@ -2550,7 +2550,7 @@ button *,
 
 .stat-card span:not(.stat-icon):not(.account-pills):not(.logo-preview-value) {
   color: var(--ink);
-  font-size: clamp(15px, 1.2vw, 18px) !important;
+  font-size: clamp(14px, 1.1vw, 16px) !important;
   font-weight: 700;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -3141,7 +3141,7 @@ textarea {
 .quick-grid button {
   min-height: 72px !important;
   padding: 12px 14px !important;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .image-clipboard-field {
@@ -3458,7 +3458,7 @@ input[type="date"] {
 
 .nf-order-date-value {
   color: var(--red);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 900;
 }
 
@@ -3519,7 +3519,7 @@ input[type="date"] {
   background: #fff;
   border: 1px solid rgba(6, 31, 59, .07);
   border-radius: 18px;
-  padding: 22px 22px 24px;
+  padding: 16px 16px 18px;
   box-shadow: 0 14px 34px rgba(6, 31, 59, .07);
   transition: transform .22s ease, box-shadow .22s ease, border-color .22s ease;
 }
@@ -5146,7 +5146,7 @@ input[type="date"] {
   border: none;
   outline: none;
   color: var(--ink) !important;
-  font-size: 15px !important;
+  font-size: 14px !important;
   min-height: 0 !important;
   height: auto !important;
   font-family: inherit;
@@ -6750,12 +6750,12 @@ input[type="date"] {
   .ws-machines-modal .ws-workers-table th,
   .ws-machines-modal .ws-workers-table td {
     padding: 10px 6px;
-    font-size: 15px;
+    font-size: 14px;
   }
 
   .ws-machines-modal .ws-workers-remove {
     padding: 0 12px;
-    font-size: 15px;
+    font-size: 14px;
   }
 
   .ws-machines-modal .ws-workers-toolbar,
@@ -6890,7 +6890,7 @@ tr.ws-row-highlight td {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 10px;
-  font-size: 15px;
+  font-size: 14px;
   border: 1px solid #999999;
   border-radius: 6px;
   margin-bottom: 10px;
@@ -6973,7 +6973,7 @@ tr.ws-row-highlight td {
 .md-field select {
   width: 100%;
   padding: 6px;
-  font-size: 15px;
+  font-size: 14px;
   border: 1px solid #999999;
   border-radius: 6px;
   background: #FFFFFF;
@@ -7041,7 +7041,7 @@ tr.ws-row-highlight td {
 .ca-screen { display: flex; flex-direction: column; gap: 14px; }
 
 .ca-customer-row { display: flex; justify-content: flex-start; }
-.ca-customer-button { display: inline-flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; box-shadow: 0 2px 8px rgba(17, 24, 39, .06); color: #111827; padding: 12px 16px; font-size: 15px; font-weight: 800; cursor: pointer; }
+.ca-customer-button { display: inline-flex; align-items: center; gap: 10px; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; box-shadow: 0 2px 8px rgba(17, 24, 39, .06); color: #111827; padding: 12px 16px; font-size: 14px; font-weight: 800; cursor: pointer; }
 .ca-customer-button select { min-width: 240px; height: 38px; padding: 0 10px; border: 1px solid #E5E7EB; border-radius: 8px; background: #fff; color: #111827; font-weight: 700; font-size: 14px; cursor: pointer; }
 .ca-customer-button select:focus { outline: none; border-color: #08243D; box-shadow: 0 0 0 3px rgba(8, 36, 61, .1); }
 
@@ -7369,7 +7369,7 @@ tr.ws-row-highlight td {
   border-radius: 999px !important;
   background: rgba(255, 255, 255, .95) !important;
   color: var(--zunion-red) !important;
-  font-size: 15px !important;
+  font-size: 14px !important;
   font-weight: 700 !important;
   text-align: right;
   cursor: pointer;
@@ -7432,14 +7432,14 @@ tr.ws-row-highlight td {
 
 .topbar .topbar-current-label {
   color: #ED1525 !important;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   line-height: 1.3;
 }
 
 .topbar .topbar-current-name {
   color: #000 !important;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   line-height: 1.3;
 }
@@ -7453,7 +7453,7 @@ tr.ws-row-highlight td {
   .topbar-current { gap: 6px; margin-inline-start: 8px; flex-direction: column; align-items: flex-start; }
   .topbar-current-label { font-size: 13px; }
   .topbar-current-name { font-size: 13px; }
-  .topbar-brand { font-size: 15px; }
+  .topbar-brand { font-size: 14px; }
 }
 
 /* order form toolbar: one red search button, aligned left of the content */
@@ -7700,7 +7700,7 @@ tr.ws-row-highlight td {
   padding: 0 14px;
   border: 1px solid #D7DBE0;
   border-radius: 12px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: #111827;
   outline: none;
@@ -7723,7 +7723,7 @@ tr.ws-row-highlight td {
   color: #FFFFFF;
   border: 1px solid #ED1525;
   border-radius: 12px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   cursor: pointer;
 }
@@ -7868,7 +7868,7 @@ tr.ws-row-highlight td {
 .add-product-panel {
   width: 100%;
   max-width: 720px;
-  padding: 22px 22px 24px;
+  padding: 16px 16px 18px;
   border: 1px solid rgba(6, 31, 59, .07);
   border-radius: 18px;
   background: #fff;
@@ -8029,7 +8029,7 @@ tr.ws-row-highlight td {
   border-radius: 6px;
   background: #E60012;
   border: 1px solid #E60012;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   line-height: 1;
   white-space: nowrap;
@@ -8280,7 +8280,7 @@ tr.ws-row-highlight td {
 .ar-state {
   padding: 26px 8px !important;
   color: #6b7280 !important;
-  font-size: 15px !important;
+  font-size: 14px !important;
   font-weight: 600;
 }
 
@@ -9181,11 +9181,11 @@ input[type="number"] {
   }
   .ws-management-modal .ws-workers-table th,.ws-management-modal .ws-workers-table td {
     padding:10px 6px;
-    font-size:15px;
+    font-size: 14px;
   }
   .ws-management-modal .ws-workers-remove {
     padding:0 12px;
-    font-size:15px;
+    font-size: 14px;
   }
   .ws-management-modal .ws-workers-toolbar,.ws-management-modal .ws-machines-actions,.ws-management-modal .ws-worker-form-actions {
     gap:8px;
@@ -9202,14 +9202,14 @@ input[type="number"] {
   }
   .ws-workers-modal .ws-workers-table th,.ws-workers-modal .ws-workers-table td {
     padding:10px 8px;
-    font-size:15px;
+    font-size: 14px;
   }
   .ws-workers-modal .ws-worker-actions-cell .ws-workers-remove+.ws-workers-remove {
     margin-inline-start:6px;
   }
   .ws-workers-modal .ws-workers-remove {
     padding:0 12px;
-    font-size:15px;
+    font-size: 14px;
   }
   .ws-management-modal .ws-workers-table-wrap {
     overflow-x:auto;
