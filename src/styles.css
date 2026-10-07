@@ -6295,13 +6295,20 @@ input[type="date"] {
 }
 
 .ws-modal-close {
-  background: none;
-  border: none;
-  font-size: 26px;
-  line-height: 1;
+  background: #ED1525;
+  color: #FFFFFF;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  color: #C62828;
-  padding: 0 6px;
+  box-shadow: 0 10px 40px -20px rgba(15, 23, 42, 0.6);
+  transition: background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+  flex-shrink: 0;
+  padding: 0;
 }
 
 .ws-modal-feedback {
