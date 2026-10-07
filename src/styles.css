@@ -9252,3 +9252,25 @@ input[type="number"] {
   color: #FFFFFF !important;
 }
 
+
+/* MachineDistributionPage - populated schedule cells compact */
+.md-cell-filled .md-line {
+  font-size: 16px !important;
+  line-height: 1.25;
+  text-align: center;
+  color: #dc2626;
+  font-weight: 800;
+}
+
+.md-cell-filled .md-line-num {
+  font-size: 16px !important;
+  font-weight: 800;
+}
+
+.md-cell-filled .md-line,
+.md-cell-filled .md-line-num {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+}
