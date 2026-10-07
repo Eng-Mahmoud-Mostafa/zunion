@@ -5367,13 +5367,15 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     });
     return (
       <DraggableDialog
-        overlayClassName="ws-modal-overlay"
         dialogClassName="ws-modal ws-management-modal ws-machines-modal"
         headClassName="ws-modal-head"
         closeDisabled={machinesSaving}
         ariaLabel="الماكينات"
         onClose={closeMachinesModal}
         title={<h2>الماكينات</h2>}
+        modal={false}
+        closeOnBackdrop={false}
+        showCloseButton
       >
         <div className="ws-modal-feedback">
           {machinesError && <div className="ws-modal-error">{machinesError}</div>}

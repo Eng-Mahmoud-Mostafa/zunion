@@ -18,7 +18,7 @@ export type DraggableDialogProps = {
   title: ReactNode;
   onClose: () => void;
   children: ReactNode;
-  overlayClassName: string;
+  overlayClassName?: string;
   dialogClassName: string;
   headClassName: string;
   closeClassName?: string;
@@ -27,6 +27,7 @@ export type DraggableDialogProps = {
   closeOnBackdrop?: boolean;
   showCloseButton?: boolean;
   ariaLabel?: string;
+  modal?: boolean;
 };
 
 export function DraggableDialog({
@@ -37,11 +38,12 @@ export function DraggableDialog({
   dialogClassName,
   headClassName,
   closeClassName = "ws-modal-close",
-  closeLabel = "إغلاق",
+  closeLabel = "����",
   closeDisabled,
   closeOnBackdrop = true,
   showCloseButton = true,
   ariaLabel,
+  modal = true,
 }: DraggableDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const offsetRef = useRef<Point>({ x: 0, y: 0 });
@@ -132,6 +134,29 @@ export function DraggableDialog({
     ? { transform: `translate3d(${offset.x}px, ${offset.y}px, 0)` }
     : undefined;
 
+  const dialog = (
+    <div
+      ref={dialogRef}
+      className={`${dialogClassName} dd-dialog`}
+      style={style}
+      role="dialog"
+      aria-modal={modal ? "true" : "false"}
+      aria-label={ariaLabel}
+    >
+      <div className={`${headClassName} dd-head`} onPointerDown={onHeadPointerDown}>
+        {title}
+        {showCloseButton ? (
+          <button type="button" className={closeClassName} aria-label={closeLabel} disabled={closeDisabled} onClick={onClose}>?</button>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+
+  if (!modal) {
+    return dialog;
+  }
+
   return (
     <div
       className={overlayClassName}
@@ -139,23 +164,7 @@ export function DraggableDialog({
         if (closeOnBackdrop && event.target === event.currentTarget) onClose();
       }}
     >
-      <div
-        ref={dialogRef}
-        className={`${dialogClassName} dd-dialog`}
-        style={style}
-        role="dialog"
-        aria-modal="true"
-        aria-label={ariaLabel}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className={`${headClassName} dd-head`} onPointerDown={onHeadPointerDown}>
-          {title}
-          {showCloseButton ? (
-            <button type="button" className={closeClassName} aria-label={closeLabel} disabled={closeDisabled} onClick={onClose}>×</button>
-          ) : null}
-        </div>
-        {children}
-      </div>
+      {dialog}
     </div>
   );
 }

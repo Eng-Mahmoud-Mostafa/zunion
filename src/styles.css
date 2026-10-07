@@ -6563,6 +6563,7 @@ input[type="date"] {
   max-height: 85vh;
   padding: 24px;
   overflow: hidden;
+  pointer-events: auto;
 }
 
 .ws-machines-modal .ws-modal-head {
