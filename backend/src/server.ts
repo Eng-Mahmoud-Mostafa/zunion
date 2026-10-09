@@ -695,7 +695,7 @@ app.post("/api/auth/verify-reset-code", async (req, res) => {
   }
 
   const { rows } = await query<{ id: string }>(
-    `select id from password_reset_codes where username=$1 and code_hash=$2 and used_at is null and expires_at > now() order by created_at desc limit 1`,
+    `select id from password_reset_codes where username=$1 and code_hash=$2 and used_at is null and expires_at > now() order by o.created_at desc limit 1`,
     [username, codeHash],
   );
   if (!rows[0]) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
@@ -733,7 +733,7 @@ app.post("/api/auth/reset-password", async (req, res) => {
       const code = await client.query<{ id: string }>(
         `select id from password_reset_codes
          where username=$1 and code_hash=$2 and used_at is null and expires_at > now()
-         order by created_at desc limit 1 for update`,
+         order by o.created_at desc limit 1 for update`,
         [username, codeHash],
       );
       if (!code.rows[0]) return false;
@@ -1100,7 +1100,7 @@ app.get("/api/orders", requireAuth, async (req, res) => {
     filters.push(`draft = ${draft === "true"}`);
   }
   const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
-  const { rows } = await query(`select * from orders ${sqlWhere} order by created_at desc`, params);
+  const { rows } = await query(`select o.*, coalesce(u.full_name, u.username) as creator_name from orders o left join users u on u.id=o.created_by ${sqlWhere} order by created_at desc`, params);
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
@@ -1137,7 +1137,7 @@ app.get("/api/orders/archive", requireAuth, async (req, res) => {
     filters.push(`completed_at::date <= $${params.length}::date`);
   }
   const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
-  const { rows } = await query(`select * from orders ${sqlWhere} order by completed_at desc, created_at desc`, params);
+  const { rows } = await query(`select o.*, coalesce(u.full_name, u.username) as creator_name from orders o left join users u on u.id=o.created_by ${sqlWhere} order by o.completed_at desc, o.created_at desc`, params);
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
@@ -1765,7 +1765,7 @@ app.get("/api/customers/:id/details", requireAuth, requireRole("Master", "Helper
     [id],
   );
   const ordersResult = await query(
-    "select * from orders where customer_id=$1 order by created_at desc",
+    "select o.*, coalesce(u.full_name, u.username) as creator_name from orders o left join users u on u.id=o.created_by where customer_id=$1 order by created_at desc",
     [id],
   );
   res.json({
@@ -1804,7 +1804,7 @@ app.delete("/api/customers/:id", requireAuth, requireAppPermission("customers.de
 
 app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const id = param(req.params.id);
-  const { rows } = await query("select * from orders where customer_id=$1 order by created_at desc", [id]);
+  const { rows } = await query("select o.*, coalesce(u.full_name, u.username) as creator_name from orders o left join users u on u.id=o.created_by where customer_id=$1 order by created_at desc", [id]);
   res.json({ orders: rows });
 });
 

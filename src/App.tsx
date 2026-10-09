@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import * as XLSX from "xlsx";
 import {
@@ -2349,7 +2349,7 @@ function orderPieces(order: DbOrder) {
   return order.pieces_count ?? order.quantity ?? 0;
 }
 
-type OrdersListRecord = Partial<Record<keyof Order | keyof DbOrder | "added_by" | "username" | "user_email" | "product_name_snapshot" | "message_text", unknown>>;
+type OrdersListRecord = Partial<Record<keyof Order | keyof DbOrder | "added_by" | "creator_name" | "username" | "user_email" | "product_name_snapshot" | "message_text", unknown>>;
 
 const ordersListHeaders = [
   "اكتب بواسطة",
@@ -2384,7 +2384,7 @@ function valueText(value: unknown, fallback = "—") {
 }
 
 function orderCreatedBy(order: OrdersListRecord) {
-  return valueText(order.created_by || order.added_by || order.username || order.user_email);
+  return valueText(order.creator_name || order.created_by || order.added_by || order.username || order.user_email, "مستخدم غير معروف");
 }
 
 function orderDisplayNumber(order: OrdersListRecord) {
