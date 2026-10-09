@@ -9282,3 +9282,64 @@ input[type="number"] {
   word-break: break-word;
   max-width: 100%;
 }
+
+/* Settings Page - Redesign (scoped) */
+.settings-page {
+  --settings-gap: 16px;
+  --settings-gap-lg: 20px;
+  --settings-gap-xl: 24px;
+  --settings-panel-pad: 20px;
+  --settings-nav-item-h: 56px;
+  --settings-control-h: 40px;
+  --settings-control-h-sm: 36px;
+  direction: rtl;
+  text-align: right;
+  background: #f8f9fa;
+  padding: 24px;
+  min-height: calc(100vh - 72px);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.settings-page * {
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.settings-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.settings-header h1 { margin: 0; font-size: 24px; font-weight: 900; color: #08243d; line-height: 1.25; }
+
+.settings-header .muted { margin: 0; color: #4b5563; font-size: 13px; font-weight: 600; }
+
+.settings-search { display: inline-flex; align-items: center; gap: 10px; width: 100%; max-width: 420px; height: 42px; padding: 0 14px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; }
+
+.settings-nav { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+
+.settings-nav-item { display: flex; align-items: center; gap: 12px; width: 100%; height: 56px; padding: 0 16px; border: 0; border-radius: 12px; background: #ed1525 !important; color: #fff !important; text-align: right; }
+
+.settings-nav-item.active { background: #a61114 !important; }
+
+.settings-nav-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.18); }
+
+.settings-nav-icon svg { color: #fff !important; stroke: #fff !important; }
+
+.settings-nav-copy strong { font-size: 14px; font-weight: 800; color: #fff !important; }
+
+.settings-nav-copy .muted { display: none; }
+
+.settings-content { display: flex; flex-direction: column; gap: 20px; }
+
+.settings-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; }
+
+.settings-stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 16px; }
+
+@media (max-width:1280px){.settings-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+@media (max-width:768px){.settings-nav{grid-template-columns:1fr}.settings-stat-grid{grid-template-columns:1fr}}
