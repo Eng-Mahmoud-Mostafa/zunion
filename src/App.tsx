@@ -46,6 +46,7 @@ import {
   Settings,
   ShoppingBag,
   Star,
+  Trash2,
   Truck,
   User,
   UserPlus,
@@ -4702,7 +4703,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
   );
 }
 
-function DraftsPage({ orders, onResume }: { orders: Order[]; onResume: (order: Order) => void }) {
+function DraftsPage({ orders, onResume, onDelete }: { orders: Order[]; onResume: (order: Order) => void; onDelete?: (order: Order) => Promise<void> }) {
   const drafts = useMemo(
     () =>
       orders
@@ -4711,12 +4712,42 @@ function DraftsPage({ orders, onResume }: { orders: Order[]; onResume: (order: O
         .sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || "")),
     [orders],
   );
+  const [confirmOrder, setConfirmOrder] = useState<Order | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const deleting = deletingId !== null;
+
+  async function confirmDelete() {
+    if (!confirmOrder || deleting) return;
+    const target = confirmOrder;
+    setDeletingId(target.id);
+    setError("");
+    setNotice("");
+    try {
+      await onDelete?.(target);
+      setNotice("تم حذف المسودة بنجاح");
+      setConfirmOrder(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تعذر حذف المسودة. حاول مرة أخرى.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <section className="panel drafts-panel">
       <div className="panel-head">
         <h2>حفظ مؤقت</h2>
         <span className="muted">{drafts.length ? `${drafts.length} أوردر محفوظ مؤقتًا` : "لا توجد أوردرات محفوظة مؤقتًا"}</span>
       </div>
+      <div className="drafts-notice">{notice && <small className="field-success">{notice}</small>}</div>
       <div className="table-wrap">
         <table className="drafts-table">
           <thead>
@@ -4741,13 +4772,33 @@ function DraftsPage({ orders, onResume }: { orders: Order[]; onResume: (order: O
                 <td>{order.order_type || "-"}</td>
                 <td>{order.updated_at || order.created_at ? formatDateTimeCairo(order.updated_at || order.created_at) : "-"}</td>
                 <td>
-                  <button type="button" className="primary-btn nf-btn nf-btn-draft" onClick={() => onResume(order)}>استكمال الأوردر</button>
+                  <div className="drafts-row-actions">
+                    <button type="button" className="primary-btn nf-btn nf-btn-draft" onClick={() => onResume(order)}>استكمال الأوردر</button>
+                    {onDelete && (
+                      <button type="button" className="primary-btn nf-btn drafts-delete-btn" disabled={deletingId === order.id} onClick={() => { setError(""); setNotice(""); setConfirmOrder(order); }}>
+                        <Trash2 size={16} /> حذف
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {confirmOrder && (
+        <div className="drafts-confirm-overlay" role="dialog" aria-modal="true" aria-label="تأكيد حذف المسودة">
+          <div className="drafts-confirm">
+            <h3>تأكيد حذف المسودة</h3>
+            <p>هل تريد حذف الأوردر <span className="data-value">{confirmOrder.order_number || "-"}</span> المحفوظ مؤقتًا؟ لا يمكن التراجع عن هذا الإجراء.</p>
+            {error && <small className="field-error drafts-confirm-error">{error}</small>}
+            <div className="drafts-confirm-actions">
+              <button type="button" className="primary-btn nf-btn" disabled={deleting} onClick={() => void confirmDelete()}>{deleting ? "جارٍ الحذف…" : "حذف"}</button>
+              <button type="button" className="ghost-btn nf-btn" disabled={deleting} onClick={() => { setConfirmOrder(null); setError(""); }}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -8243,6 +8294,15 @@ function ZunionApp() {
     setView("draftEdit");
   }
 
+  async function deleteDraft(order: Order) {
+    if (!canDeleteOrder(session?.role ?? "Master")) throw new Error("غير مصرح لك بحذف المسودة");
+    const current = orders.find((o) => o.id === order.id);
+    if (!current || !current.draft) throw new Error("هذا الأوردر لم يعد مسودة محفوظة مؤقتًا");
+    await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "DELETE" });
+    setOrders((list) => list.filter((o) => o.id !== order.id));
+    addAudit(session, "ORDER_DELETED", "orders", order.id, current, undefined);
+  }
+
   const currentRole = session?.role ?? "Master";
   const visibleOrders = roleOrders(currentRole, orders);
   const isMaster = currentRole === "Master";
@@ -8389,7 +8449,7 @@ function ZunionApp() {
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
           {view === "new" && <OrderForm customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
-          {view === "drafts" && <DraftsPage orders={orders} onResume={resumeDraft} />}
+          {view === "drafts" && <DraftsPage orders={orders} onResume={resumeDraft} onDelete={canDeleteOrder(currentRole) ? deleteDraft : undefined} />}
           {view === "draftEdit" && resumingDraft && <OrderForm initial={resumingDraft} startAsDraft customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setResumingDraftId(null); setView("drafts"); }} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "draftEdit" && !resumingDraft && <ErrorPanel message="لم يتم العثور على المسودة المطلوبة" />}
           {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
