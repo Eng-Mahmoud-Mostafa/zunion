@@ -9343,3 +9343,8 @@ input[type="number"] {
 @media (max-width:1280px){.settings-nav{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 @media (max-width:768px){.settings-nav{grid-template-columns:1fr}.settings-stat-grid{grid-template-columns:1fr}}
+
+.drafts-panel .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.drafts-table td, .drafts-table th { text-align: right; vertical-align: middle; }
+.drafts-table .primary-btn { white-space: nowrap; }
+.drafts-panel .table-wrap { overflow-x: auto; }

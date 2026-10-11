@@ -80,7 +80,7 @@ import { allPermissionKeys, roleDefaultPermissions, type PermissionKey } from ".
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -533,6 +533,8 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   orders: "orders.view",
   new: "orders.create",
   editOrder: "orders.view",
+  drafts: "orders.create",
+  draftEdit: "orders.create",
   addCustomer: "customers.create",
   addProduct: "products.create",
   search: "orders.view",
@@ -3895,7 +3897,7 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
   );
 }
 
-function OrderForm({ initial, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
+function OrderForm({ initial, startAsDraft = false, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: partyOptions[0], delivery_date: isoOffset(0), created_at: new Date().toISOString() });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -4319,7 +4321,6 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
       if (saved && saved.order_number) {
         setForm((current) => calculate({ ...current, id: saved.id, order_number: saved.order_number, order_status: saved.order_status || "في التشغيل", updated_at: new Date().toISOString() }));
       }
-      setDraftNotice("تم حفظ الأوردر وإرساله للتشغيل بنجاح");
       setForm({
         ...emptyOrder,
         id: createId(),
@@ -4445,7 +4446,7 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
     );
   }
 
-  const isEdit = !!initial;
+  const isEdit = !!initial && !startAsDraft;
 
   return (
     <>
@@ -4461,7 +4462,7 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
             <header className="nf-card-head">
               <span className="nf-card-icon"><ClipboardList size={19} /></span>
               <div>
-                <h3>{isEdit ? `تفاصيل الطلب #${form.order_number}` : "أوردر جديد"}</h3>
+                <h3>{isEdit ? `تفاصيل الطلب #${form.order_number}` : startAsDraft && initial ? `استكمال الأوردر #${form.order_number}` : "أوردر جديد"}</h3>
               </div>
             </header>
             <div className="nf-row nf-row-order">
@@ -4698,6 +4699,56 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
     </form>
     <OrderSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} onSelectOrder={onOpenOrder || (() => setSearchOpen(false))} />
     </>
+  );
+}
+
+function DraftsPage({ orders, onResume }: { orders: Order[]; onResume: (order: Order) => void }) {
+  const drafts = useMemo(
+    () =>
+      orders
+        .filter((order) => order.draft)
+        .slice()
+        .sort((a, b) => (b.updated_at || b.created_at || "").localeCompare(a.updated_at || a.created_at || "")),
+    [orders],
+  );
+  return (
+    <section className="panel drafts-panel">
+      <div className="panel-head">
+        <h2>حفظ مؤقت</h2>
+        <span className="muted">{drafts.length ? `${drafts.length} أوردر محفوظ مؤقتًا` : "لا توجد أوردرات محفوظة مؤقتًا"}</span>
+      </div>
+      <div className="table-wrap">
+        <table className="drafts-table">
+          <thead>
+            <tr>
+              <th>رقم الأوردر</th>
+              <th>اسم العميل</th>
+              <th>نوع الأوردر</th>
+              <th>آخر حفظ</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {drafts.length === 0 && (
+              <tr>
+                <td colSpan={5} className="muted">لا توجد أوردرات محفوظة مؤقتًا. اضغط "حفظ مؤقت" داخل أوردر جديد لإضافتها هنا.</td>
+              </tr>
+            )}
+            {drafts.map((order) => (
+              <tr key={order.id}>
+                <td className="data-value">{order.order_number || "-"}</td>
+                <td>{order.client_name || "-"}</td>
+                <td>{order.order_type || "-"}</td>
+                <td>{order.updated_at || order.created_at ? formatDateTimeCairo(order.updated_at || order.created_at) : "-"}</td>
+                <td>
+                  <button type="button" className="primary-btn nf-btn nf-btn-draft" onClick={() => onResume(order)}>استكمال الأوردر</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -5965,8 +6016,9 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   }
 
   const baseOrders = useMemo(() => {
-    if (queue === "finish") return orders.filter((order) => order.workStage === "finishing" || (order.workStage === "operation" && order.operation_status === "تم"));
-    return roleOrders(session.role, orders);
+    const nonDrafts = orders.filter((order) => !order.draft);
+    if (queue === "finish") return nonDrafts.filter((order) => order.workStage === "finishing" || (order.workStage === "operation" && order.operation_status === "تم"));
+    return roleOrders(session.role, nonDrafts);
   }, [orders, queue, session.role]);
 
   const filtered = useMemo(() => {
@@ -7982,7 +8034,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "alerts", "settings"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "alerts", "settings"];
 
 function viewFromHash(): View {
   const raw = window.location.hash.replace(/^#\/?/, "");
@@ -7995,6 +8047,7 @@ function ZunionApp() {
   const [view, setViewState] = useState<View>(() => viewFromHash());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const [sentNotice, setSentNotice] = useState("");
   const [searchGoOrderId, setSearchGoOrderId] = useState<string | null>(null);
   const [workerGoOrderId, setWorkerGoOrderId] = useState<string | null>(null);
   const [sewingGoOrderId, setSewingGoOrderId] = useState<string | null>(null);
@@ -8002,12 +8055,19 @@ function ZunionApp() {
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
   const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
+  const [resumingDraftId, setResumingDraftId] = useState<string | null>(null);
   const [finishGoOrderId, setFinishGoOrderId] = useState<string | null>(null);
   const [productDrawer, setProductDrawer] = useState<Product | null>(null);
   const [userDrawer, setUserDrawer] = useState<SearchableUser | null>(null);
   const { orders, setOrders } = useOrders(session);
   const orderDrawerOrder = useMemo(() => orderDrawerOrderNumber ? orders.find((o) => o.order_number === orderDrawerOrderNumber) || null : null, [orderDrawerOrderNumber, orders]);
   const editingOrder = useMemo(() => editingOrderNumber ? orders.find((o) => o.order_number === editingOrderNumber) || null : null, [editingOrderNumber, orders]);
+  const resumingDraft = useMemo(() => resumingDraftId ? orders.find((o) => o.id === resumingDraftId && o.draft) || null : null, [resumingDraftId, orders]);
+  useEffect(() => {
+    if (!sentNotice) return;
+    const timer = setTimeout(() => setSentNotice(""), 8000);
+    return () => clearTimeout(timer);
+  }, [sentNotice]);
   const { items: customers, setItems: setCustomers } = useCustomers(session);
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
   const { items: products, setItems: setProducts } = useProducts(session);
@@ -8170,9 +8230,17 @@ function ZunionApp() {
     });
     addAudit(session, "ORDER_SENT_TO_OPERATION", "orders", saved.id, previous, saved);
     setEditingOrderNumber(null);
+    setResumingDraftId(null);
     setWorkerGoOrderId(saved.id);
-    setView("worker");
+    setSentNotice("تم حفظ الأوردر وإرساله للتشغيل بنجاح");
+    setView("new");
     return saved;
+  }
+
+  function resumeDraft(order: Order) {
+    setResumingDraftId(order.id);
+    setEditingOrderNumber(null);
+    setView("draftEdit");
   }
 
   const currentRole = session?.role ?? "Master";
@@ -8189,6 +8257,7 @@ function ZunionApp() {
         id: "main", label: "الرئيسية", visible: true, icon: Home,
         children: [
           { id: "new", label: "اوردر جديد", visible: true, icon: FilePlus },
+          { id: "drafts", label: "حفظ مؤقت", visible: true, icon: Clock },
           { id: "addCustomer", label: "إضافة عميل", visible: true, icon: UserPlus },
           { id: "addProduct", label: "إضافة منتج", visible: true, icon: PackagePlus },
           { id: "orders", label: "متابعة أوردرات", visible: true, icon: ClipboardList },
@@ -8271,7 +8340,7 @@ function ZunionApp() {
     <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
       <Sidebar
         items={sidebarItems}
-        activeView={view === "editOrder" || view === "search" ? "orders" : view}
+        activeView={view === "editOrder" || view === "search" ? "orders" : view === "draftEdit" ? "drafts" : view}
         drawerOpen={drawerOpen}
         onSelect={selectSidebarView}
         onLogout={logout}
@@ -8290,6 +8359,13 @@ function ZunionApp() {
         <section className="page">
           {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}
           {routeAllowed && <>
+          {sentNotice && (
+            <section className="panel created-order-panel">
+              <div>
+                <h2>{sentNotice}</h2>
+              </div>
+            </section>
+          )}
           {createdOrder && (
             <section className="panel created-order-panel">
               <div>
@@ -8313,6 +8389,9 @@ function ZunionApp() {
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
           {view === "new" && <OrderForm customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "drafts" && <DraftsPage orders={orders} onResume={resumeDraft} />}
+          {view === "draftEdit" && resumingDraft && <OrderForm initial={resumingDraft} startAsDraft customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setResumingDraftId(null); setView("drafts"); }} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "draftEdit" && !resumingDraft && <ErrorPanel message="لم يتم العثور على المسودة المطلوبة" />}
           {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
