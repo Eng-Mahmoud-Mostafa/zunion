@@ -3992,7 +3992,8 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
       const existing = customers.find((customer) => customer.client_name.trim().toLowerCase() === value.trim().toLowerCase() || customer.phone === current.phone);
       const source = current.source_person || partyOptions[0];
       const clientCode = existing?.client_code || current.client_code || nextCustomerCode(customers, source);
-      return calculate({ ...current, customer_id: existing?.id || current.customer_id, client_name: value, client_code: clientCode, updated_at: new Date().toISOString() });
+      const updated = calculate({ ...current, customer_id: existing?.id || current.customer_id, client_name: value, client_code: clientCode, updated_at: new Date().toISOString() });
+      return updated;
     });
   }
 
@@ -4305,7 +4306,46 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
   }
 
   const submit = saveValidated(false, onSave);
-  const sendToOperation = saveValidated(true, onSendToProduction ?? onSave);
+  async function handleSendToProduction(event: React.FormEvent) {
+    event.preventDefault();
+    if (saving) return;
+    const order = buildValidatedOrder(true);
+    if (!order) return;
+    setSaving(true);
+    setSaveError("");
+    setDraftNotice("");
+    try {
+      const saved = await (onSendToProduction ?? onSave)(order);
+      if (saved && saved.order_number) {
+        setForm((current) => calculate({ ...current, id: saved.id, order_number: saved.order_number, order_status: saved.order_status || "في التشغيل", updated_at: new Date().toISOString() }));
+      }
+      setDraftNotice("تم حفظ الأوردر وإرساله للتشغيل بنجاح");
+      setForm({
+        ...emptyOrder,
+        id: createId(),
+        source_person: form.source_person,
+        order_number: nextCustomerCode(customers, form.source_person || partyOptions[0]).replace(/^[^-]+-/, '').replace(/^0+/, '') || String(Date.now()).slice(-6),
+        delivery_date: isoOffset(0),
+        created_at: new Date().toISOString(),
+        operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
+        items: [],
+        logo_image_url: "",
+        work_order_image_url: "",
+        logoFileName: "",
+        workOrderFileName: "",
+      });
+      setForm((current) => calculate({ ...current, client_code: nextCustomerCode(customers, form.source_person || partyOptions[0]) }));
+      setErrors({});
+      setSaveError("");
+      const img = document.querySelectorAll('.image-clipboard-field .upload-preview, .image-clipboard-field img');
+      img.forEach((el) => el.remove());
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "تعذر حفظ الأوردر وإرساله للتشغيل. حاول مرة أخرى.");
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
+  }
 
   async function saveDraftTemp() {
     if (saving) return;
@@ -4458,6 +4498,23 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
                 </select>
                 <ErrorText message={errors.client_name} />
               </label>
+              <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
+                <span>طرف</span>
+                <select
+                  value={partyOptions.includes(form.source_person) ? form.source_person : form.source_person === "أخرى" ? "أخرى" : (form.source_person ? "أخرى" : "")}
+                  onChange={(event) => {
+                    setForm((current) => calculate({ ...current, source_person: event.target.value, updated_at: new Date().toISOString() }));
+                  }}
+                  disabled={readOnly}
+                >
+                  <option value="" disabled hidden>اختر الطرف</option>
+                  <option value="أحمد">أحمد</option>
+                  <option value="حسن">حسن</option>
+                  <option value="خليفة">خليفة</option>
+                  <option value="أخرى">أخرى</option>
+                </select>
+                <ErrorText message={errors.source_person} />
+              </label>
               <label className="nf-field">
                 <span>كود العميل</span>
                 <input value={form.client_code || nextCustomerCode(customers, form.source_person || "")} readOnly />
@@ -4584,7 +4641,7 @@ function OrderForm({ initial, customers = [], products = [], canAddProduct = fal
         ) : onSaveDraft || onSendToProduction ? (
           <>
             {onSaveDraft && <button type="button" className="primary-btn nf-btn nf-btn-draft" onClick={saveDraftTemp} disabled={saving}><FilePlus size={16} /> حفظ مؤقت</button>}
-            {onSendToProduction && <button type="button" className="primary-btn nf-btn nf-btn-to-op" onClick={sendToOperation} disabled={saving}><Truck size={16} /> اذهب للتشغيل</button>}
+            <button type="button" className="primary-btn nf-btn nf-btn-to-op" onClick={handleSendToProduction} disabled={saving}><Truck size={16} /> اذهب للتشغيل</button>
             {onPrint && <button type="button" className="primary-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة</button>}
           </>
         ) : (

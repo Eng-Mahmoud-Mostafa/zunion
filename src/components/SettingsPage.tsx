@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
   Ban,
@@ -1295,8 +1295,8 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
                   <tr key={user.id}>
                     <td>
                       <div className="settings-user-cell">
-                        <strong>{user.fullName}</strong>
-                        <span className="muted">{user.username}</span>
+                        <div className="settings-user-name">{user.fullName}</div>
+                        <div className="settings-user-username">{user.username}</div>
                       </div>
                     </td>
                     <td>{user.role}</td>
