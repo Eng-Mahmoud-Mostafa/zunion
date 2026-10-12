@@ -3970,7 +3970,7 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
   );
 }
 
-function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
+function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint, closeSaveMode = "save", onDirtyChange, registerActions }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void; tabId?: string; closeSaveMode?: "draft" | "save"; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
   const firstActiveParty = parties.find((party) => party.active)?.name ?? "";
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: firstActiveParty, delivery_date: isoOffset(0), created_at: new Date().toISOString() });
   const activePartyNames = parties.filter((party) => party.active).map((party) => party.name);
@@ -3980,6 +3980,26 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const baselineRef = useRef<string | null>(JSON.stringify(form));
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  useEffect(() => {
+    const serialized = JSON.stringify(form);
+    if (baselineRef.current === null) {
+      baselineRef.current = serialized;
+      onDirtyChangeRef.current?.(false);
+      return;
+    }
+    onDirtyChangeRef.current?.(serialized !== baselineRef.current);
+  }, [form]);
+  const saveForCloseRef = useRef<() => Promise<boolean>>(async () => true);
+  saveForCloseRef.current = saveForClose;
+  const registerActionsRef = useRef(registerActions);
+  registerActionsRef.current = registerActions;
+  useEffect(() => {
+    registerActionsRef.current?.({ saveForClose: () => saveForCloseRef.current() });
+    return () => registerActionsRef.current?.(null);
+  }, []);
   const [searchOpen, setSearchOpen] = useState(false);
   const [draftNotice, setDraftNotice] = useState("");
   useEffect(() => {
@@ -4376,6 +4396,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
         if (saved && saved.order_number) {
           setForm((current) => calculate({ ...current, id: saved.id, order_number: saved.order_number, order_status: saved.order_status || current.order_status, updated_at: new Date().toISOString() }));
         }
+        baselineRef.current = null;
       } catch (error) {
         setSaveError(error instanceof Error ? error.message : "تعذر حفظ الأوردر. حاول مرة أخرى.");
         setSaving(false);
@@ -4414,6 +4435,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
         workOrderFileName: "",
       });
       setForm((current) => calculate({ ...current, client_code: nextCustomerCode(customers, form.source_person || firstActiveParty) }));
+      baselineRef.current = null;
       setErrors({});
       setSaveError("");
       const img = document.querySelectorAll('.image-clipboard-field .upload-preview, .image-clipboard-field img');
@@ -4426,8 +4448,8 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
     setSaving(false);
   }
 
-  async function saveDraftTemp() {
-    if (saving) return;
+  async function saveDraftTemp(): Promise<boolean> {
+    if (saving) return false;
     const now = new Date().toISOString();
     const selectedName = selectedProduct?.name || form.productName;
     const order = calculate({
@@ -4456,13 +4478,38 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
       if (saved && saved.order_number) {
         setForm((current) => calculate({ ...current, id: saved.id, order_number: saved.order_number, updated_at: new Date().toISOString() }));
       }
+      baselineRef.current = null;
       setDraftNotice("تم حفظ الأوردر كمسودة بنجاح");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "تعذر حفظ المسودة. حاول مرة أخرى.");
       setSaving(false);
-      return;
+      return false;
     }
     setSaving(false);
+    return true;
+  }
+
+  async function saveForClose(): Promise<boolean> {
+    if (saving) return false;
+    if (closeSaveMode === "draft") return saveDraftTemp();
+    const order = buildValidatedOrder(false);
+    if (!order) return false;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const saved = await onSave(order);
+      if (saved && saved.order_number) {
+        setForm((current) => calculate({ ...current, id: saved.id, order_number: saved.order_number, order_status: saved.order_status || current.order_status, updated_at: new Date().toISOString() }));
+      }
+      baselineRef.current = JSON.stringify(form);
+      onDirtyChangeRef.current?.(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "تعذر حفظ الأوردر. حاول مرة أخرى.");
+      setSaving(false);
+      return false;
+    }
+    setSaving(false);
+    return true;
   }
   const canSubmit = Boolean(
     form.client_name.trim() &&
@@ -7293,7 +7340,7 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
   );
 }
 
-function AddCustomerPage({ customers, setCustomers, session, parties = [] }: { customers: Customer[]; setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>; session: Session; parties?: Party[] }) {
+function AddCustomerPage({ customers, setCustomers, session, parties = [], onDirtyChange, registerActions }: { customers: Customer[]; setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>; session: Session; parties?: Party[]; tabId?: string; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
   const partyNames = parties.filter((item) => item.active).map((item) => item.name).filter(Boolean);
   const [party, setParty] = useState(partyNames[0] ?? "");
   const [name, setName] = useState("");
@@ -7303,15 +7350,34 @@ function AddCustomerPage({ customers, setCustomers, session, parties = [] }: { c
   const [error, setError] = useState("");
   const selectedParty = party;
   const code = nextCustomerCode(customers, selectedParty || partyNames[0] || "");
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  const registerActionsRef = useRef(registerActions);
+  registerActionsRef.current = registerActions;
+  const saveForCloseRef = useRef<() => Promise<boolean>>(async () => true);
+  saveForCloseRef.current = async () => {
+    if (!name.trim() && !phone.trim() && !email.trim() && !address.trim()) return true;
+    return saveCustomer();
+  };
+  useEffect(() => {
+    onDirtyChangeRef.current?.(Boolean(name.trim() || phone.trim() || email.trim() || address.trim()));
+  }, [name, phone, email, address]);
+  useEffect(() => {
+    registerActionsRef.current?.({ saveForClose: () => saveForCloseRef.current() });
+    return () => registerActionsRef.current?.(null);
+  }, []);
   useEffect(() => {
     if (!party && partyNames.length) setParty(partyNames[0]);
   }, [party, partyNames.length]);
-  function submit(event: React.FormEvent) {
-    event.preventDefault();
+  function saveCustomer(): boolean {
     const normalizedEmail = email.trim().toLowerCase();
+    if (!name.trim()) {
+      setError("اسم العميل مطلوب");
+      return false;
+    }
     if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       setError("البريد الإلكتروني غير صحيح");
-      return;
+      return false;
     }
     setError("");
     const customer: Customer = { id: createId(), source_person: selectedParty, client_name: name.trim(), client_code: code, phone: phone.trim(), email: normalizedEmail, address: address.trim(), old_balance: 0, notes: "", created_at: new Date().toISOString() };
@@ -7321,6 +7387,12 @@ function AddCustomerPage({ customers, setCustomers, session, parties = [] }: { c
     setPhone("");
     setEmail("");
     setAddress("");
+    onDirtyChangeRef.current?.(false);
+    return true;
+  }
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    saveCustomer();
   }
   return (
     <div className="stack add-product-page">
@@ -8164,15 +8236,97 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
 
 const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "alerts", "settings"];
 
-function viewFromHash(): View {
+type ShellTab = { id: string; view: View; recordId?: string; label: string };
+
+const TAB_META: Record<View, { label: string; icon: LucideIcon }> = {
+  dashboard: { label: "نظرة عامة", icon: LayoutDashboard },
+  orders: { label: "متابعة أوردرات", icon: ClipboardList },
+  new: { label: "أوردر جديد", icon: FilePlus },
+  editOrder: { label: "تفاصيل أوردر", icon: ClipboardList },
+  drafts: { label: "حفظ مؤقت", icon: Clock },
+  draftEdit: { label: "استكمال مسودة", icon: Clock },
+  addCustomer: { label: "إضافة عميل", icon: UserPlus },
+  addProduct: { label: "إضافة منتج", icon: PackagePlus },
+  search: { label: "بحث", icon: Search },
+  worker: { label: "تشغيل تطريز", icon: Cog },
+  machineDist: { label: "توزيع المكن", icon: LayoutGrid },
+  finish: { label: "التشطيب", icon: Wrench },
+  print: { label: "طباعه", icon: Printer },
+  sewing: { label: "خياطه", icon: Scissors },
+  archive: { label: "أرشيف", icon: Archive },
+  customers: { label: "حسابات العملاء", icon: Users },
+  customerAccounts: { label: "كشف العملاء", icon: Users },
+  finance: { label: "مصروفات وإيرادات", icon: WalletCards },
+  reports: { label: "التقارير", icon: BarChart3 },
+  audit: { label: "سجل العمليات", icon: History },
+  import: { label: "استيراد وتصدير", icon: FileText },
+  alerts: { label: "تنبيهات التسليم", icon: Bell },
+  settings: { label: "الإعدادات", icon: Settings },
+};
+
+const RECORD_VIEWS: View[] = ["editOrder", "draftEdit"];
+
+function tabIdFor(view: View, recordId?: string) {
+  return recordId ? `${view}:${recordId}` : view;
+}
+
+function makeShellTab(view: View, recordId?: string, label?: string): ShellTab {
+  const scopedRecord = RECORD_VIEWS.includes(view) ? recordId : undefined;
+  return { id: tabIdFor(view, recordId), view, recordId: scopedRecord, label: label ?? TAB_META[view].label };
+}
+
+function parseHash(): { view: View; recordId?: string } {
   const raw = window.location.hash.replace(/^#\/?/, "");
-  return knownViews.includes(raw as View) ? raw as View : "dashboard";
+  const [head, ...rest] = raw.split("/");
+  const view = knownViews.includes(head as View) ? (head as View) : "dashboard";
+  const recordId = rest.length ? decodeURIComponent(rest.join("/")) : undefined;
+  return { view, recordId: RECORD_VIEWS.includes(view) ? recordId : undefined };
+}
+
+function encodeTabHash(tab: { view: View; recordId?: string }) {
+  return tab.recordId ? `#${tab.view}/${encodeURIComponent(tab.recordId)}` : `#${tab.view}`;
+}
+
+function TabBar({ tabs, activeId, dirtyMap, onActivate, onClose }: { tabs: ShellTab[]; activeId: string; dirtyMap: Record<string, boolean>; onActivate: (id: string) => void; onClose: (id: string) => void }) {
+  return (
+    <div className="tabbar" role="tablist" aria-label="الصفحات المفتوحة">
+      <div className="tabbar-scroll">
+        {tabs.map((tab) => {
+          const Icon = TAB_META[tab.view].icon;
+          const active = tab.id === activeId;
+          const dirty = !!dirtyMap[tab.id];
+          return (
+            <div key={tab.id} className={`tab${active ? " active" : ""}${dirty ? " tab-dirty" : ""}`} role="tab" aria-selected={active}>
+              <button type="button" className="tab-main" title={tab.label} onClick={() => onActivate(tab.id)}>
+                <Icon size={15} />
+                <span className="tab-label">{tab.label}</span>
+                {dirty && <span className="tab-dot" aria-label="توجد تغييرات غير محفوظة" />}
+              </button>
+              <button type="button" className="tab-close" aria-label={`إغلاق ${tab.label}`} title="إغلاق" onClick={() => onClose(tab.id)}>
+                <X size={14} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function ZunionApp() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
   const [sessionReady, setSessionReady] = useState(!useServerAuth);
-  const [view, setViewState] = useState<View>(() => viewFromHash());
+  const [tabs, setTabs] = useState<ShellTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState("");
+  const [dirtyMap, setDirtyMap] = useState<Record<string, boolean>>({});
+  const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const [closeError, setCloseError] = useState("");
+  const tabControllers = useRef(new Map<string, { saveForClose: () => Promise<boolean> }>());
+  const scrollPositions = useRef<Record<string, number>>({});
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null;
+  const view: View = activeTab ? activeTab.view : "dashboard";
+  const anyDirty = Object.keys(dirtyMap).some((key) => dirtyMap[key]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [sentNotice, setSentNotice] = useState("");
@@ -8251,23 +8405,161 @@ function ZunionApp() {
     };
   }, []);
 
+  function syncTabHash(tab: { view: View; recordId?: string }) {
+    try {
+      window.history.replaceState(null, "", encodeTabHash(tab));
+    } catch {
+      window.location.hash = encodeTabHash(tab);
+    }
+  }
+
+  function activateTabObject(tab: ShellTab) {
+    if (tab.id !== activeTabId) scrollPositions.current[activeTabId] = window.scrollY;
+    setActiveTabId(tab.id);
+    syncTabHash(tab);
+    if (tab.view === "editOrder") setEditingOrderNumber(tab.recordId ?? null);
+    if (tab.view === "draftEdit") setResumingDraftId(tab.recordId ?? null);
+    requestAnimationFrame(() => window.scrollTo(0, scrollPositions.current[tab.id] || 0));
+  }
+
+  function openView(nextView: View, recordId?: string, label?: string) {
+    const tab = makeShellTab(nextView, recordId, label ?? (nextView === "editOrder" && recordId ? `أوردر ${recordId}` : undefined));
+    setTabs((prev) => (prev.some((item) => item.id === tab.id) ? prev : [...prev, tab]));
+    if (nextView === "new") setCreatedOrder(null);
+    activateTabObject(tab);
+  }
+
+  function activateTab(id: string) {
+    const tab = tabs.find((item) => item.id === id);
+    if (tab && tab.id !== activeTabId) activateTabObject(tab);
+  }
+
+  function removeTab(id: string) {
+    tabControllers.current.delete(id);
+    setDirtyMap((map) => {
+      if (!(id in map)) return map;
+      const next = { ...map };
+      delete next[id];
+      return next;
+    });
+    delete scrollPositions.current[id];
+    setTabs((prev) => {
+      const index = prev.findIndex((item) => item.id === id);
+      if (index === -1) return prev;
+      const next = prev.filter((item) => item.id !== id);
+      if (id === activeTabId) {
+        const target = next[index] ?? next[index - 1] ?? null;
+        if (target) activateTabObject(target);
+        else {
+          setActiveTabId("");
+          try {
+            window.history.replaceState(null, "", "#dashboard");
+          } catch {
+            window.location.hash = "#dashboard";
+          }
+        }
+      }
+      return next;
+    });
+  }
+
+  function closeTab(id: string) {
+    if (dirtyMap[id]) {
+      setPendingCloseId(id);
+      setCloseError("");
+    } else {
+      removeTab(id);
+    }
+  }
+
+  function requestCloseTab(id: string) {
+    closeTab(id);
+  }
+
+  async function confirmSaveClose() {
+    if (!pendingCloseId) return;
+    const id = pendingCloseId;
+    const controller = tabControllers.current.get(id);
+    if (!controller) {
+      setPendingCloseId(null);
+      removeTab(id);
+      return;
+    }
+    setCloseBusy(true);
+    setCloseError("");
+    try {
+      const ok = await controller.saveForClose();
+      if (ok) {
+        setPendingCloseId(null);
+        removeTab(id);
+      } else {
+        setCloseError("تعذّر حفظ التغييرات. حاول مرة أخرى.");
+      }
+    } catch {
+      setCloseError("تعذّر حفظ التغييرات. حاول مرة أخرى.");
+    } finally {
+      setCloseBusy(false);
+    }
+  }
+
+  function discardClose() {
+    if (!pendingCloseId) return;
+    const id = pendingCloseId;
+    setPendingCloseId(null);
+    removeTab(id);
+  }
+
+  const openViewRef = useRef(openView);
+  openViewRef.current = openView;
+
   useEffect(() => {
-    const syncViewFromHash = () => setViewState(viewFromHash());
-    window.addEventListener("hashchange", syncViewFromHash);
-    return () => window.removeEventListener("hashchange", syncViewFromHash);
+    const onHash = () => {
+      const parsed = parseHash();
+      openViewRef.current(parsed.view, parsed.recordId);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   useEffect(() => {
+    if (!session) {
+      setTabs([]);
+      setActiveTabId("");
+      setDirtyMap({});
+      tabControllers.current.clear();
+      setPendingCloseId(null);
+      return;
+    }
+    setTabs((prev) => {
+      if (prev.length) return prev;
+      const parsed = parseHash();
+      const target = canAccessView(session, parsed.view) ? parsed.view : firstAllowedView(session);
+      const tab = makeShellTab(target, target === parsed.view ? parsed.recordId : undefined);
+      setActiveTabId(tab.id);
+      try {
+        window.history.replaceState(null, "", encodeTabHash(tab));
+      } catch {
+        /* ignore */
+      }
+      return [tab];
+    });
+  }, [session?.email]);
+
+  useEffect(() => {
     if (!session) return;
-    if (!canAccessView(session, view)) setView(firstAllowedView(session));
+    if (!canAccessView(session, view)) openView(firstAllowedView(session));
   }, [session, view]);
 
-  function setView(nextView: View) {
-    setViewState(nextView);
-    window.history.replaceState(null, "", `#${nextView}`);
-    if (nextView === "new") setCreatedOrder(null);
-    if (nextView !== "editOrder") setEditingOrderNumber(null);
-  }
+  useEffect(() => {
+    if (!anyDirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+      return "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [anyDirty]);
 
   async function uploadOrderImages(order: Order): Promise<Order> {
     const items = (order.operationItems || []).filter((item) => item.method.trim() || item.logoImage || item.workOrderImage);
@@ -8331,7 +8623,7 @@ function ZunionApp() {
     addAudit(session, "ORDER_CREATED", "orders", saved.id, undefined, saved);
     setCreatedOrder(saved);
     setSearchGoOrderId(saved.id);
-    setView("search");
+    openView("search");
     return saved;
   }
 
@@ -8343,7 +8635,7 @@ function ZunionApp() {
     addAudit(session, "ORDER_EDITED", "orders", saved.id, previous, saved);
     setEditingOrderNumber(null);
     setSearchGoOrderId(saved.id);
-    setView("search");
+    openView("search");
     return saved;
   }
 
@@ -8364,8 +8656,7 @@ function ZunionApp() {
       if (current.some((existing) => existing.id === order.id)) return current;
       return [order, ...current];
     });
-    setEditingOrderNumber(order.order_number);
-    setView("editOrder");
+    openView("editOrder", order.order_number, order.client_name ? `${order.client_name} · ${order.order_number}` : undefined);
   }
 
   async function sendOrderToOperation(order: Order): Promise<Order> {
@@ -8380,14 +8671,14 @@ function ZunionApp() {
     setResumingDraftId(null);
     setWorkerGoOrderId(saved.id);
     setSentNotice("تم حفظ الأوردر وإرساله للتشغيل بنجاح");
-    setView("new");
+    openView("new");
     return saved;
   }
 
   function resumeDraft(order: Order) {
     setResumingDraftId(order.id);
     setEditingOrderNumber(null);
-    setView("draftEdit");
+    openView("draftEdit", order.id, order.client_name ? `مسودة · ${order.client_name}` : undefined);
   }
 
   async function deleteDraft(order: Order) {
@@ -8453,7 +8744,7 @@ function ZunionApp() {
   }, [session]);
 
   function selectSidebarView(nextView: View) {
-    setView(nextView);
+    openView(nextView);
     setDrawerOpen(false);
   }
 
@@ -8492,6 +8783,95 @@ function ZunionApp() {
     managePermissions: hasPermission(session, "permissions.manage"),
   };
 
+  const orderTabLabel = (orderNumber: string) => {
+    const match = orders.find((item) => item.order_number === orderNumber);
+    return match?.client_name ? `${match.client_name} · ${orderNumber}` : `أوردر ${orderNumber}`;
+  };
+
+  const reportDirty = (id: string) => (dirty: boolean) => {
+    setDirtyMap((map) => (map[id] === dirty ? map : { ...map, [id]: dirty }));
+  };
+
+  const registerTabActions = (id: string) => (actions: { saveForClose: () => Promise<boolean> } | null) => {
+    if (actions) tabControllers.current.set(id, actions);
+    else tabControllers.current.delete(id);
+  };
+
+  function renderTabContent(tab: ShellTab) {
+    if (!session) return null;
+    switch (tab.view) {
+      case "dashboard":
+        return <Dashboard setView={(next) => openView(next)} canSeeFinancials={canManageFinancials(session.role)} />;
+      case "orders":
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+      case "new":
+        return <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => openView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+      case "drafts":
+        return <DraftsPage orders={orders} onResume={resumeDraft} onDelete={canDeleteOrder(currentRole) ? deleteDraft : undefined} />;
+      case "draftEdit": {
+        const draft = tab.recordId ? orders.find((item) => item.id === tab.recordId && item.draft) : null;
+        if (!draft) return <ErrorPanel message="لم يتم العثور على المسودة المطلوبة" />;
+        return <OrderForm initial={draft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => openView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+      }
+      case "editOrder": {
+        const order = tab.recordId ? orders.find((item) => item.order_number === tab.recordId) : null;
+        if (!order) return <ErrorPanel message="لم يتم العثور على الأوردر المطلوب" />;
+        return <OrderForm initial={order} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => openView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(ord) => printOrderFromForm(ord, orders)} tabId={tab.id} closeSaveMode="save" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+      }
+      case "addCustomer":
+        return <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} parties={parties} tabId={tab.id} onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+      case "addProduct":
+        return <ProductManagerPage products={products} setProducts={setProducts} session={session} />;
+      case "search":
+        return <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+      case "worker":
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); openView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} onDistribute={() => openView("machineDist")} />;
+      case "machineDist":
+        return <MachineDistributionPage orders={orders} session={session} machines={machines} onMachinesChanged={refreshMachines} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+      case "finish":
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+      case "print":
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="printing" goToOrderId={printingGoOrderId} onGoToOrderHandled={() => setPrintingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+      case "sewing":
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+      case "archive":
+        return <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />;
+      case "customers":
+        return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} />;
+      case "customerAccounts":
+        return <CustomerAccountsPage orders={orders} customers={customers} session={session} />;
+      case "finance":
+        return <FinancePageModern session={session} />;
+      case "reports":
+        return <ReportsPage session={session} />;
+      case "import":
+        return <ImportExport orders={orders} setOrders={setOrders} session={session} />;
+      case "audit":
+        return <AuditLog />;
+      case "settings":
+        return (
+          <SettingsPage
+            username={session.username || ""}
+            role={session.role}
+            isMaster={session.role === "Master"}
+            useRemoteSettings={useServerAuth || !isLocalHost}
+            permissionGroups={permissionGroups}
+            capabilities={settingsCapabilities}
+            accountPanel={<OptionalPasswordChangePanel session={session} />}
+            localMachines={machines}
+            parties={parties}
+            onCreateParty={handleCreateParty}
+            onUpdateParty={handleUpdateParty}
+            onAudit={(action, entityType, entityId, oldValue, newValue) => addAudit(session, action, entityType, entityId, oldValue, newValue)}
+          />
+        );
+      case "alerts":
+        return <section className="panel"><h2>تنبيهات التسليم</h2><div className="alerts-list">{buildAlerts(visibleOrders, canManageFinancials(session.role)).map((alert, index) => <AlertItem key={`${alert.order.id}-${index}`} alert={alert} />)}</div></section>;
+      default:
+        return null;
+    }
+  }
+
   return (
     <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
       <Sidebar
@@ -8512,6 +8892,7 @@ function ZunionApp() {
           <button type="button" className="topbar-bell" aria-label="التنبيهات" onClick={() => selectSidebarView("alerts")}><Bell size={20} /><span className="topbar-notification-dot" /></button>
           <div className="topbar-brand" dir="ltr">zunion system control</div>
         </header>
+        <TabBar tabs={tabs} activeId={activeTabId} dirtyMap={dirtyMap} onActivate={activateTab} onClose={closeTab} />
         <section className="page">
           {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}
           {routeAllowed && <>
@@ -8542,52 +8923,32 @@ function ZunionApp() {
               )}
             </section>
           )}
-          {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
-          {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-          {view === "new" && <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
-          {view === "drafts" && <DraftsPage orders={orders} onResume={resumeDraft} onDelete={canDeleteOrder(currentRole) ? deleteDraft : undefined} />}
-          {view === "draftEdit" && resumingDraft && <OrderForm initial={resumingDraft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setResumingDraftId(null); setView("drafts"); }} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
-          {view === "draftEdit" && !resumingDraft && <ErrorPanel message="لم يتم العثور على المسودة المطلوبة" />}
-          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
-          {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} parties={parties} />}
-          {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
-          {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-{view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onDistribute={() => setView("machineDist")} />}
-            {view === "machineDist" && <MachineDistributionPage orders={orders} session={session} machines={machines} onMachinesChanged={refreshMachines} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-            {view === "finish" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-            {view === "print" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="printing" goToOrderId={printingGoOrderId} onGoToOrderHandled={() => setPrintingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-            {view === "sewing" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-            {view === "archive" && <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={setView} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
-          {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} />}
-          {view === "customerAccounts" && <CustomerAccountsPage orders={orders} customers={customers} session={session} />}
-          {view === "finance" && <FinancePageModern session={session} />}
-          {view === "reports" && <ReportsPage session={session} />}
-          {view === "import" && <ImportExport orders={orders} setOrders={setOrders} session={session} />}
-          {view === "audit" && <AuditLog />}
-          {view === "settings" && (
-          <SettingsPage
-            username={session.username || ""}
-            role={session.role}
-            isMaster={session.role === "Master"}
-            useRemoteSettings={useServerAuth || !isLocalHost}
-            permissionGroups={permissionGroups}
-            capabilities={settingsCapabilities}
-            accountPanel={<OptionalPasswordChangePanel session={session} />}
-            localMachines={machines}
-            parties={parties}
-            onCreateParty={handleCreateParty}
-            onUpdateParty={handleUpdateParty}
-            onAudit={(action, entityType, entityId, oldValue, newValue) => addAudit(session, action, entityType, entityId, oldValue, newValue)}
-          />
-        )}
-          {view === "alerts" && <section className="panel"><h2>تنبيهات التسليم</h2><div className="alerts-list">{buildAlerts(visibleOrders, canManageFinancials(session.role)).map((alert, index) => <AlertItem key={`${alert.order.id}-${index}`} alert={alert} />)}</div></section>}
+          {tabs.map((tab) => (
+            <div key={tab.id} className="tab-pane" hidden={tab.id !== activeTabId}>
+              {renderTabContent(tab)}
+            </div>
+          ))}
           </>}
         </section>
       </main>
-      <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={setView} />
-      <OrderDetailsDrawer open={!!orderDrawerOrder} onClose={() => setOrderDrawerOrderNumber(null)} order={orderDrawerOrder} customers={customers} setOrders={setOrders} session={session} setView={setView} onCustomerClick={(code, name) => { setOrderDrawerOrderNumber(null); setCustomerDrawer({ code, name }); }} />
-      <ProductDrawer open={!!productDrawer} onClose={() => setProductDrawer(null)} product={productDrawer} orders={orders} setView={setView} />
+      <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={(next) => openView(next)} />
+      <OrderDetailsDrawer open={!!orderDrawerOrder} onClose={() => setOrderDrawerOrderNumber(null)} order={orderDrawerOrder} customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => { setOrderDrawerOrderNumber(null); setCustomerDrawer({ code, name }); }} />
+      <ProductDrawer open={!!productDrawer} onClose={() => setProductDrawer(null)} product={productDrawer} orders={orders} setView={(next) => openView(next)} />
       <UserDrawer open={!!userDrawer} onClose={() => setUserDrawer(null)} user={userDrawer} orders={orders} />
+      {pendingCloseId && (
+        <div className="tab-confirm-overlay" role="presentation" onClick={() => { if (!closeBusy) setPendingCloseId(null); }}>
+          <div className="tab-confirm" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <h3>توجد تغييرات غير محفوظة</h3>
+            <p className="muted">هل تريد حفظ التغييرات قبل إغلاق الصفحة؟</p>
+            {closeError && <p className="tab-confirm-error">{closeError}</p>}
+            <div className="tab-confirm-actions">
+              <button type="button" className="primary-btn" onClick={() => void confirmSaveClose()} disabled={closeBusy}>{closeBusy ? "جارٍ الحفظ..." : "حفظ"}</button>
+              <button type="button" className="ghost-btn" onClick={discardClose} disabled={closeBusy}>تجاهل التغييرات</button>
+              <button type="button" className="ghost-btn" onClick={() => setPendingCloseId(null)} disabled={closeBusy}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
