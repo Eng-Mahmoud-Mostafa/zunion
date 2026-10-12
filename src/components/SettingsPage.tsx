@@ -76,7 +76,14 @@ export type SettingsCapabilities = {
   managePermissions: boolean;
 };
 
-type SectionId = "overview" | "users" | "roles" | "overrides" | "departments" | "resources" | "finance" | "security";
+export type SettingsParty = {
+  id: string;
+  name: string;
+  position: number;
+  active: boolean;
+};
+
+type SectionId = "overview" | "users" | "roles" | "overrides" | "departments" | "resources" | "parties" | "finance" | "security";
 
 /** Minimal structural shapes the host app passes down for browser-only mode. */
 type LocalWorkerInput = { id: string; name: string; active: boolean; department: string; card_id?: string | null; phone?: string | null };
@@ -100,6 +107,9 @@ type SettingsPageProps = {
   /** Browser-only mode has no backend, so the host supplies live records. */
   localWorkers?: LocalWorkerInput[];
   localMachines?: LocalMachineInput[];
+  parties?: SettingsParty[];
+  onCreateParty?: (name: string) => Promise<void> | void;
+  onUpdateParty?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void;
   onAudit: (action: string, entityType: string, entityId?: string, oldValue?: unknown, newValue?: unknown) => void;
 };
 
@@ -192,6 +202,7 @@ const SECTIONS: Array<{ id: SectionId; label: string; description: string; icon:
   { id: "overrides", label: "صلاحيات المستخدمين", description: "منح أو منع صلاحية واحدة لمستخدم محدد", icon: UserCog },
   { id: "departments", label: "الأقسام وقنوات التشغيل", description: "أقسام العمال وقنوات الطابور المستخدمة في التشغيل", icon: Factory },
   { id: "resources", label: "العمال والماكينات", description: "سجل العمال المسجلين والماكينات المعتمدة", icon: Cpu },
+  { id: "parties", label: "إدارة الأطراف", description: "قائمة الأطراف المركزية المستخدمة في كل الشاشات", icon: Wrench },
   { id: "finance", label: "الإعدادات المالية", description: "طرق الدفع والفترات الشهرية المفتوحة", icon: WalletCards },
   { id: "security", label: "الأمان", description: "كلمة المرور، الحسابات النشطة، وسجل الأمان", icon: Lock },
 ];
@@ -506,12 +517,15 @@ function StatusBadge({ status }: { status: "active" | "inactive" }) {
   return <span className={status === "active" ? "badge badge-green" : "badge badge-gray"}>{status === "active" ? "مفعل" : "موقوف"}</span>;
 }
 
-export default function SettingsPage({ username, role, isMaster, useRemoteSettings, permissionGroups, capabilities, accountPanel, localWorkers, localMachines, onAudit }: SettingsPageProps) {
+export default function SettingsPage({ username, role, isMaster, useRemoteSettings, permissionGroups, capabilities, accountPanel, localWorkers, localMachines, parties, onCreateParty, onUpdateParty, onAudit }: SettingsPageProps) {
   const [section, setSection] = useState<SectionId>("overview");
   const [query, setQuery] = useState("");
   const [users, setUsers] = useState<SettingsUser[]>(() => loadStoredUsers());
   const [roles, setRoles] = useState<SettingsRole[]>(() => loadStoredRoles());
   const [notice, setNotice] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
+  const [newPartyName, setNewPartyName] = useState("");
+  const [partyEdits, setPartyEdits] = useState<Record<string, string>>({});
+  const [partyBusy, setPartyBusy] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
   const [loadError, setLoadError] = useState("");
 
@@ -1135,12 +1149,13 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
         return [...Object.entries(WORKER_DEPARTMENT_LABELS), ...QUEUE_CHANNELS.map((channel) => [channel.id, channel.label] as [string, string])].filter(([, label]) => label.toLowerCase().includes(needle)).length;
       }
       if (id === "resources") return (workers || []).filter((item) => item.name.toLowerCase().includes(needle)).length + (machines || []).filter((item) => item.name.toLowerCase().includes(needle)).length;
+      if (id === "parties") return (parties || []).filter((item) => item.name.toLowerCase().includes(needle)).length;
       if (id === "finance") return PAYMENT_METHODS.filter((item) => item.label.toLowerCase().includes(needle)).length;
       if (id === "security") return (auditRows || []).filter((item) => `${AUDIT_ACTION_LABELS[item.action] || item.action} ${item.entity_type || ""}`.toLowerCase().includes(needle)).length;
       if (id === "overview") return users.filter((item) => `${item.username} ${item.fullName} ${item.role}`.toLowerCase().includes(needle)).length + roles.filter((item) => `${item.name} ${item.description}`.toLowerCase().includes(needle)).length;
       return 0;
     },
-    [query, filteredUsers, roles, users, workers, machines, auditRows],
+    [query, filteredUsers, roles, users, workers, machines, auditRows, parties],
   );
 
   if (!isMaster) {
@@ -1734,6 +1749,150 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
       </section>
     );
   };
+  const renderParties = () => {
+    const list = parties ?? [];
+    const duplicateExists = (name: string, ignoreId?: string) =>
+      list.some((party) => party.id !== ignoreId && party.name.trim().toLowerCase() === name.trim().toLowerCase());
+    const submitNew = async () => {
+      const name = newPartyName.trim();
+      if (!name) { showNotice("error", "اسم الطرف مطلوب"); return; }
+      if (duplicateExists(name)) { showNotice("error", "هذا الطرف موجود بالفعل"); return; }
+      if (!onCreateParty) { showNotice("error", "غير مصرح لك بهذا الإجراء"); return; }
+      setPartyBusy("new");
+      try {
+        await onCreateParty(name);
+        setNewPartyName("");
+        showNotice("success", "تم إضافة الطرف بنجاح");
+      } catch (error) {
+        showNotice("error", error instanceof Error ? error.message : "تعذر إضافة الطرف");
+      } finally {
+        setPartyBusy("");
+      }
+    };
+    const saveEdit = async (party: SettingsParty) => {
+      const raw = (partyEdits[party.id] ?? party.name).trim();
+      if (!raw) { showNotice("error", "اسم الطرف مطلوب"); return; }
+      if (duplicateExists(raw, party.id)) { showNotice("error", "هذا الطرف موجود بالفعل"); return; }
+      if (raw.toLowerCase() === party.name.trim().toLowerCase()) {
+        setPartyEdits((prev) => { const next = { ...prev }; delete next[party.id]; return next; });
+        return;
+      }
+      if (!onUpdateParty) { showNotice("error", "غير مصرح لك بهذا الإجراء"); return; }
+      setPartyBusy(party.id);
+      try {
+        await onUpdateParty(party.id, { name: raw });
+        setPartyEdits((prev) => { const next = { ...prev }; delete next[party.id]; return next; });
+        showNotice("success", "تم حفظ تغييرات الطرف");
+      } catch (error) {
+        showNotice("error", error instanceof Error ? error.message : "تعذر حفظ الطرف");
+      } finally {
+        setPartyBusy("");
+      }
+    };
+    const cancelEdit = (id: string) => setPartyEdits((prev) => { const next = { ...prev }; delete next[id]; return next; });
+    const toggleActive = async (party: SettingsParty) => {
+      if (!onUpdateParty) { showNotice("error", "غير مصرح لك بهذا الإجراء"); return; }
+      setPartyBusy(party.id);
+      try {
+        await onUpdateParty(party.id, { active: !party.active });
+        showNotice("success", party.active ? "تم إيقاف الطرف" : "تم تفعيل الطرف");
+      } catch (error) {
+        showNotice("error", error instanceof Error ? error.message : "تعذر تحديث الطرف");
+      } finally {
+        setPartyBusy("");
+      }
+    };
+    return (
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <div>
+            <h2>إدارة الأطراف</h2>
+            <p className="muted">قائمة واحدة للطرف تظهر في كل قوائم الاختيار داخل النظام. الاسم الفارغ أو المكرر غير مسموح، وإعادة تسمية الطرف تُحدّثه في كل الأوردرات المرتبطة.</p>
+          </div>
+        </div>
+        <div className="settings-toolbar">
+          <label className="settings-search">
+            <Wrench size={18} />
+            <input
+              placeholder="اسم الطرف الجديد"
+              value={newPartyName}
+              onChange={(event) => setNewPartyName(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void submitNew(); } }}
+            />
+          </label>
+          <button type="button" className="primary-btn" onClick={submitNew} disabled={partyBusy === "new" || !onCreateParty}>
+            {partyBusy === "new" ? <Loader2 size={18} className="spin" /> : <Plus size={18} />}
+            إضافة طرف
+          </button>
+        </div>
+        {(parties ?? []).length === 0 ? (
+          <EmptyState icon={Wrench} title="لا توجد أطراف" hint="أضف أول طرف من الحقل أعلاه." />
+        ) : (
+          <div className="table-wrap settings-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>الطرف</th>
+                  <th>الحالة</th>
+                  <th>إجراءات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(parties ?? []).map((party) => {
+                  const editing = partyEdits[party.id] !== undefined;
+                  return (
+                    <tr key={party.id}>
+                      <td>
+                        {editing ? (
+                          <input
+                            className="settings-inline-input"
+                            value={partyEdits[party.id]}
+                            onChange={(event) => setPartyEdits((prev) => ({ ...prev, [party.id]: event.target.value }))}
+                          />
+                        ) : (
+                          <strong>{party.name}</strong>
+                        )}
+                      </td>
+                      <td>
+                        <StatusBadge status={party.active ? "active" : "inactive"} />
+                      </td>
+                      <td>
+                        <div className="settings-row-actions">
+                          {editing ? (
+                            <>
+                              <button type="button" className="primary-btn compact" onClick={() => void saveEdit(party)} disabled={partyBusy === party.id}>
+                                <Check size={16} />
+                                حفظ
+                              </button>
+                              <button type="button" className="ghost-btn compact" onClick={() => cancelEdit(party.id)} disabled={partyBusy === party.id}>
+                                <X size={16} />
+                                إلغاء
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button type="button" className="ghost-btn compact" onClick={() => setPartyEdits((prev) => ({ ...prev, [party.id]: party.name }))} disabled={!!partyBusy}>
+                                <Pencil size={16} />
+                                تعديل
+                              </button>
+                              <button type="button" className={party.active ? "primary-btn compact" : "ghost-btn compact"} onClick={() => void toggleActive(party)} disabled={partyBusy === party.id}>
+                                {party.active ? "إيقاف" : "تفعيل"}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    );
+  };
+
   const renderDepartments = () => (
     <section className="settings-card">
       <div className="settings-card-head">
@@ -2035,6 +2194,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
     if (id === "overrides") return renderOverrides();
     if (id === "departments") return renderDepartments();
     if (id === "resources") return renderResources();
+    if (id === "parties") return renderParties();
     if (id === "finance") return renderFinance();
     return renderSecurity();
   };

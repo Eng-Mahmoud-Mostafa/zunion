@@ -244,11 +244,29 @@ const recentOrdersKey = "zunion-local-recent-orders-v1";
 const recentCustomersKey = "zunion-local-recent-customers-v1";
 const pinnedItemsKey = "zunion-local-pinned-items-v1";
 const searchCacheKey = "zunion-local-search-cache-v1";
-const partyOptions = ["أحمد", "حسن", "خليفة", "أخرى"];
+const partiesKey = "zunion-local-parties-v1";
 const onFieldOptions = ["أحمد", "رضا", "سامح"];
 const machineOptions = ["تاجيما 2015", "تاجيما 2007", "الجلوبال", "swf", "تاجيما 2005", "فيا الي جوا", "فيا الي برا"];
 
 type MachineRecord = { id: string; name: string; position: number; active: boolean };
+
+type Party = { id: string; name: string; position: number; active: boolean };
+
+const defaultParties: Party[] = [
+  { id: "party-ahmed", name: "أحمد", position: 1, active: true },
+  { id: "party-hassan", name: "حسن", position: 2, active: true },
+  { id: "party-khalifa", name: "خليفة", position: 3, active: true },
+  { id: "party-other", name: "أخرى", position: 4, active: true },
+];
+
+function normalizeParty(row: Record<string, unknown>, index = 0): Party {
+  return {
+    id: String(row.id ?? createId()),
+    name: String(row.name ?? ""),
+    position: Number(row.position ?? index),
+    active: row.active === undefined ? true : Boolean(row.active),
+  };
+}
 
 const WORKER_DEPARTMENT_LABELS: Record<string, string> = {
   operation: "تشغيل تطريز",
@@ -1916,6 +1934,60 @@ function useMachines(session: Session | null) {
   }, [session?.username, session?.email]);
 
   return { machines, setMachines, refreshMachines };
+}
+
+function useParties(session: Session | null) {
+  const remote = useServerAuth || !isLocalHost;
+  const [parties, setParties] = useState<Party[]>([]);
+  const partiesRef = useRef<Party[]>([]);
+  useEffect(() => { partiesRef.current = parties; }, [parties]);
+
+  const persistLocal = useCallback((list: Party[]) => {
+    try { localStorage.setItem(partiesKey, JSON.stringify(list)); } catch { /* storage unavailable */ }
+  }, []);
+
+  const refreshParties = useCallback(() => {
+    if (remote) {
+      if (!session) return;
+      backendJson<{ parties: Array<Record<string, unknown>> }>("/api/parties")
+        .then((data) => setParties((data.parties ?? []).map((row, index) => normalizeParty(row, index))))
+        .catch(() => undefined);
+      return;
+    }
+    try {
+      const stored = localStorage.getItem(partiesKey);
+      const parsed = stored ? (JSON.parse(stored) as Party[]) : null;
+      setParties(Array.isArray(parsed) && parsed.length ? parsed : defaultParties);
+    } catch {
+      setParties(defaultParties);
+    }
+  }, [remote, session?.username, session?.email]);
+
+  useEffect(() => { refreshParties(); }, [refreshParties]);
+
+  const createParty = useCallback(async (name: string) => {
+    if (remote) {
+      await backendJson("/api/parties", { method: "POST", body: JSON.stringify({ name }) });
+      refreshParties();
+      return;
+    }
+    const list = [...partiesRef.current, { id: createId(), name, position: partiesRef.current.length + 1, active: true }];
+    setParties(list);
+    persistLocal(list);
+  }, [remote, refreshParties, persistLocal]);
+
+  const updateParty = useCallback(async (id: string, changes: { name?: string; active?: boolean }) => {
+    if (remote) {
+      await backendJson(`/api/parties/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(changes) });
+      refreshParties();
+      return;
+    }
+    const list = partiesRef.current.map((party) => (party.id === id ? { ...party, ...changes } : party));
+    setParties(list);
+    persistLocal(list);
+  }, [remote, refreshParties, persistLocal]);
+
+  return { parties, setParties, refreshParties, createParty, updateParty };
 }
 
 function daysUntil(date: string) {
@@ -3898,8 +3970,13 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
   );
 }
 
-function OrderForm({ initial, startAsDraft = false, customers = [], products = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
-  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: partyOptions[0], delivery_date: isoOffset(0), created_at: new Date().toISOString() });
+function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void }) {
+  const firstActiveParty = parties.find((party) => party.active)?.name ?? "";
+  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: firstActiveParty, delivery_date: isoOffset(0), created_at: new Date().toISOString() });
+  const activePartyNames = parties.filter((party) => party.active).map((party) => party.name);
+  const partySelectOptions = form.source_person && !activePartyNames.includes(form.source_person)
+    ? [...activePartyNames, form.source_person]
+    : activePartyNames;
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -3993,7 +4070,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
   function setClientName(value: string) {
     setForm((current) => {
       const existing = customers.find((customer) => customer.client_name.trim().toLowerCase() === value.trim().toLowerCase() || customer.phone === current.phone);
-      const source = current.source_person || partyOptions[0];
+      const source = current.source_person || firstActiveParty;
       const clientCode = existing?.client_code || current.client_code || nextCustomerCode(customers, source);
       const updated = calculate({ ...current, customer_id: existing?.id || current.customer_id, client_name: value, client_code: clientCode, updated_at: new Date().toISOString() });
       return updated;
@@ -4272,7 +4349,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
       productName: selectedName,
       order_type: form.order_type,
       materialsStatus: normalizeMaterialsStatus(form.materialsStatus),
-      client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
+      client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || firstActiveParty),
       operationMethods: methods,
       operationItems: normalizedOperationItems.filter((item) => item.method || item.logoImage || item.workOrderImage),
       draft: false,
@@ -4326,7 +4403,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
         ...emptyOrder,
         id: createId(),
         source_person: form.source_person,
-        order_number: nextCustomerCode(customers, form.source_person || partyOptions[0]).replace(/^[^-]+-/, '').replace(/^0+/, '') || String(Date.now()).slice(-6),
+        order_number: nextCustomerCode(customers, form.source_person || firstActiveParty).replace(/^[^-]+-/, '').replace(/^0+/, '') || String(Date.now()).slice(-6),
         delivery_date: isoOffset(0),
         created_at: new Date().toISOString(),
         operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
@@ -4336,7 +4413,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
         logoFileName: "",
         workOrderFileName: "",
       });
-      setForm((current) => calculate({ ...current, client_code: nextCustomerCode(customers, form.source_person || partyOptions[0]) }));
+      setForm((current) => calculate({ ...current, client_code: nextCustomerCode(customers, form.source_person || firstActiveParty) }));
       setErrors({});
       setSaveError("");
       const img = document.querySelectorAll('.image-clipboard-field .upload-preview, .image-clipboard-field img');
@@ -4359,7 +4436,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
       productName: selectedName,
       order_type: form.order_type,
       materialsStatus: normalizeMaterialsStatus(form.materialsStatus),
-      client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || partyOptions[0]),
+      client_code: computed.client_code || nextCustomerCode(customers, computed.source_person || firstActiveParty),
       operationMethods: operationItems.map((item) => item.method.trim()).filter(Boolean),
       operationItems,
       draft: true,
@@ -4503,17 +4580,14 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
               <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
                 <span>طرف</span>
                 <select
-                  value={partyOptions.includes(form.source_person) ? form.source_person : form.source_person === "أخرى" ? "أخرى" : (form.source_person ? "أخرى" : "")}
+                  value={form.source_person}
                   onChange={(event) => {
                     setForm((current) => calculate({ ...current, source_person: event.target.value, updated_at: new Date().toISOString() }));
                   }}
                   disabled={readOnly}
                 >
                   <option value="" disabled hidden>اختر الطرف</option>
-                  <option value="أحمد">أحمد</option>
-                  <option value="حسن">حسن</option>
-                  <option value="خليفة">خليفة</option>
-                  <option value="أخرى">أخرى</option>
+                  {partySelectOptions.map((name) => <option key={name} value={name}>{name}</option>)}
                 </select>
                 <ErrorText message={errors.source_person} />
               </label>
@@ -4658,7 +4732,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
         <Field label="رقم الأوردر" value={form.order_number} onChange={(value) => set("order_number", value)} disabled={readOnly} />
         <PartyField value={form.source_person} onChange={(value) => set("source_person", value)} disabled={readOnly} />
         <label>اسم العميل<select value={form.customer_id || ""} onChange={(event) => event.target.value && selectCustomer(event.target.value)} disabled={readOnly}><option value="" disabled hidden>اختر العميل</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}</select></label>
-        <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || partyOptions[0])} />
+        <ReadonlyText label="كود العميل" value={form.client_code || nextCustomerCode(customers, form.source_person || firstActiveParty)} />
         <Field label="رقم التليفون" value={form.phone} onChange={(value) => set("phone", value)} disabled={readOnly} />
         <Field label="تاريخ التسليم" type="date" value={form.delivery_date} onChange={(value) => set("delivery_date", value)} disabled={readOnly} />
         <Field label="السعر" type="number" value={form.price} onChange={(value) => set("price", Number(value))} disabled={readOnly} />
@@ -7143,7 +7217,7 @@ function ImportExport({ orders, setOrders, session }: { orders: Order[]; setOrde
   );
 }
 
-function CustomerAccounts({ orders, customers: savedCustomers, session, setOrders }: { orders: Order[]; customers: Customer[]; session: Session; setOrders: React.Dispatch<React.SetStateAction<Order[]>> }) {
+function CustomerAccounts({ orders, customers: savedCustomers, session, setOrders, parties = [] }: { orders: Order[]; customers: Customer[]; session: Session; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; parties?: Party[] }) {
   const [search, setSearch] = useState("");
   const [partyFilter, setPartyFilter] = useState("");
   const [debtorOnly, setDebtorOnly] = useState(false);
@@ -7151,10 +7225,11 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
 
   const partyOptions = useMemo(() => {
     const sources = new Set<string>();
+    for (const party of parties) { if (party.name) sources.add(party.name); }
     for (const c of savedCustomers) { if (c.source_person) sources.add(c.source_person); }
     for (const o of orders) { if (o.source_person) sources.add(o.source_person); }
     return Array.from(sources);
-  }, [orders, savedCustomers]);
+  }, [orders, savedCustomers, parties]);
 
   const customers = useMemo(() => {
     const grouped = new Map<string, { name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }>();
@@ -7218,16 +7293,19 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
   );
 }
 
-function AddCustomerPage({ customers, setCustomers, session }: { customers: Customer[]; setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>; session: Session }) {
-  const [party, setParty] = useState("أحمد");
-  const [customParty, setCustomParty] = useState("");
+function AddCustomerPage({ customers, setCustomers, session, parties = [] }: { customers: Customer[]; setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>; session: Session; parties?: Party[] }) {
+  const partyNames = parties.filter((item) => item.active).map((item) => item.name).filter(Boolean);
+  const [party, setParty] = useState(partyNames[0] ?? "");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [error, setError] = useState("");
-  const selectedParty = party === "أخرى" ? customParty : party;
-  const code = nextCustomerCode(customers, selectedParty || party);
+  const selectedParty = party;
+  const code = nextCustomerCode(customers, selectedParty || partyNames[0] || "");
+  useEffect(() => {
+    if (!party && partyNames.length) setParty(partyNames[0]);
+  }, [party, partyNames.length]);
   function submit(event: React.FormEvent) {
     event.preventDefault();
     const normalizedEmail = email.trim().toLowerCase();
@@ -7250,8 +7328,7 @@ function AddCustomerPage({ customers, setCustomers, session }: { customers: Cust
         <div className="panel-head"><h2>إضافة عميل</h2></div>
         <form className="order-form compact-form add-product-form" onSubmit={submit}>
           <div className="form-grid product-form-grid">
-            <Select label="طرف" value={party} options={partyOptions} onChange={setParty} />
-            {party === "أخرى" && <Field label="طرف آخر" value={customParty} onChange={setCustomParty} />}
+            <Select label="طرف" value={party} options={partyNames} onChange={setParty} />
             <Field label="اسم العميل" value={name} onChange={setName} />
             <ReadonlyText label="كود العميل" value={code} />
             <Field label="تليفون" value={phone} onChange={setPhone} />
@@ -8123,6 +8200,25 @@ function ZunionApp() {
   const { items: financeRecords, setItems: setFinanceRecords } = useStoredList<FinanceRecord>(financeKey, []);
   const { items: products, setItems: setProducts } = useProducts(session);
   const { machines, refreshMachines } = useMachines(session);
+  const { parties, createParty, updateParty } = useParties(session);
+
+  const handleCreateParty = useCallback(async (name: string) => {
+    await createParty(name);
+  }, [createParty]);
+
+  const handleUpdateParty = useCallback(async (id: string, changes: { name?: string; active?: boolean }) => {
+    const currentParty = parties.find((item) => item.id === id);
+    const oldName = currentParty?.name ?? "";
+    await updateParty(id, changes);
+    if (changes.name && oldName) {
+      const nextName = changes.name.trim();
+      if (nextName.toLowerCase() !== oldName.trim().toLowerCase()) {
+        setOrders((list) => list.map((order) => order.source_person && order.source_person.trim().toLowerCase() === oldName.trim().toLowerCase() ? { ...order, source_person: nextName } : order));
+        setCustomers((list) => list.map((customer) => customer.source_person && customer.source_person.trim().toLowerCase() === oldName.trim().toLowerCase() ? { ...customer, source_person: nextName } : customer));
+      }
+    }
+  }, [parties, updateParty, setOrders, setCustomers]);
+
 
   useEffect(() => {
     if (!useServerAuth) return;
@@ -8448,12 +8544,12 @@ function ZunionApp() {
           )}
           {view === "dashboard" && <Dashboard setView={setView} canSeeFinancials={canManageFinancials(session.role)} />}
           {view === "orders" && <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
-          {view === "new" && <OrderForm customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "new" && <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => setView("search")} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "drafts" && <DraftsPage orders={orders} onResume={resumeDraft} onDelete={canDeleteOrder(currentRole) ? deleteDraft : undefined} />}
-          {view === "draftEdit" && resumingDraft && <OrderForm initial={resumingDraft} startAsDraft customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setResumingDraftId(null); setView("drafts"); }} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "draftEdit" && resumingDraft && <OrderForm initial={resumingDraft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setResumingDraftId(null); setView("drafts"); }} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
           {view === "draftEdit" && !resumingDraft && <ErrorPanel message="لم يتم العثور على المسودة المطلوبة" />}
-          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} customers={customers} products={products} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
-          {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} />}
+          {view === "editOrder" && editingOrder && <OrderForm initial={editingOrder} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => setView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => { setEditingOrderNumber(null); setView("search"); }} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} />}
+          {view === "addCustomer" && <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} parties={parties} />}
           {view === "addProduct" && <ProductManagerPage products={products} setProducts={setProducts} session={session} />}
           {view === "search" && <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
 {view === "worker" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); setView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} onDistribute={() => setView("machineDist")} />}
@@ -8462,7 +8558,7 @@ function ZunionApp() {
             {view === "print" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="printing" goToOrderId={printingGoOrderId} onGoToOrderHandled={() => setPrintingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "sewing" && <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => { setEditingOrderNumber(num); setView("editOrder"); }} />}
             {view === "archive" && <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={setView} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />}
-          {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} />}
+          {view === "customers" && <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} />}
           {view === "customerAccounts" && <CustomerAccountsPage orders={orders} customers={customers} session={session} />}
           {view === "finance" && <FinancePageModern session={session} />}
           {view === "reports" && <ReportsPage session={session} />}
@@ -8478,6 +8574,9 @@ function ZunionApp() {
             capabilities={settingsCapabilities}
             accountPanel={<OptionalPasswordChangePanel session={session} />}
             localMachines={machines}
+            parties={parties}
+            onCreateParty={handleCreateParty}
+            onUpdateParty={handleUpdateParty}
             onAudit={(action, entityType, entityId, oldValue, newValue) => addAudit(session, action, entityType, entityId, oldValue, newValue)}
           />
         )}

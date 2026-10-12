@@ -343,6 +343,26 @@ alter table machines add column if not exists active boolean not null default tr
 create unique index if not exists machines_name_uniq on machines (lower(name));
 create index if not exists machines_position_idx on machines (position);
 
+-- Parties (أطراف). A centrally-managed list shown in every party dropdown in
+-- the system. Orders/customers keep referencing a party by its display name, so
+-- renaming a party cascades the new name onto linked orders/customers (see the
+-- PATCH handler in server.ts). The stable id (and unique lower(name) index)
+-- keeps the management list safe against duplicates and blank names.
+create table if not exists parties (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  position integer not null default 0,
+  active boolean not null default true,
+  created_by uuid references users(id) on delete set null,
+  updated_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table parties add column if not exists position integer not null default 0;
+alter table parties add column if not exists active boolean not null default true;
+create unique index if not exists parties_name_uniq on parties (lower(btrim(name)));
+create index if not exists parties_position_idx on parties (position);
+
 create table if not exists monthly_periods (
   id uuid primary key default gen_random_uuid(),
   month integer not null,
@@ -409,6 +429,23 @@ begin
 end;
 $$;
 
+-- Stamp the moment an order enters the completed stage. Kept in the database so
+-- every write path (order edit, status change, finishing hand-off) records it
+-- without each handler having to remember. Only fills a null value, so the
+-- original completion time survives later edits to a finished order.
+create or replace function set_order_completed_at()
+returns trigger language plpgsql as $$
+begin
+  if new.work_stage = 'completed' and new.completed_at is null then
+    new.completed_at = now();
+  end if;
+  if new.work_stage is distinct from 'completed' then
+    new.completed_at = null;
+  end if;
+  return new;
+end;
+$$;
+
 create or replace function calculate_order_item_total()
 returns trigger language plpgsql as $$
 begin
@@ -446,6 +483,9 @@ create trigger set_orders_updated_at before update on orders for each row execut
 
 drop trigger if exists calculate_orders_financials on orders;
 create trigger calculate_orders_financials before insert or update on orders for each row execute function calculate_order_financials();
+
+drop trigger if exists set_orders_completed_at on orders;
+create trigger set_orders_completed_at before insert or update on orders for each row execute function set_order_completed_at();
 
 drop trigger if exists set_order_items_updated_at on order_items;
 create trigger set_order_items_updated_at before update on order_items for each row execute function set_updated_at();

@@ -11,7 +11,7 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, customerTransactionUpdateSchema, finishingSchema, machineAssignmentSchema, machineCreateSchema, machineMoveSchema, machineReorderSchema, machineSchema, machineUpdateSchema, orderSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
+import { customerSchema, customerTransactionSchema, customerTransactionUpdateSchema, finishingSchema, machineAssignmentSchema, machineCreateSchema, machineMoveSchema, machineReorderSchema, machineSchema, machineUpdateSchema, orderSchema, partyCreateSchema, partyUpdateSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { activateMachine, createOrReactivateMachine, deactivateMachine, findMachineByName, listMachines, loadMachine, removeMachine, renameMachine } from "./machines.js";
@@ -35,6 +35,7 @@ const serviceRoutedPrefixes = [
   "/customers",
   "/customer-accounts",
   "/products",
+  "/parties",
   "/search",
   "/monthly-periods",
   "/expenses",
@@ -1614,6 +1615,60 @@ app.delete("/api/machines/:id", requireAuth, requireRole("Master", "Helper", "Op
     if (code === "ZUNION_MACHINE_QUEUED") return res.status(409).json({ message: (error as Error).message });
     throw error;
   }
+});
+
+app.get("/api/parties", requireAuth, async (_req, res) => {
+  try {
+    const { rows } = await query("select * from parties order by position asc, created_at asc");
+    res.json({ parties: rows });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to load parties", details: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/parties", requireAuth, requireRole("Master"), async (req, res) => {
+  const parsed = partyCreateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "اسم الطرف مطلوب", issues: parsed.error.issues });
+  const name = parsed.data.name.trim();
+  const duplicate = await query<{ id: string }>("select id from parties where lower(btrim(name)) = lower($1) limit 1", [name]);
+  if (duplicate.rows.length) return res.status(409).json({ message: "هذا الطرف موجود بالفعل" });
+  const { rows } = await query(
+    `insert into parties (name, position, active, created_by)
+     values ($1, coalesce((select max(position) from parties), 0) + 1, true, $2)
+     returning *`,
+    [name, req.user!.id],
+  );
+  await audit(req.user!, "PARTY_CREATED", "parties", rows[0].id, undefined, rows[0]);
+  res.status(201).json({ party: rows[0] });
+});
+
+app.patch("/api/parties/:id", requireAuth, requireRole("Master"), async (req, res) => {
+  const id = param(req.params.id);
+  const parsed = partyUpdateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "بيانات الطرف غير صالحة", issues: parsed.error.issues });
+  const current = (await query<{ id: string; name: string; active: boolean }>("select * from parties where id=$1", [id])).rows[0];
+  if (!current) return res.status(404).json({ message: "Party not found" });
+  const currentName = String(current.name).trim();
+  if (parsed.data.name !== undefined) {
+    const nextName = parsed.data.name.trim();
+    if (nextName.toLowerCase() !== currentName.toLowerCase()) {
+      const duplicate = await query<{ id: string }>("select id from parties where lower(btrim(name)) = lower($1) and id <> $2 limit 1", [nextName, id]);
+      if (duplicate.rows.length) return res.status(409).json({ message: "هذا الطرف موجود بالفعل" });
+      // Renames cascade onto linked orders/customers so the displayed name
+      // updates everywhere without breaking existing records.
+      await tx(async (client) => {
+        await client.query("update orders set source_party=$1 where lower(btrim(source_party)) = lower($2)", [nextName, currentName]);
+        await client.query("update customers set source_party=$1 where lower(btrim(source_party)) = lower($2)", [nextName, currentName]);
+        await client.query("update parties set name=$1, updated_by=$2, updated_at=now() where id=$3", [nextName, req.user!.id, id]);
+      });
+    }
+  }
+  if (parsed.data.active !== undefined) {
+    await query("update parties set active=$1, updated_by=$2, updated_at=now() where id=$3", [parsed.data.active, req.user!.id, id]);
+  }
+  const party = (await query("select * from parties where id=$1", [id])).rows[0];
+  await audit(req.user!, "PARTY_UPDATED", "parties", id, current, party);
+  res.json({ party });
 });
 
 app.delete("/api/orders/:id", requireAuth, requireRole("Master"), async (req, res) => {

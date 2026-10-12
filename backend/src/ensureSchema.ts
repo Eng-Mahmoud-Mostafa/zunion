@@ -312,6 +312,47 @@ async function syncMachinesTable(log: (msg: string) => void) {
 }
 
 /**
+ * The parties (أطراف) list is created here as well so databases that predate
+ * the feature self-heal on boot. Idempotent: creates the table/indexes and then
+ * backfills the built-in parties plus any name already referenced by an order
+ * or customer, so existing data keeps working and becomes manageable.
+ */
+async function syncPartiesTable(log: (msg: string) => void) {
+  await guarded(
+    () => query(`create table if not exists parties (
+      id uuid primary key default gen_random_uuid(),
+      name text not null,
+      position integer not null default 0,
+      active boolean not null default true,
+      created_by uuid references users(id) on delete set null,
+      updated_by uuid references users(id) on delete set null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    alter table parties add column if not exists position integer not null default 0;
+    alter table parties add column if not exists active boolean not null default true;
+    create unique index if not exists parties_name_uniq on parties (lower(btrim(name)));
+    create index if not exists parties_position_idx on parties (position);`),
+    log,
+    "parties table drift",
+  );
+  await guarded(
+    () => query(`insert into parties (name, position)
+      select name, row_number() over (order by name)
+      from (
+        select name from (values ('أحمد'), ('حسن'), ('خليفة'), ('أخرى')) as seed(name)
+        union
+        select distinct btrim(source_party) from orders where source_party is not null and btrim(source_party) <> ''
+        union
+        select distinct btrim(source_party) from customers where source_party is not null and btrim(source_party) <> ''
+      ) all_names
+      where not exists (select 1 from parties p where lower(btrim(p.name)) = lower(btrim(all_names.name)))`),
+    log,
+    "parties seed/backfill",
+  );
+}
+
+/**
  * Dedicated sequence for the display order number (00001, 00002, ...). Created
  * once, never reset, and aligned to continue after the highest existing
  * all-digit number already stored on orders. The unique index on
@@ -392,6 +433,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncPhotosTable(log);
   await syncWorkersTable(log);
   await syncMachinesTable(log);
+  await syncPartiesTable(log);
   await syncCustomerAccountsTables(log);
   await syncOrderNumberSequence(log);
 }

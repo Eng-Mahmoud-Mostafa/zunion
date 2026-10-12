@@ -133,6 +133,15 @@ export const machineUpdateSchema = z.object({
   active: z.boolean().optional(),
 });
 
+export const partyCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+});
+
+export const partyUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  active: z.boolean().optional(),
+});
+
 export const workerCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
   department: z.string().trim().min(1).max(40),

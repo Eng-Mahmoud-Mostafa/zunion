@@ -335,6 +335,26 @@ alter table machines add column if not exists active boolean not null default tr
 create unique index if not exists machines_name_uniq on machines (lower(name));
 create index if not exists machines_position_idx on machines (position);
 
+-- Parties (أطراف). A centrally-managed list shown in every party dropdown in
+-- the system. Orders/customers keep referencing a party by its display name, so
+-- renaming a party cascades the new name onto linked orders/customers (see the
+-- PATCH handler in server.ts). The stable id (and unique lower(name) index)
+-- keeps the management list safe against duplicates and blank names.
+create table if not exists parties (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  position integer not null default 0,
+  active boolean not null default true,
+  created_by uuid references users(id) on delete set null,
+  updated_by uuid references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table parties add column if not exists position integer not null default 0;
+alter table parties add column if not exists active boolean not null default true;
+create unique index if not exists parties_name_uniq on parties (lower(btrim(name)));
+create index if not exists parties_position_idx on parties (position);
+
 create table if not exists monthly_periods (
   id uuid primary key default gen_random_uuid(),
   month integer not null,
