@@ -8336,15 +8336,11 @@ function ZunionApp() {
   const [printingGoOrderId, setPrintingGoOrderId] = useState<string | null>(null);
   const [customerDrawer, setCustomerDrawer] = useState<{ code: string; name: string } | null>(null);
   const [orderDrawerOrderNumber, setOrderDrawerOrderNumber] = useState<string | null>(null);
-  const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
-  const [resumingDraftId, setResumingDraftId] = useState<string | null>(null);
   const [finishGoOrderId, setFinishGoOrderId] = useState<string | null>(null);
   const [productDrawer, setProductDrawer] = useState<Product | null>(null);
   const [userDrawer, setUserDrawer] = useState<SearchableUser | null>(null);
   const { orders, setOrders } = useOrders(session);
   const orderDrawerOrder = useMemo(() => orderDrawerOrderNumber ? orders.find((o) => o.order_number === orderDrawerOrderNumber) || null : null, [orderDrawerOrderNumber, orders]);
-  const editingOrder = useMemo(() => editingOrderNumber ? orders.find((o) => o.order_number === editingOrderNumber) || null : null, [editingOrderNumber, orders]);
-  const resumingDraft = useMemo(() => resumingDraftId ? orders.find((o) => o.id === resumingDraftId && o.draft) || null : null, [resumingDraftId, orders]);
   useEffect(() => {
     if (!sentNotice) return;
     const timer = setTimeout(() => setSentNotice(""), 8000);
@@ -8417,8 +8413,6 @@ function ZunionApp() {
     if (tab.id !== activeTabId) scrollPositions.current[activeTabId] = window.scrollY;
     setActiveTabId(tab.id);
     syncTabHash(tab);
-    if (tab.view === "editOrder") setEditingOrderNumber(tab.recordId ?? null);
-    if (tab.view === "draftEdit") setResumingDraftId(tab.recordId ?? null);
     requestAnimationFrame(() => window.scrollTo(0, scrollPositions.current[tab.id] || 0));
   }
 
@@ -8633,7 +8627,6 @@ function ZunionApp() {
     const saved = await persistOrder(order);
     setOrders(current => current.map(o => o.id === saved.id ? saved : o));
     addAudit(session, "ORDER_EDITED", "orders", saved.id, previous, saved);
-    setEditingOrderNumber(null);
     setSearchGoOrderId(saved.id);
     openView("search");
     return saved;
@@ -8667,8 +8660,6 @@ function ZunionApp() {
       return prev ? current.map((o) => o.id === saved.id ? saved : o) : [saved, ...current];
     });
     addAudit(session, "ORDER_SENT_TO_OPERATION", "orders", saved.id, previous, saved);
-    setEditingOrderNumber(null);
-    setResumingDraftId(null);
     setWorkerGoOrderId(saved.id);
     setSentNotice("تم حفظ الأوردر وإرساله للتشغيل بنجاح");
     openView("new");
@@ -8676,8 +8667,6 @@ function ZunionApp() {
   }
 
   function resumeDraft(order: Order) {
-    setResumingDraftId(order.id);
-    setEditingOrderNumber(null);
     openView("draftEdit", order.id, order.client_name ? `مسودة · ${order.client_name}` : undefined);
   }
 
