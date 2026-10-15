@@ -9382,3 +9382,34 @@ input[type="number"] {
 .tab-confirm-error { color: #b3261e; margin: 0 0 12px; }
 .tab-confirm-actions { display: flex; gap: 10px; justify-content: flex-start; }
 .tab-confirm-actions .primary-btn, .tab-confirm-actions .ghost-btn { display: inline-flex; align-items: center; justify-content: center; }
+
+/* ---- shared party dropdown + إدارة الأطراف popup ---- */
+.party-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1400; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.party-modal { background: #fff; border: 1px solid #ED1525; border-radius: 12px; padding: 16px; width: min(560px, 96vw); max-height: 88vh; overflow: auto; box-shadow: 0 20px 50px rgba(0,0,0,.28); }
+.party-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid #f0d4d6; cursor: move; touch-action: none; }
+.party-modal-head h2 { margin: 0; font-size: 18px; font-weight: 800; color: #ED1525; }
+.party-modal-close { background: none; border: none; color: #ED1525; line-height: 1; cursor: pointer; padding: 0 6px; display: inline-flex; }
+.party-modal-close:hover { opacity: .72; }
+.party-manager { display: flex; flex-direction: column; gap: 12px; }
+.party-manager-toolbar { display: flex; gap: 8px; align-items: center; }
+.party-manager-input { flex: 1; width: 100%; padding: 9px 12px; border: 1px solid #d9d9d9; border-radius: 8px; font: inherit; }
+.party-manager-input:focus { outline: none; border-color: #ED1525; box-shadow: 0 0 0 3px rgba(237,21,37,.12); }
+.party-btn { display: inline-flex; align-items: center; gap: 6px; background: #ED1525; color: #fff; border: 1px solid #ED1525; border-radius: 8px; padding: 8px 12px; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.party-btn:hover:not(:disabled) { background: #c8101f; border-color: #c8101f; }
+.party-btn.ghost { background: #fff; color: #ED1525; }
+.party-btn.ghost:hover:not(:disabled) { background: #fdecec; }
+.party-btn:disabled { opacity: .55; cursor: not-allowed; }
+.party-manager-notice { border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+.party-manager-notice.success { background: #e7f6ec; color: #146c2e; }
+.party-manager-notice.error { background: #fdeaea; color: #b3261e; }
+.party-manager-tablewrap { overflow: auto; }
+.party-manager-table { width: 100%; border-collapse: collapse; }
+.party-manager-table th, .party-manager-table td { text-align: right; padding: 9px 10px; border-bottom: 1px solid #eee; vertical-align: middle; }
+.party-manager-table th { font-size: 13px; color: #666; font-weight: 700; }
+.party-manager-table tbody tr:hover { background: #fafafa; }
+.party-manager-name { font-weight: 700; }
+.party-manager-empty { text-align: center; color: #888; }
+.party-status { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+.party-status.active { background: #e7f6ec; color: #146c2e; }
+.party-status.inactive { background: #f1f1f1; color: #777; }
+.party-manager-actions { display: flex; gap: 6px; flex-wrap: wrap; }

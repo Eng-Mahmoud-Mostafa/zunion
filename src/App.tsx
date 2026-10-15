@@ -62,6 +62,7 @@ import {
 import { BrandLogo } from "./components/BrandLogo";
 import CustomerAccountsPage from "./components/CustomerAccountsPage";
 import { DraggableDialog } from "./components/DraggableDialog";
+import { PartySelect, activePartyNames } from "./components/PartyManager";
 import SettingsPage, { type SettingsCapabilities } from "./components/SettingsPage";
 import { formatDateArabic, formatDateTimeCairo, formatDateTimeEnglish, formatMoney, formatNumber, normalizeDigitsToEnglish } from "./utils/formatters";
 import {
@@ -3970,13 +3971,9 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
   );
 }
 
-function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, onAddProduct, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint, closeSaveMode = "save", onDirtyChange, registerActions }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; onAddProduct?: () => void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void; tabId?: string; closeSaveMode?: "draft" | "save"; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
-  const firstActiveParty = parties.find((party) => party.active)?.name ?? "";
-  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: firstActiveParty, delivery_date: isoOffset(0), created_at: new Date().toISOString() });
-  const activePartyNames = parties.filter((party) => party.active).map((party) => party.name);
-  const partySelectOptions = form.source_person && !activePartyNames.includes(form.source_person)
-    ? [...activePartyNames, form.source_person]
-    : activePartyNames;
+function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, canManageParties = false, onAddProduct, onCreateParty, onUpdateParty, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint, closeSaveMode = "save", onDirtyChange, registerActions }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; canManageParties?: boolean; onAddProduct?: () => void; onCreateParty?: (name: string) => Promise<void> | void; onUpdateParty?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void; tabId?: string; closeSaveMode?: "draft" | "save"; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
+  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: activePartyNames(parties)[0] ?? "", delivery_date: isoOffset(0), created_at: new Date().toISOString() });
+  const firstActiveParty = activePartyNames(parties)[0] ?? "";
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -4626,16 +4623,17 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
               </label>
               <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
                 <span>طرف</span>
-                <select
+                <PartySelect
                   value={form.source_person}
-                  onChange={(event) => {
-                    setForm((current) => calculate({ ...current, source_person: event.target.value, updated_at: new Date().toISOString() }));
+                  onChange={(name) => {
+                    setForm((current) => calculate({ ...current, source_person: name, updated_at: new Date().toISOString() }));
                   }}
+                  parties={parties}
+                  canManage={canManageParties && !readOnly}
+                  onCreate={onCreateParty}
+                  onUpdate={onUpdateParty}
                   disabled={readOnly}
-                >
-                  <option value="" disabled hidden>اختر الطرف</option>
-                  {partySelectOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-                </select>
+                />
                 <ErrorText message={errors.source_person} />
               </label>
               <label className="nf-field">
@@ -7340,8 +7338,8 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, setOrder
   );
 }
 
-function AddCustomerPage({ customers, setCustomers, session, parties = [], onDirtyChange, registerActions }: { customers: Customer[]; setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>; session: Session; parties?: Party[]; tabId?: string; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
-  const partyNames = parties.filter((item) => item.active).map((item) => item.name).filter(Boolean);
+function AddCustomerPage({ customers, setCustomers, session, parties = [], canManageParties = false, onCreateParty, onUpdateParty, onDirtyChange, registerActions }: { customers: Customer[]; setCustomers: React.Dispatch<React.SetStateAction<Customer[]>>; session: Session; parties?: Party[]; canManageParties?: boolean; onCreateParty?: (name: string) => Promise<void> | void; onUpdateParty?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void; tabId?: string; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
+  const partyNames = activePartyNames(parties);
   const [party, setParty] = useState(partyNames[0] ?? "");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -7400,7 +7398,7 @@ function AddCustomerPage({ customers, setCustomers, session, parties = [], onDir
         <div className="panel-head"><h2>إضافة عميل</h2></div>
         <form className="order-form compact-form add-product-form" onSubmit={submit}>
           <div className="form-grid product-form-grid">
-            <Select label="طرف" value={party} options={partyNames} onChange={setParty} />
+            <label>طرف<PartySelect value={party} onChange={setParty} parties={parties} canManage={canManageParties} onCreate={onCreateParty} onUpdate={onUpdateParty} /></label>
             <Field label="اسم العميل" value={name} onChange={setName} />
             <ReadonlyText label="كود العميل" value={code} />
             <Field label="تليفون" value={phone} onChange={setPhone} />
@@ -8794,21 +8792,21 @@ function ZunionApp() {
       case "orders":
         return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
       case "new":
-        return <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => openView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       case "drafts":
         return <DraftsPage orders={orders} onResume={resumeDraft} onDelete={canDeleteOrder(currentRole) ? deleteDraft : undefined} />;
       case "draftEdit": {
         const draft = tab.recordId ? orders.find((item) => item.id === tab.recordId && item.draft) : null;
         if (!draft) return <ErrorPanel message="لم يتم العثور على المسودة المطلوبة" />;
-        return <OrderForm initial={draft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => openView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <OrderForm initial={draft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       }
       case "editOrder": {
         const order = tab.recordId ? orders.find((item) => item.order_number === tab.recordId) : null;
         if (!order) return <ErrorPanel message="لم يتم العثور على الأوردر المطلوب" />;
-        return <OrderForm initial={order} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} onAddProduct={() => openView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(ord) => printOrderFromForm(ord, orders)} tabId={tab.id} closeSaveMode="save" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <OrderForm initial={order} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(ord) => printOrderFromForm(ord, orders)} tabId={tab.id} closeSaveMode="save" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       }
       case "addCustomer":
-        return <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} parties={parties} tabId={tab.id} onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} parties={parties} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} tabId={tab.id} onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       case "addProduct":
         return <ProductManagerPage products={products} setProducts={setProducts} session={session} />;
       case "search":
