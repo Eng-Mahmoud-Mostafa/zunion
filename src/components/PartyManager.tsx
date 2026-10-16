@@ -207,6 +207,9 @@ export function PartyModal({ parties, onCreate, onUpdate, onClose }: ManagerProp
       ariaLabel="إدارة الأطراف"
       onClose={onClose}
       title={<h2>إدارة الأطراف</h2>}
+      portal
+      dragFromEmptyArea
+      centerOnce
     >
       <PartyManagerPanel parties={parties} onCreate={onCreate} onUpdate={onUpdate} />
     </DraggableDialog>

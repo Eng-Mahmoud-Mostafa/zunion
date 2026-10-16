@@ -138,7 +138,8 @@ try {
     const modal = document.querySelector('.party-modal');
     if (!head || !modal) return null;
     const rect = head.getBoundingClientRect();
-    return { x: Math.round(rect.left + 30), y: Math.round(rect.top + 12), left: Math.round(modal.getBoundingClientRect().left) };
+    // Grab the empty middle of the title bar (not the title text, not the ×).
+    return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2), left: Math.round(modal.getBoundingClientRect().left) };
   })()`);
   await mouseDrag(cdp, { x: handle.x, y: handle.y }, { x: handle.x + 180, y: handle.y + 80 });
   await sleep(300);
