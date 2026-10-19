@@ -44,6 +44,7 @@ export const productSchema = z.object({
 export const orderSchema = z.object({
   id: z.string().uuid().optional(),
   source_party: z.string().default(""),
+  source_party_id: z.string().uuid().nullish(),
   customer_name_snapshot: z.string().default(""),
   customer_code_snapshot: z.string().optional().default(""),
   phone_snapshot: z.string().optional().default(""),
@@ -193,6 +194,7 @@ export const customerSchema = z.object({
   email: z.string().trim().toLowerCase().email().or(z.literal("")).optional().default(""),
   address: z.string().trim().optional().default(""),
   source_party: z.string().optional().default(""),
+  source_party_id: z.string().uuid().nullish(),
   old_balance: z.coerce.number().default(0),
   notes: z.string().optional().default(""),
 });

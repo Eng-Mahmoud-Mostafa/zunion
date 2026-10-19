@@ -120,16 +120,18 @@ create table if not exists customers (
   code text,
   phone text not null,
   email text default '',
-  address text default '',
-  source_party text,
-  old_balance numeric not null default 0,
-  notes text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+   address text default '',
+   source_party text,
+   source_party_id uuid,
+   old_balance numeric not null default 0,
+   notes text,
+   created_at timestamptz not null default now(),
+   updated_at timestamptz not null default now()
 );
 
 alter table customers add column if not exists email text default '';
 alter table customers add column if not exists address text default '';
+alter table customers add column if not exists source_party_id uuid;
 
 create table if not exists products (
   id uuid primary key default gen_random_uuid(),
@@ -168,6 +170,7 @@ create table if not exists orders (
   order_number text unique not null,
   customer_id uuid references customers(id) on delete set null,
   source_party text,
+  source_party_id uuid,
   customer_name_snapshot text not null,
   customer_code_snapshot text,
   phone_snapshot text not null,
@@ -215,6 +218,7 @@ create table if not exists orders (
 );
 
 alter table orders add column if not exists completed_at timestamptz;
+alter table orders add column if not exists source_party_id uuid;
 alter table orders add column if not exists details text;
 alter table orders add column if not exists draft boolean not null default false;
 alter table orders add column if not exists work_stage text not null default 'new';
@@ -344,10 +348,12 @@ create unique index if not exists machines_name_uniq on machines (lower(name));
 create index if not exists machines_position_idx on machines (position);
 
 -- Parties (أطراف). A centrally-managed list shown in every party dropdown in
--- the system. Orders/customers keep referencing a party by its display name, so
--- renaming a party cascades the new name onto linked orders/customers (see the
--- PATCH handler in server.ts). The stable id (and unique lower(name) index)
--- keeps the management list safe against duplicates and blank names.
+-- the system. Orders/customers reference a party by its stable id
+-- (source_party_id) so renames never break the link; the display name
+-- (source_party) is kept as a snapshot and still cascades on rename for legacy
+-- rows that predate the id column (see the PATCH handler in server.ts). The
+-- stable id (and unique lower(name) index) keeps the management list safe
+-- against duplicates and blank names.
 create table if not exists parties (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -362,6 +368,17 @@ alter table parties add column if not exists position integer not null default 0
 alter table parties add column if not exists active boolean not null default true;
 create unique index if not exists parties_name_uniq on parties (lower(btrim(name)));
 create index if not exists parties_position_idx on parties (position);
+
+-- Link orders/customers to parties by id. The FK is added here (not on the
+-- column declaration above) because the parties table is created later in this
+-- script. Rows are backfilled from the matching display name; rows with no
+-- matching party stay null (unassigned) rather than guessing a party.
+alter table customers drop constraint if exists customers_source_party_id_fkey;
+alter table customers add constraint customers_source_party_id_fkey foreign key (source_party_id) references parties(id) on delete set null;
+alter table orders drop constraint if exists orders_source_party_id_fkey;
+alter table orders add constraint orders_source_party_id_fkey foreign key (source_party_id) references parties(id) on delete set null;
+update customers c set source_party_id = p.id from parties p where c.source_party_id is null and c.source_party is not null and lower(btrim(c.source_party)) = lower(btrim(p.name));
+update orders o set source_party_id = p.id from parties p where o.source_party_id is null and o.source_party is not null and lower(btrim(o.source_party)) = lower(btrim(p.name));
 
 create table if not exists monthly_periods (
   id uuid primary key default gen_random_uuid(),

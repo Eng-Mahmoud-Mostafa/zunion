@@ -1146,51 +1146,67 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
   const parsed = orderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid order", issues: parsed.error.issues });
   const order = parsed.data;
-  const inserted = await tx(async (client) => {
-    const customerId = await ensureCustomer(client, {
-      name: order.customer_name_snapshot,
-      code: order.customer_code_snapshot,
-      phone: order.phone_snapshot,
-      source_party: order.source_party,
-      old_balance: order.old_account,
-    });
-    await ensureCustomerAccount(customerId, client);
-    const clientId = order.id ?? null;
-    let number = "";
-    for (let attempt = 0; attempt < 5; attempt++) {
-      number = await nextOrderNumber(client);
-      try {
-        const result = await client.query<{ id: string }>(
-          `insert into orders (
-            id, order_number, customer_id, source_party, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
-            delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, machine_name, worker_name, operation_methods, operation_attachments,
-            quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
-            damaged_pieces, production_notes, finishing_notes, details, draft, created_by, updated_by
-          ) values (coalesce($1, gen_random_uuid()),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$33) on conflict (id) do nothing returning id`,
-          [
-            clientId, number, customerId, order.source_party, order.customer_name_snapshot, order.customer_code_snapshot,
-            order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
-            order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? "", order.machineName ?? "",
-            order.worker_name ?? "", JSON.stringify(order.operationMethods),
-            JSON.stringify(order.operation_attachments ?? []),
-            order.quantity, order.price, order.paid,
-            order.old_account, order.status ?? "NEW", order.workStage ?? "new", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
-            order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id,
-          ],
-        );
-        if (result.rows[0]) return { id: result.rows[0].id, created: true, order_number: number };
-        break;
-      } catch (error) {
-        const code = (error as { code?: string })?.code;
-        if (code === "23505" && attempt < 4) continue;
-        throw error;
+  let inserted: { id: string; created: boolean; order_number: string };
+  try {
+    inserted = await tx(async (client) => {
+      const customerId = await ensureCustomer(client, {
+        name: order.customer_name_snapshot,
+        code: order.customer_code_snapshot,
+        phone: order.phone_snapshot,
+        source_party: order.source_party,
+        source_party_id: order.source_party_id,
+        old_balance: order.old_account,
+      });
+      await ensureCustomerAccount(customerId, client);
+      const clientId = order.id ?? null;
+      let orderPartyId = order.source_party_id ? String(order.source_party_id) : "";
+      if (!orderPartyId) {
+        const pn = (order.source_party ?? "").trim();
+        if (pn) {
+          const pid = await client.query<{ id: string }>("select id from parties where lower(btrim(name)) = lower($1) limit 1", [pn]);
+          orderPartyId = pid.rows[0]?.id ?? "";
+        }
       }
-    }
-    if (!clientId) throw new Error("تعذر إنشاء الأوردر");
-    const existing = await client.query<{ id: string; order_number: string }>("select id, order_number from orders where id = $1", [clientId]);
-    if (!existing.rows[0]) throw new Error("تعذر إنشاء الأوردر");
-    return { id: existing.rows[0].id, created: false, order_number: existing.rows[0].order_number };
-  });
+      let number = "";
+      for (let attempt = 0; attempt < 5; attempt++) {
+        number = await nextOrderNumber(client);
+        try {
+          const result = await client.query<{ id: string }>(
+            `insert into orders (
+              id, order_number, customer_id, source_party, source_party_id, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
+              delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, machine_name, worker_name, operation_methods, operation_attachments,
+              quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
+              damaged_pieces, production_notes, finishing_notes, details, draft, created_by, updated_by
+            ) values (coalesce($1, gen_random_uuid()),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35) on conflict (id) do nothing returning id`,
+            [
+              clientId, number, customerId, order.source_party, orderPartyId || null, order.customer_name_snapshot, order.customer_code_snapshot,
+              order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
+              order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? "", order.machineName ?? "",
+              order.worker_name ?? "", JSON.stringify(order.operationMethods),
+              JSON.stringify(order.operation_attachments ?? []),
+              order.quantity, order.price, order.paid,
+              order.old_account, order.status ?? "NEW", order.workStage ?? "new", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
+              order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, req.user!.id,
+            ],
+          );
+          if (result.rows[0]) return { id: result.rows[0].id, created: true, order_number: number };
+          break;
+        } catch (error) {
+          const code = (error as { code?: string })?.code;
+          if (code === "23505" && attempt < 4) continue;
+          throw error;
+        }
+      }
+      if (!clientId) throw new Error("تعذر إنشاء الأوردر");
+      const existing = await client.query<{ id: string; order_number: string }>("select id, order_number from orders where id = $1", [clientId]);
+      if (!existing.rows[0]) throw new Error("تعذر إنشاء الأوردر");
+      return { id: existing.rows[0].id, created: false, order_number: existing.rows[0].order_number };
+    });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === "ZUNION_PARTY_MISMATCH") return res.status(400).json({ message: "الطرف المختار لا يطابق طرف العميل" });
+    throw error;
+  }
   await audit(req.user!, "ORDER_CREATED", "orders", inserted.id, undefined, { ...order, order_number: inserted.order_number });
   res.status(inserted.created ? 201 : 200).json(inserted);
 });
@@ -1244,14 +1260,49 @@ app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operato
   const parsed = orderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid order", issues: parsed.error.issues });
   const order = parsed.data;
-  await query(
-    `update orders set source_party=$1, customer_name_snapshot=$2, customer_code_snapshot=$3, phone_snapshot=$4,
-     delivery_date=$5, type=$6, product_id=$7, product_name_snapshot=$8, payment_method=$9, custom_payment_method=$10,
-     materials_status=$11, machine_name=$12, worker_name=$13, operation_methods=$14, operation_attachments=$15, quantity=$16, price=$17, paid=$18, old_account=$19, status=$20, work_stage=$21, notes=$22,
-     message_text=$23, quality_notes=$24, damaged_pieces=$25, production_notes=$26, finishing_notes=$27, details=$28, draft=$29, updated_by=$30
-     where id=$31`,
-    [order.source_party, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? oldOrder.materials_status ?? "", order.machineName ?? "", order.worker_name ?? "", JSON.stringify(order.operationMethods), JSON.stringify(order.operation_attachments ?? []), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, id],
-  );
+  let orderPartyId = order.source_party_id ? String(order.source_party_id) : "";
+  if (!orderPartyId) {
+    const pn = (order.source_party ?? "").trim();
+    if (pn) {
+      const pid = await query<{ id: string }>("select id from parties where lower(btrim(name)) = lower($1) limit 1", [pn]);
+      orderPartyId = pid.rows[0]?.id ?? "";
+    }
+  }
+  let customerClient: unknown;
+  try {
+    await tx(async (client) => {
+      try {
+        await ensureCustomer(client, {
+          name: order.customer_name_snapshot,
+          code: order.customer_code_snapshot,
+          phone: order.phone_snapshot,
+          source_party: order.source_party,
+          source_party_id: order.source_party_id,
+          old_balance: order.old_account,
+        });
+      } catch (error) {
+        const code = (error as { code?: string })?.code;
+        if (code === "ZUNION_PARTY_MISMATCH") {
+          const err: Error & { zunionCode?: string } = new Error("الطرف المختار لا يطابق طرف العميل");
+          err.zunionCode = "PARTY_MISMATCH";
+          throw err;
+        }
+        throw error;
+      }
+      await client.query(
+        `update orders set source_party=$1, source_party_id=$2, customer_name_snapshot=$3, customer_code_snapshot=$4, phone_snapshot=$5,
+         delivery_date=$6, type=$7, product_id=$8, product_name_snapshot=$9, payment_method=$10, custom_payment_method=$11,
+         materials_status=$12, machine_name=$13, worker_name=$14, operation_methods=$15, operation_attachments=$16, quantity=$17, price=$18, paid=$19, old_account=$20, status=$21, work_stage=$22, notes=$23,
+         message_text=$24, quality_notes=$25, damaged_pieces=$26, production_notes=$27, finishing_notes=$28, details=$29, draft=$30, updated_by=$31
+         where id=$32`,
+        [order.source_party, orderPartyId || null, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? oldOrder.materials_status ?? "", order.machineName ?? "", order.worker_name ?? "", JSON.stringify(order.operationMethods), JSON.stringify(order.operation_attachments ?? []), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, id],
+      );
+    });
+  } catch (error) {
+    const err = error as { zunionCode?: string };
+    if (err.zunionCode === "PARTY_MISMATCH") return res.status(400).json({ message: "الطرف المختار لا يطابق طرف العميل" });
+    throw error;
+  }
   await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, order);
   res.json({ ok: true });
 });
@@ -1657,8 +1708,8 @@ app.patch("/api/parties/:id", requireAuth, requireRole("Master"), async (req, re
       // Renames cascade onto linked orders/customers so the displayed name
       // updates everywhere without breaking existing records.
       await tx(async (client) => {
-        await client.query("update orders set source_party=$1 where lower(btrim(source_party)) = lower($2)", [nextName, currentName]);
-        await client.query("update customers set source_party=$1 where lower(btrim(source_party)) = lower($2)", [nextName, currentName]);
+        await client.query("update orders set source_party=$1, source_party_id=$3 where lower(btrim(source_party)) = lower($2)", [nextName, currentName, id]);
+        await client.query("update customers set source_party=$1, source_party_id=$3 where lower(btrim(source_party)) = lower($2)", [nextName, currentName, id]);
         await client.query("update parties set name=$1, updated_by=$2, updated_at=now() where id=$3", [nextName, req.user!.id, id]);
       });
     }
@@ -1786,9 +1837,17 @@ app.post("/api/customers", requireAuth, requireRole("Master", "Helper", "Operato
   const parsed = customerSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid customer", issues: parsed.error.issues });
   const customer = parsed.data;
+  let partyId = customer.source_party_id ? String(customer.source_party_id) : "";
+  if (!partyId && customer.source_party) {
+    const pn = customer.source_party.trim();
+    if (pn) {
+      const pid = await query<{ id: string }>("select id from parties where lower(btrim(name)) = lower($1) limit 1", [pn]);
+      partyId = pid.rows[0]?.id ?? "";
+    }
+  }
   const { rows } = await query<{ id: string }>(
-    "insert into customers (name, code, phone, email, address, source_party, old_balance, notes) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id",
-    [customer.name, customer.code, customer.phone, customer.email, customer.address, customer.source_party, customer.old_balance, customer.notes],
+    "insert into customers (name, code, phone, email, address, source_party, source_party_id, old_balance, notes) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id",
+    [customer.name, customer.code, customer.phone, customer.email, customer.address, customer.source_party, partyId || null, customer.old_balance, customer.notes],
   );
   await ensureCustomerAccount(rows[0].id);
   await audit(req.user!, "CUSTOMER_CREATED", "customers", rows[0].id, undefined, customer);
@@ -1835,7 +1894,15 @@ app.put("/api/customers/:id", requireAuth, requireRole("Master"), async (req, re
   const parsed = customerSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid customer", issues: parsed.error.issues });
   const old = await query("select * from customers where id=$1", [id]);
-  await query("update customers set name=$1, code=$2, phone=$3, email=$4, address=$5, source_party=$6, old_balance=$7, notes=$8 where id=$9", [parsed.data.name, parsed.data.code, parsed.data.phone, parsed.data.email, parsed.data.address, parsed.data.source_party, parsed.data.old_balance, parsed.data.notes, id]);
+  let partyId = parsed.data.source_party_id ? String(parsed.data.source_party_id) : "";
+  if (!partyId && parsed.data.source_party) {
+    const pn = parsed.data.source_party.trim();
+    if (pn) {
+      const pid = await query<{ id: string }>("select id from parties where lower(btrim(name)) = lower($1) limit 1", [pn]);
+      partyId = pid.rows[0]?.id ?? "";
+    }
+  }
+  await query("update customers set name=$1, code=$2, phone=$3, email=$4, address=$5, source_party=$6, source_party_id=$7, old_balance=$8, notes=$9 where id=$10", [parsed.data.name, parsed.data.code, parsed.data.phone, parsed.data.email, parsed.data.address, parsed.data.source_party, partyId || null, parsed.data.old_balance, parsed.data.notes, id]);
   await audit(req.user!, "CUSTOMER_BALANCE_UPDATED", "customers", id, old.rows[0], parsed.data);
   res.json({ ok: true });
 });
@@ -2264,10 +2331,11 @@ app.post("/api/finance/transactions", requireFinanceSession, async (req, res) =>
   }
 });
 
-app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(error);
+app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const detail = error instanceof Error ? (error.stack || error.message) : String(error);
+  console.error(`[500] ${req.method} ${req.path}`, detail);
   const message = error instanceof Error ? error.message : "Internal server error";
-  res.status(500).json({ message: config.nodeEnv === "production" ? "Internal server error" : message });
+  res.status(500).json({ message: config.nodeEnv === "production" ? "تعذر حفظ الأوردر حالياً. حاول مرة أخرى." : message });
 });
 
 async function start() {

@@ -14,6 +14,7 @@ const REQUIRED_ORDER_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["order_number", "text unique not null"],
   ["customer_id", "uuid references customers(id) on delete set null"],
   ["source_party", "text"],
+  ["source_party_id", "uuid"],
   ["customer_name_snapshot", "text not null"],
   ["customer_code_snapshot", "text"],
   ["phone_snapshot", "text not null"],
@@ -96,6 +97,21 @@ async function guarded(fn: () => Promise<unknown>, log: (msg: string) => void, l
   }
 }
 
+const REQUIRED_CUSTOMER_COLUMNS: ReadonlyArray<readonly [string, string]> = [
+  ["id", "uuid primary key"],
+  ["name", "text not null"],
+  ["code", "text"],
+  ["phone", "text not null"],
+  ["email", "text default ''"],
+  ["address", "text default ''"],
+  ["source_party", "text"],
+  ["source_party_id", "uuid"],
+  ["old_balance", "numeric not null default 0"],
+  ["notes", "text"],
+  ["created_at", "timestamptz not null default now()"],
+  ["updated_at", "timestamptz not null default now()"],
+];
+
 async function syncOrdersColumns(log: (msg: string) => void) {
   const { rows } = await query<{ column_name: string }>(
     `select column_name from information_schema.columns where table_schema = 'public' and table_name = 'orders'`,
@@ -109,6 +125,23 @@ async function syncOrdersColumns(log: (msg: string) => void) {
       () => query(`alter table orders add column if not exists ${name} ${definition}`),
       log,
       `add column orders.${name}`,
+    );
+  }
+}
+
+async function syncCustomersColumns(log: (msg: string) => void) {
+  const { rows } = await query<{ column_name: string }>(
+    `select column_name from information_schema.columns where table_schema = 'public' and table_name = 'customers'`,
+  );
+  const existing = new Set(rows.map((row) => row.column_name));
+  const missing = REQUIRED_CUSTOMER_COLUMNS.filter(([name]) => !existing.has(name));
+  if (!missing.length) return;
+  log(`[schema] adding ${missing.length} missing column(s) to customers: ${missing.map(([name]) => name).join(", ")}`);
+  for (const [name, definition] of missing) {
+    await guarded(
+      () => query(`alter table customers add column if not exists ${name} ${definition}`),
+      log,
+      `add column customers.${name}`,
     );
   }
 }
@@ -350,6 +383,16 @@ async function syncPartiesTable(log: (msg: string) => void) {
     log,
     "parties seed/backfill",
   );
+  await guarded(
+    () => query(`alter table customers drop constraint if exists customers_source_party_id_fkey;
+      alter table customers add constraint customers_source_party_id_fkey foreign key (source_party_id) references parties(id) on delete set null;
+      alter table orders drop constraint if exists orders_source_party_id_fkey;
+      alter table orders add constraint orders_source_party_id_fkey foreign key (source_party_id) references parties(id) on delete set null;
+      update customers c set source_party_id = p.id from parties p where c.source_party_id is null and c.source_party is not null and lower(btrim(c.source_party)) = lower(btrim(p.name));
+      update orders o set source_party_id = p.id from parties p where o.source_party_id is null and o.source_party is not null and lower(btrim(o.source_party)) = lower(btrim(p.name));`),
+    log,
+    "party links fk/backfill",
+  );
 }
 
 /**
@@ -426,6 +469,7 @@ async function syncCustomerAccountsTables(log: (msg: string) => void) {
  */
 async function syncSchemaDrift(log: (msg: string) => void) {
   await syncOrdersColumns(log);
+  await syncCustomersColumns(log);
   await syncOrderCompletion(log);
   await syncWorkStageConstraint(log);
   await syncOrderStatusEnum(log);

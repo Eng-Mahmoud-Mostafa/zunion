@@ -112,6 +112,7 @@ type OperationItem = {
 type Customer = {
   id: string;
   source_person: string;
+  source_party_id?: string;
   client_name: string;
   client_code: string;
   phone: string;
@@ -173,6 +174,7 @@ type Order = {
   created_by: string;
   order_number: string;
   source_person: string;
+  source_party_id?: string;
   client_name: string;
   client_code: string;
   phone: string;
@@ -1187,6 +1189,7 @@ const emptyOrder: Order = {
   created_by: "",
   order_number: "",
   source_person: "",
+  source_party_id: "",
   client_name: "",
   client_code: "",
   phone: "",
@@ -1418,6 +1421,7 @@ function orderFromApi(row: Record<string, unknown>): Order {
     created_by: String(row.created_by ?? row.added_by ?? ""),
     order_number: String(row.order_number ?? ""),
     source_person: String(row.source_party ?? row.party ?? ""),
+    source_party_id: String(row.source_party_id ?? ""),
     client_name: String(row.customer_name_snapshot ?? row.customer_name ?? ""),
     client_code: String(row.customer_code_snapshot ?? ""),
     phone: String(row.phone_snapshot ?? row.phone ?? ""),
@@ -1514,6 +1518,7 @@ function orderToApi(order: Order) {
   return {
     ...(calculated.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(calculated.id) ? { id: calculated.id } : {}),
     source_party: calculated.source_person,
+    source_party_id: calculated.source_party_id || undefined,
     customer_name_snapshot: calculated.client_name,
     customer_code_snapshot: calculated.client_code,
     phone_snapshot: calculated.phone,
@@ -1562,6 +1567,7 @@ function customerFromApi(row: Record<string, unknown>): Customer {
   return {
     id: String(row.id ?? createId()),
     source_person: String(row.source_party ?? row.source_person ?? ""),
+    source_party_id: String(row.source_party_id ?? ""),
     client_name: String(row.name ?? row.client_name ?? ""),
     client_code: String(row.code ?? row.client_code ?? ""),
     phone: String(row.phone ?? ""),
@@ -1581,6 +1587,7 @@ function customerToApi(customer: Customer) {
     email: customer.email || "",
     address: customer.address || "",
     source_party: customer.source_person,
+    source_party_id: customer.source_party_id || null,
     old_balance: customer.old_balance,
     notes: customer.notes || "",
   };
@@ -4066,7 +4073,25 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
   const activeProducts = normalizedProducts.filter((product) => product.status === "active");
   const selectedProduct = normalizedProducts.find((product) => product.id === form.productId);
   const visibleProducts = activeProducts.filter((product) => `${product.name} ${product.details}`.toLowerCase().includes(productSearch.trim().toLowerCase()));
-  const visibleCustomers = customers.filter((customer) => {
+  function partyIdByName(partyList: Party[], name: string): string {
+    const target = (name ?? "").trim().toLowerCase();
+    if (!target) return "";
+    const found = partyList.find((p) => p.name.trim().toLowerCase() === target);
+    return found?.id ?? "";
+  }
+  const currentPartyId = form.source_party_id || partyIdByName(parties, form.source_person);
+  const partyKey = (name: string, id?: string) => {
+    const keyId = (id || partyIdByName(parties, name)).trim().toLowerCase();
+    return keyId || (name ?? "").trim().toLowerCase();
+  };
+  const currentPartyKeyStr = currentPartyId || (form.source_person ?? "").trim().toLowerCase();
+  const partyCustomersAll = currentPartyKeyStr
+    ? customers.filter((c) => {
+        const ck = partyKey(c.source_person, c.source_party_id);
+        return ck !== "" && ck === currentPartyKeyStr;
+      })
+    : [];
+  const visibleCustomers = partyCustomersAll.filter((customer) => {
     const term = customerSearch.trim().toLowerCase();
     return !term || `${customer.client_name} ${customer.client_code} ${customer.phone}`.toLowerCase().includes(term);
   });
@@ -4100,16 +4125,20 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
       setClientName(id);
       return;
     }
-    setForm((current) => calculate({
-      ...current,
-      customer_id: existing.id,
-      client_name: existing.client_name,
-      client_code: existing.client_code,
-      phone: existing.phone,
-      source_person: existing.source_person || current.source_person,
-      old_balance: existing.old_balance || current.old_balance,
-      updated_at: new Date().toISOString(),
-    }));
+    setForm((current) => {
+      const nextPartyId = existing.source_party_id || partyIdByName(parties, existing.source_person) || current.source_party_id;
+      return calculate({
+        ...current,
+        customer_id: existing.id,
+        client_name: existing.client_name,
+        client_code: existing.client_code,
+        phone: existing.phone,
+        source_person: existing.source_person || current.source_person,
+        source_party_id: nextPartyId,
+        old_balance: existing.old_balance || current.old_balance,
+        updated_at: new Date().toISOString(),
+      });
+    });
   }
 
   function handleCustomerInputFocus() {
@@ -4596,46 +4625,72 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
                 <span>رقم الأوردر</span>
                 <input value={form.order_number} readOnly placeholder="يُولَّد عند الحفظ" title={form.order_number} />
               </label>
-              <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
-                <span>اسم العميل<em className="nf-required">*</em></span>
-                <select
-                  value={form.customer_id || ""}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setCustomerSearch("");
-                    setCustomerHighlight(-1);
-                    if (value) selectCustomer(value);
-                    else {
-                      setForm((current) => calculate({ ...current, customer_id: "", client_name: "", client_code: "", phone: "", updated_at: new Date().toISOString() }));
-                    }
-                  }}
-                  onFocus={handleCustomerInputFocus}
-                  disabled={readOnly}
-                >
-                  <option value="" disabled hidden>اختر العميل</option>
-                  {customers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <ErrorText message={errors.client_name} />
-              </label>
-              <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
-                <span>طرف</span>
-                <PartySelect
-                  value={form.source_person}
-                  onChange={(name) => {
-                    setForm((current) => calculate({ ...current, source_person: name, updated_at: new Date().toISOString() }));
-                  }}
-                  parties={parties}
-                  canManage={canManageParties && !readOnly}
-                  onCreate={onCreateParty}
-                  onUpdate={onUpdateParty}
-                  disabled={readOnly}
-                />
-                <ErrorText message={errors.source_person} />
-              </label>
+               <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
+                 <span>طرف</span>
+                 <PartySelect
+                   value={form.source_person}
+                   onChange={(name) => {
+                     setForm((current) => {
+                       const nextId = partyIdByName(parties, name);
+                       const stillBelongs = current.customer_id
+                         ? (() => {
+                             const c = customers.find((x) => x.id === current.customer_id);
+                             if (!c) return false;
+                             const ck = (c.source_party_id || partyIdByName(parties, c.source_person) || c.source_person).trim().toLowerCase();
+                             const nk = (nextId || name).trim().toLowerCase();
+                             return ck !== "" && ck === nk;
+                           })()
+                         : false;
+                       if (current.customer_id && !stillBelongs) {
+                         return calculate({
+                           ...current,
+                           source_person: name,
+                           source_party_id: nextId,
+                           customer_id: "",
+                           client_name: "",
+                           client_code: "",
+                           phone: "",
+                           updated_at: new Date().toISOString(),
+                         });
+                       }
+                       return calculate({ ...current, source_person: name, source_party_id: nextId, updated_at: new Date().toISOString() });
+                     });
+                   }}
+                   parties={parties}
+                   canManage={canManageParties && !readOnly}
+                   onCreate={onCreateParty}
+                   onUpdate={onUpdateParty}
+                   disabled={readOnly}
+                 />
+                 <ErrorText message={errors.source_person} />
+               </label>
+               <label className={`nf-field${errors.client_name ? " nf-field-invalid" : ""}`}>
+                 <span>اسم العميل<em className="nf-required">*</em></span>
+                 <select
+                   value={form.customer_id || ""}
+                   onChange={(event) => {
+                     const value = event.target.value;
+                     setCustomerSearch("");
+                     setCustomerHighlight(-1);
+                     if (value) selectCustomer(value);
+                     else {
+                       setForm((current) => calculate({ ...current, customer_id: "", client_name: "", client_code: "", phone: "", updated_at: new Date().toISOString() }));
+                     }
+                   }}
+                   onFocus={handleCustomerInputFocus}
+                   disabled={readOnly || !form.source_person}
+                 >
+                   <option value="" disabled hidden>
+                     {!form.source_person ? "اختر الطرف أولًا" : partyCustomersAll.length === 0 ? "لا يوجد عملاء لهذا الطرف" : "اختر العميل"}
+                   </option>
+                   {partyCustomersAll.map((customer) => (
+                     <option key={customer.id} value={customer.id}>
+                       {customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}
+                     </option>
+                   ))}
+                 </select>
+                 <ErrorText message={errors.client_name} />
+               </label>
               <label className="nf-field">
                 <span>كود العميل</span>
                 <input value={form.client_code || nextCustomerCode(customers, form.source_person || "")} readOnly />
@@ -5022,8 +5077,24 @@ function AttachmentImage({ src, alt, className }: { src: string; alt: string; cl
   const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  useEffect(() => { setStatus("loading"); }, [src, attempt]);
-  const isInline = src.startsWith("data:") || src.startsWith("blob:");
+  useEffect(() => {
+    if (!src) {
+      setStatus("error");
+      return;
+    }
+    let cancelled = false;
+    setStatus("loading");
+    // Probe with a detached Image so the result never depends on layout/lazy-loading,
+    // and always resolve within a bounded time so "جارٍ التحميل" can never hang forever.
+    const probe = new window.Image();
+    probe.onload = () => { if (!cancelled) setStatus("loaded"); };
+    probe.onerror = () => { if (!cancelled) setStatus("error"); };
+    probe.src = src;
+    const timer = window.setTimeout(() => {
+      if (!cancelled) setStatus((current) => (current === "loading" ? "error" : current));
+    }, 12000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [src, attempt]);
   const retry = (event: React.MouseEvent) => {
     event.stopPropagation();
     setAttempt((current) => current + 1);
@@ -5039,15 +5110,12 @@ function AttachmentImage({ src, alt, className }: { src: string; alt: string; cl
             <button type="button" className="ghost-btn compact" onClick={retry}><RefreshCw size={12} /> إعادة المحاولة</button>
           </div>
         )}
-        {status !== "error" && (
+        {status === "loaded" && (
           <img
-            key={`${src}-${attempt}`}
             src={src}
             alt={alt}
-            loading="lazy"
-            className={`upload-preview${status === "loading" ? " upload-preview-hidden" : ""}`}
-            onClick={() => { if (status === "loaded") setPreviewOpen(true); }}
-            onLoad={() => { if (!isInline) setStatus("loaded"); else setStatus("loaded"); }}
+            className="upload-preview"
+            onClick={() => setPreviewOpen(true)}
             onError={() => setStatus("error")}
           />
         )}
@@ -7347,6 +7415,13 @@ function AddCustomerPage({ customers, setCustomers, session, parties = [], canMa
   const [address, setAddress] = useState("");
   const [error, setError] = useState("");
   const selectedParty = party;
+  function partyIdByNameAdd(pList: Party[], n: string): string {
+    const t = (n ?? "").trim().toLowerCase();
+    if (!t) return "";
+    const f = pList.find((p) => p.name.trim().toLowerCase() === t);
+    return f?.id ?? "";
+  }
+  const partyId = partyIdByNameAdd(parties, selectedParty);
   const code = nextCustomerCode(customers, selectedParty || partyNames[0] || "");
   const onDirtyChangeRef = useRef(onDirtyChange);
   onDirtyChangeRef.current = onDirtyChange;
@@ -7378,7 +7453,7 @@ function AddCustomerPage({ customers, setCustomers, session, parties = [], canMa
       return false;
     }
     setError("");
-    const customer: Customer = { id: createId(), source_person: selectedParty, client_name: name.trim(), client_code: code, phone: phone.trim(), email: normalizedEmail, address: address.trim(), old_balance: 0, notes: "", created_at: new Date().toISOString() };
+    const customer: Customer = { id: createId(), source_person: selectedParty, source_party_id: partyId || undefined, client_name: name.trim(), client_code: code, phone: phone.trim(), email: normalizedEmail, address: address.trim(), old_balance: 0, notes: "", created_at: new Date().toISOString() };
     setCustomers((current) => [customer, ...current]);
     addAudit(session, "CUSTOMER_CREATED", "customers", customer.id, undefined, customer);
     setName("");
