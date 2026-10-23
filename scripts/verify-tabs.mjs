@@ -1,9 +1,10 @@
-// Verifies the persistent internal tabs feature against the built dist.
-// The app runs in server-auth mode, so /api/* is mocked via fetch interception:
-// /api/orders GET fails (the app keeps its seeded local cache), /api/orders POST
-// is toggleable to simulate a save failure. Checks: opening tabs from the
-// sidebar, preserving typed values across tab switches, per-record order tabs,
-// the dirty indicator, and the close-confirm flow (save / discard / cancel).
+// Verifies the persistent internal tabs feature (now grouped by sidebar section)
+// against the built dist. The app runs in server-auth mode, so /api/* is mocked
+// via fetch interception: /api/orders GET fails (the app keeps its seeded local
+// cache), /api/orders POST is toggleable to simulate a save failure.
+// Checks: opening subpages (grouped under a section), preserving typed values
+// across tab switches, per-record order tabs (standalone), the dirty indicator,
+// and the close-confirm flow (save / discard / cancel).
 import { launch, connect, evaluate, shot, cleanup } from "./cdp.mjs";
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:5195";
@@ -36,6 +37,7 @@ const ORDER_B = {
 const SEED = `
 (() => {
   try {
+    window.alert = function () {};
     localStorage.setItem('zunion-local-session', JSON.stringify({ email: 'mahmoudmostafa3104@gmail.com', username: 'mahmoud', fullName: 'Mahmoud', role: 'Master',
       expiresAt: new Date(Date.now() + 86400000).toISOString(), loggedInAt: new Date().toISOString(), mustChangePassword: false }));
     localStorage.setItem('zunion-local-orders-v2', JSON.stringify(${JSON.stringify([ORDER_A, ORDER_B])}));
@@ -71,30 +73,58 @@ const SETVAL = `const setVal = (el, v) => { const proto = el.tagName === 'SELECT
 const NORM = `const norm = (s) => (s || '').replace(/[\\u0623\\u0625\\u0622]/g, 'ا').replace(/\\s+/g,' ').trim();`;
 
 const tabsState = `(() => {
-  const tabs = [...document.querySelectorAll('.tabbar .tab')].map(t => ({
+  const tabs = [...document.querySelectorAll('.tabbar .tab')].filter(t => t.querySelector('.tab-main')).map(t => ({
     label: t.querySelector('.tab-label')?.textContent?.trim() || '',
     active: t.classList.contains('active'),
     dirty: !!t.querySelector('.tab-dot'),
   }));
-  return { tabs };
+  const sections = [...document.querySelectorAll('.tabbar .tab-section-btn')].map(b => ({
+    label: b.querySelector('.tab-label')?.textContent?.trim() || '',
+    containsActive: b.classList.contains('contains-active'),
+  }));
+  return { tabs, sections };
 })()`;
+
+const openSection = (label) => `(() => {
+  ${NORM}
+  const want = norm(${JSON.stringify(label)});
+  const btn = [...document.querySelectorAll('.tabbar .tab-section-btn')].find(b => norm(b.querySelector('.tab-label')?.textContent || '').includes(want));
+  if (!btn) return { ok:false };
+  if (!btn.classList.contains('open')) btn.click();
+  return { ok:true };
+})()`;
+
+const menuRows = `(() => [...document.querySelectorAll('.tab-section-menu .tab-menu-row')].map(r => ({
+  label: r.querySelector('.tab-menu-label')?.textContent?.trim() || '',
+  open: !!r.querySelector('.tab-menu-dot'),
+  dirty: !!r.querySelector('.tab-menu-dirty'),
+  active: r.classList.contains('active'),
+})))()`;
 
 const clickTab = (label) => `(() => {
   ${NORM}
   const want = norm(${JSON.stringify(label)});
-  const tab = [...document.querySelectorAll('.tabbar .tab')].find(t => norm(t.querySelector('.tab-label')?.textContent || '').includes(want));
-  if (!tab) return { ok: false, have: [...document.querySelectorAll('.tabbar .tab')].map(t => norm(t.querySelector('.tab-label')?.textContent || '')) };
-  tab.querySelector('.tab-main').click();
-  return { ok: true };
+  const stand = [...document.querySelectorAll('.tabbar .tab')].filter(t => t.querySelector('.tab-main')).find(t => norm(t.querySelector('.tab-label')?.textContent || '').includes(want));
+  if (stand) { stand.querySelector('.tab-main').click(); return { ok:true, via:'standalone' }; }
+  for (const btn of document.querySelectorAll('.tabbar .tab-section-btn')) {
+    if (!btn.classList.contains('open')) btn.click();
+    const row = [...document.querySelectorAll('.tab-section-menu .tab-menu-row')].find(r => norm(r.querySelector('.tab-menu-label')?.textContent || '').includes(want));
+    if (row) { row.querySelector('.tab-menu-main').click(); return { ok:true, via:'section' }; }
+  }
+  return { ok:false, have:[...document.querySelectorAll('.tabbar .tab-label')].map(e=>norm(e.textContent)) };
 })()`;
 
 const closeTab = (label) => `(() => {
   ${NORM}
   const want = norm(${JSON.stringify(label)});
-  const tab = [...document.querySelectorAll('.tabbar .tab')].find(t => norm(t.querySelector('.tab-label')?.textContent || '').includes(want));
-  if (!tab) return { ok: false, have: [...document.querySelectorAll('.tabbar .tab')].map(t => norm(t.querySelector('.tab-label')?.textContent || '')) };
-  tab.querySelector('.tab-close').click();
-  return { ok: true };
+  const stand = [...document.querySelectorAll('.tabbar .tab')].filter(t => t.querySelector('.tab-main')).find(t => norm(t.querySelector('.tab-label')?.textContent || '').includes(want));
+  if (stand) { stand.querySelector('.tab-close').click(); return { ok:true, via:'standalone' }; }
+  for (const btn of document.querySelectorAll('.tabbar .tab-section-btn')) {
+    if (!btn.classList.contains('open')) btn.click();
+    const row = [...document.querySelectorAll('.tab-section-menu .tab-menu-row')].find(r => norm(r.querySelector('.tab-menu-label')?.textContent || '').includes(want));
+    if (row && row.querySelector('.tab-menu-close')) { row.querySelector('.tab-menu-close').click(); return { ok:true, via:'section' }; }
+  }
+  return { ok:false, have:[...document.querySelectorAll('.tabbar .tab-label')].map(e=>norm(e.textContent)) };
 })()`;
 
 const setQty = (value) => `(() => {
@@ -126,7 +156,7 @@ const readOrderNumber = `(() => {
   return label ? label.querySelector('input').value : null;
 })()`;
 
-const countOrderTabs = `(() => [...document.querySelectorAll('.tabbar .tab-label')].filter(e => /9000/.test(e.textContent)).length)()`;
+const countOrderTabs = `(() => [...document.querySelectorAll('.tabbar .tab-main .tab-label')].filter(e => /9000/.test(e.textContent)).length)()`;
 
 const confirmVisible = `(() => { const el = document.querySelector('.tab-confirm'); return el ? { text: el.textContent.replace(/\\s+/g,' ').trim() } : null; })()`;
 
@@ -156,7 +186,7 @@ try {
   let state = await evaluate(cdp, tabsState);
   check("one initial tab (نظرة عامة)", state.tabs.length === 1 && state.tabs[0].active, state);
 
-  console.log("== 2. sidebar opens a new tab ==");
+  console.log("== 2. sidebar opens a new grouped subpage ==");
   await evaluate(cdp, `(() => {
     ${NORM}
     const child = [...document.querySelectorAll('.sidebar-subitem')].find(b => norm(b.textContent).includes(norm('اوردر جديد')));
@@ -173,16 +203,22 @@ try {
   })()`);
   await sleep(1200);
   state = await evaluate(cdp, tabsState);
-  check("new-order tab opened", state.tabs.length === 2 && state.tabs.some(t => t.label.includes('جديد')), state);
+  check("new-order grouped under الرئيسية (no standalone tab)", state.tabs.length === 1 && state.sections.some(s => s.label.includes('الرئيسية')), state);
+  await evaluate(cdp, openSection('الرئيسية'));
+  await sleep(300);
+  let rows = await evaluate(cdp, menuRows);
+  check("new-order open with a red circle in the dropdown", rows.some(r => r.label.includes('جديد') && r.open), rows);
   await shot(cdp, `${OUT}\\tabs-01-open.png`);
 
   console.log("== 3. typed value + dirty dot ==");
   const typed = await evaluate(cdp, setQty('7'));
   check("quantity typed", typed.ok && typed.value === '7', typed);
   await sleep(500);
-  state = await evaluate(cdp, tabsState);
-  const newTab = state.tabs.find(t => t.label.includes('جديد'));
-  check("dirty dot shown on edited tab", !!newTab && newTab.dirty, state);
+  await evaluate(cdp, openSection('الرئيسية'));
+  await sleep(300);
+  rows = await evaluate(cdp, menuRows);
+  const newRow = rows.find(r => r.label.includes('جديد'));
+  check("dirty indicator shown on edited subpage row", !!newRow && newRow.dirty, rows);
 
   console.log("== 4. switching tabs preserves the typed value ==");
   await evaluate(cdp, clickTab('نظرة عامة'));
@@ -194,14 +230,14 @@ try {
   const preserved = await evaluate(cdp, readQty);
   check("quantity preserved after returning", preserved === '7', preserved);
 
-  console.log("== 5. per-record order tabs via hash ==");
+  console.log("== 5. per-record order tabs via hash (standalone) ==");
   await evaluate(cdp, `window.location.hash = '#/editOrder/900001'`);
   await sleep(1000);
   await evaluate(cdp, `window.location.hash = '#/editOrder/900002'`);
   await sleep(1000);
   state = await evaluate(cdp, tabsState);
   const orderTabCount = await evaluate(cdp, countOrderTabs);
-  check("two order tabs opened", state.tabs.length === 4 && orderTabCount === 2, { state, orderTabCount });
+  check("two standalone order tabs opened", state.tabs.length === 3 && orderTabCount === 2, { state, orderTabCount });
   const numB = await evaluate(cdp, readOrderNumber);
   check("second order tab shows its record", numB === '900002', numB);
   await evaluate(cdp, clickTab('900001'));
@@ -225,7 +261,7 @@ try {
   await sleep(500);
   modal = await evaluate(cdp, confirmVisible);
   state = await evaluate(cdp, tabsState);
-  check("cancel keeps the tab open", !modal && state.tabs.length === 4, { modal, state });
+  check("cancel keeps the tab open", !modal && state.tabs.length === 3, { modal, state });
 
   console.log("== 7. discard changes closes the tab ==");
   await evaluate(cdp, closeTab('900001'));
@@ -233,7 +269,7 @@ try {
   await evaluate(cdp, clickConfirm('تجاهل'));
   await sleep(700);
   state = await evaluate(cdp, tabsState);
-  check("discard closes the tab", state.tabs.length === 3 && !state.tabs.some(t => t.label.includes('900001')), state);
+  check("discard closes the tab", state.tabs.length === 2 && !state.tabs.some(t => t.label.includes('900001')), state);
 
   console.log("== 8. close a clean tab removes it silently ==");
   await evaluate(cdp, closeTab('نظرة عامة'));
@@ -248,13 +284,15 @@ try {
   await evaluate(cdp, closeTab('900002'));
   await sleep(600);
   state = await evaluate(cdp, tabsState);
-  check("neighbour activated after close", state.tabs.some(t => t.active && t.label.includes('جديد')), state);
+  check("neighbour (grouped new-order) activated after close", state.sections.some(s => s.label.includes('الرئيسية') && s.containsActive), state);
 
   console.log("== 8c. save failure keeps the tab and shows an error ==");
   const typed2 = await evaluate(cdp, setQty('11'));
   check("quantity typed for save test", typed2.ok && typed2.value === '11', typed2);
   await sleep(400);
   await evaluate(cdp, `window.__ordersPostFail = true`);
+  await evaluate(cdp, openSection('الرئيسية'));
+  await sleep(400);
   await evaluate(cdp, closeTab('جديد'));
   await sleep(500);
   modal = await evaluate(cdp, confirmVisible);
@@ -263,7 +301,7 @@ try {
   await sleep(1500);
   state = await evaluate(cdp, tabsState);
   const errText = await evaluate(cdp, `document.querySelector('.tab-confirm-error')?.textContent || ''`);
-  check("failed save keeps the tab with an error", state.tabs.some(t => t.label.includes('جديد')) && errText.length > 0, { state, errText });
+  check("failed save keeps the section with an error", state.sections.some(s => s.label.includes('الرئيسية')) && errText.length > 0, { state, errText });
   await shot(cdp, `${OUT}\\tabs-04-save-fail.png`);
 
   console.log("== 9. successful save then close ==");
@@ -271,7 +309,7 @@ try {
   await evaluate(cdp, clickConfirm('حفظ'));
   await sleep(1500);
   state = await evaluate(cdp, tabsState);
-  check("successful save closes the tab", !state.tabs.some(t => t.label.includes('جديد')), state);
+  check("successful save closes the tab and its section", !state.sections.some(s => s.label.includes('الرئيسية')), state);
   await shot(cdp, `${OUT}\\tabs-05-after-save.png`);
 
   console.log("\nRESULT: " + pass + " passed, " + fail + " failed");
