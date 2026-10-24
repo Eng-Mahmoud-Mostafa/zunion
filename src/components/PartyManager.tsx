@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type MutableRefObject, type ReactNode } from "react";
 import { Check, Loader2, Pencil, Plus, X } from "lucide-react";
 import { DraggableDialog } from "./DraggableDialog";
 
@@ -37,11 +37,14 @@ type ManagerProps = {
   onUpdate?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void;
 };
 
+/** Lets a hosting window ask for pending edits to be saved before it closes. */
+export type PartyPanelControl = { saveAll: () => Promise<boolean> };
+
 /**
  * The one and only parties management table (الاسم / الحالة / الإجراءات).
  * Shared by the Settings section and the in-form draggable popup.
  */
-export function PartyManagerPanel({ parties, onCreate, onUpdate }: ManagerProps) {
+export function PartyManagerPanel({ parties, onCreate, onUpdate, onDirtyChange, controlRef }: ManagerProps & { onDirtyChange?: (dirty: boolean) => void; controlRef?: MutableRefObject<PartyPanelControl | null> }) {
   const list = parties
     .slice()
     .sort((a, b) => a.position - b.position)
@@ -67,40 +70,61 @@ export function PartyManagerPanel({ parties, onCreate, onUpdate }: ManagerProps)
       return next;
     });
 
-  const submitNew = async () => {
+  const submitNew = async (): Promise<boolean> => {
     const name = newName.trim();
-    if (!name) { setNotice({ tone: "error", text: "الاسم مطلوب" }); return; }
-    if (duplicate(name)) { setNotice({ tone: "error", text: "يوجد اسم مطابق موجود" }); return; }
-    if (!onCreate) { setNotice({ tone: "error", text: "غير مصرح بإدارة الأطراف" }); return; }
+    if (!name) { setNotice({ tone: "error", text: "الاسم مطلوب" }); return false; }
+    if (duplicate(name)) { setNotice({ tone: "error", text: "يوجد اسم مطابق موجود" }); return false; }
+    if (!onCreate) { setNotice({ tone: "error", text: "غير مصرح بإدارة الأطراف" }); return false; }
     setBusy("new");
     try {
       await onCreate(name);
       setNewName("");
       setNotice({ tone: "success", text: "تمّت إضافة الطرف" });
+      return true;
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "تعذّر إضافة الطرف" });
+      return false;
     } finally {
       setBusy("");
     }
   };
 
-  const saveEdit = async (party: PartyItem) => {
+  const saveEdit = async (party: PartyItem): Promise<boolean> => {
     const raw = (edits[party.id] ?? party.name).trim();
-    if (!raw) { setNotice({ tone: "error", text: "الاسم مطلوب" }); return; }
-    if (duplicate(raw, party.id)) { setNotice({ tone: "error", text: "يوجد اسم مطابق موجود" }); return; }
-    if (raw.toLowerCase() === party.name.trim().toLowerCase()) { cancelEdit(party.id); return; }
-    if (!onUpdate) { setNotice({ tone: "error", text: "غير مصرح بإدارة الأطراف" }); return; }
+    if (!raw) { setNotice({ tone: "error", text: "الاسم مطلوب" }); return false; }
+    if (duplicate(raw, party.id)) { setNotice({ tone: "error", text: "يوجد اسم مطابق موجود" }); return false; }
+    if (raw.toLowerCase() === party.name.trim().toLowerCase()) { cancelEdit(party.id); return true; }
+    if (!onUpdate) { setNotice({ tone: "error", text: "غير مصرح بإدارة الأطراف" }); return false; }
     setBusy(party.id);
     try {
       await onUpdate(party.id, { name: raw });
       cancelEdit(party.id);
       setNotice({ tone: "success", text: "تمّ تعديل الطرف" });
+      return true;
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "تعذّر تعديل الطرف" });
+      return false;
     } finally {
       setBusy("");
     }
   };
+
+  // Unsaved = a typed new name, or a rename that differs from the saved name.
+  // Refreshed party lists never reset these: they are keyed by party id.
+  const dirty = Boolean(newName.trim()) || list.some((party) => edits[party.id] !== undefined && edits[party.id].trim() !== party.name.trim());
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  if (controlRef) {
+    controlRef.current = {
+      saveAll: async () => {
+        let ok = true;
+        if (newName.trim()) ok = (await submitNew()) && ok;
+        for (const party of list) {
+          if (edits[party.id] !== undefined && edits[party.id].trim() !== party.name.trim()) ok = (await saveEdit(party)) && ok;
+        }
+        return ok;
+      },
+    };
+  }
 
   const toggleActive = async (party: PartyItem) => {
     if (!onUpdate) { setNotice({ tone: "error", text: "غير مصرح بإدارة الأطراف" }); return; }
@@ -196,22 +220,23 @@ export function PartyManagerPanel({ parties, onCreate, onUpdate }: ManagerProps)
   );
 }
 
-/** Draggable white/red popup titled إدارة الأطراف, opened straight from a form. */
+/** Floating white/red window titled إدارة الأطراف, opened straight from a form. */
 export function PartyModal({ parties, onCreate, onUpdate, onClose }: ManagerProps & { onClose: () => void }) {
+  const [dirty, setDirty] = useState(false);
+  const controlRef = useRef<PartyPanelControl | null>(null);
   return (
     <DraggableDialog
-      overlayClassName="party-modal-overlay"
       dialogClassName="party-modal"
       headClassName="party-modal-head"
       closeClassName="party-modal-close"
       ariaLabel="إدارة الأطراف"
       onClose={onClose}
       title={<h2>إدارة الأطراف</h2>}
-      portal
       dragFromEmptyArea
-      centerOnce
+      dirty={dirty}
+      onSave={() => controlRef.current?.saveAll() ?? true}
     >
-      <PartyManagerPanel parties={parties} onCreate={onCreate} onUpdate={onUpdate} />
+      <PartyManagerPanel parties={parties} onCreate={onCreate} onUpdate={onUpdate} onDirtyChange={setDirty} controlRef={controlRef} />
     </DraggableDialog>
   );
 }
@@ -257,7 +282,9 @@ export function PartySelect({ value, onChange, parties, canManage, onCreate, onU
         {names.map((name) => <option key={name} value={name}>{name}</option>)}
         {canManage ? <option value={OTHER_PARTY_NAME}>{OTHER_PARTY_NAME}</option> : null}
       </select>
-      {open && canManage ? (
+      {/* Opening needs canManage; once open, the window stays until it is closed,
+          even if the hosting form switches to read-only after a save. */}
+      {open ? (
         <PartyModal
           parties={parties}
           onCreate={onCreate}

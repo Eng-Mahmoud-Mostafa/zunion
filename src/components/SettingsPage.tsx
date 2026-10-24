@@ -28,6 +28,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { DraggableDialog } from "./DraggableDialog";
 import { PartyManagerPanel } from "./PartyManager";
 import { allPermissionKeys, masterProtectedPermissions, type PermissionKey } from "../../shared/permissions";
 import { formatDateArabic, formatDateTimeEnglish } from "../utils/formatters";
@@ -456,6 +457,36 @@ function normalizeText(value: string) {
   return value.trim().toLowerCase();
 }
 
+/**
+ * Management forms (users, passwords, roles) open as floating, non-modal windows;
+ * only ConfirmDialog keeps the blocking backdrop.
+ */
+function FloatingFormWindow({ title, subtitle, onClose, children, footer, dirty, formId }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode; dirty?: boolean; formId?: string }) {
+  return (
+    <DraggableDialog
+      dialogClassName="settings-modal settings-floating-window"
+      headClassName="settings-modal-head"
+      closeClassName="settings-icon-btn"
+      ariaLabel={title}
+      onClose={onClose}
+      dirty={dirty}
+      // "حفظ" in the unsaved-changes prompt submits the window's own form; that
+      // form closes the window itself when saving succeeds, and keeps it open
+      // (with its validation messages) when it does not.
+      onSave={formId ? () => { (document.getElementById(formId) as HTMLFormElement | null)?.requestSubmit(); return false; } : undefined}
+      title={
+        <div>
+          <h3>{title}</h3>
+          {subtitle ? <p className="muted">{subtitle}</p> : null}
+        </div>
+      }
+    >
+      <div className="settings-modal-body" dir="rtl">{children}</div>
+      {footer ? <div className="settings-modal-foot">{footer}</div> : null}
+    </DraggableDialog>
+  );
+}
+
 function Modal({ title, subtitle, onClose, children, footer }: { title: string; subtitle?: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   return (
     <div
@@ -547,6 +578,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
   const [userModal, setUserModal] = useState<"create" | "edit" | null>(null);
   const [editingUserId, setEditingUserId] = useState("");
   const [userForm, setUserForm] = useState({ username: "", fullName: "", role: "", status: "active" as "active" | "inactive", password: "", confirmPassword: "", mustChangePassword: true });
+  const userFormBaseRef = useRef("");
   const [userFormErrors, setUserFormErrors] = useState<Record<string, string>>({});
 
   const [passwordModalUserId, setPasswordModalUserId] = useState("");
@@ -819,14 +851,18 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
   );
 
   const openCreateUser = () => {
-    setUserForm({ username: "", fullName: "", role: roles[0]?.name || "Operator", status: "active", password: "", confirmPassword: "", mustChangePassword: true });
+    const initial = { username: "", fullName: "", role: roles[0]?.name || "Operator", status: "active" as const, password: "", confirmPassword: "", mustChangePassword: true };
+    setUserForm(initial);
+    userFormBaseRef.current = JSON.stringify(initial);
     setUserFormErrors({});
     setEditingUserId("");
     setUserModal("create");
   };
 
   const openEditUser = (user: SettingsUser) => {
-    setUserForm({ username: user.username, fullName: user.fullName, role: user.role, status: user.status, password: "", confirmPassword: "", mustChangePassword: user.mustChangePassword });
+    const initial = { username: user.username, fullName: user.fullName, role: user.role, status: user.status, password: "", confirmPassword: "", mustChangePassword: user.mustChangePassword };
+    setUserForm(initial);
+    userFormBaseRef.current = JSON.stringify(initial);
     setUserFormErrors({});
     setEditingUserId(user.id);
     setUserModal("edit");
@@ -2121,7 +2157,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
       </div>
 
       {userModal === "create" || userModal === "edit" ? (
-        <Modal
+        <FloatingFormWindow formId="settings-user-form" dirty={JSON.stringify(userForm) !== userFormBaseRef.current}
           title={userModal === "create" ? "مستخدم جديد" : `تعديل ${users.find((item) => item.id === editingUserId)?.username || ""}`}
           subtitle={userModal === "create" ? "سيتم إنشاء الحساب بكلمة المرور المحددة" : "تعديل بيانات الحساب الأساسية"}
           onClose={() => setUserModal(null)}
@@ -2185,11 +2221,11 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
               إجبار تغيير كلمة المرور عند أول تسجيل دخول
             </label>
           </form>
-        </Modal>
+        </FloatingFormWindow>
       ) : null}
 
       {passwordModalUserId ? (
-        <Modal
+        <FloatingFormWindow formId="settings-password-form" dirty={Boolean(passwordForm.password || passwordForm.confirmPassword)}
           title="تغيير كلمة المرور"
           subtitle={users.find((item) => item.id === passwordModalUserId)?.username}
           onClose={() => setPasswordModalUserId("")}
@@ -2225,11 +2261,11 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
               </div>
             ) : null}
           </form>
-        </Modal>
+        </FloatingFormWindow>
       ) : null}
 
       {roleModalOpen ? (
-        <Modal
+        <FloatingFormWindow formId="settings-role-form" dirty={Boolean(roleForm.name.trim() || roleForm.description.trim())}
           title="دور جديد"
           subtitle="سيبدأ الدور بصلاحية لوحة المعلومات فقط"
           onClose={() => setRoleModalOpen(false)}
@@ -2261,7 +2297,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
               </div>
             ) : null}
           </form>
-        </Modal>
+        </FloatingFormWindow>
       ) : null}
 
       {confirm?.kind === "status" ? <ConfirmDialog title={confirm.payload.status === "active" ? "إيقاف المستخدم" : "تفعيل المستخدم"} message={`هل تريد ${confirm.payload.status === "active" ? "إيقاف" : "تفعيل"} حساب ${confirm.payload.username}؟`} confirmLabel={confirm.payload.status === "active" ? "إيقاف" : "تفعيل"} busy={busy === "user:status"} onConfirm={applyUserStatus} onCancel={() => setConfirm(null)} /> : null}

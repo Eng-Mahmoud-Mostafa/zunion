@@ -9476,3 +9476,28 @@ input[type="number"] {
 .ws-staff-btn { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; margin-inline-start: 4px; padding: 3px 5px; border: 1px solid #D1D5DB; border-radius: 4px; background: #fff; color: #4B5563; cursor: pointer; }
 .ws-staff-btn:hover { background: #F3F4F6; color: #b3121f; border-color: #ED1525; }
 .cd-order-num .cd-client-link, .ar-num .cd-client-link, .ss-order-link { font: inherit; font-weight: 700; }
+
+/* ── Floating, non-modal windows (DraggableDialog) ─────────────────────────
+   No backdrop: the page stays usable, several windows can be open, and the
+   window clicked last is on top (z-index set inline, starting at 2000). */
+.dd-floating { box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; }
+.dd-floating > .dd-head { flex: 0 0 auto; }
+.dd-floating > :not(.dd-head) { min-height: 0; }
+.dd-floating.md-modal, .dd-floating.ws-staff-panel, .dd-floating.osm-panel { overflow-y: auto; }
+.dd-floating.ws-staff-panel { width: min(620px, calc(100vw - 16px)); }
+.md-modal-head .md-modal-close { color: #ED1525; }
+
+/* Explicit confirmations stay modal and always sit above floating windows;
+   menus that open from the page must not hide behind a window either. */
+.dd-confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 100000; }
+.tab-confirm-overlay, .drafts-confirm-overlay, .settings-modal-backdrop, .attachment-lightbox { z-index: 100000 !important; }
+.tab-section-menu, .gs-panel { z-index: 90000 !important; }
+
+/* Settings management forms as floating windows */
+.settings-floating-window { background: #fff; border: 1px solid #ED1525; border-radius: 12px; padding: 16px; width: min(560px, calc(100vw - 16px)); box-shadow: 0 20px 50px rgba(0,0,0,.28); }
+.settings-floating-window .settings-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid #f0d4d6; }
+.settings-floating-window .settings-modal-head h3 { margin: 0; font-size: 17px; font-weight: 800; color: #ED1525; }
+.settings-floating-window .settings-modal-head p { margin: 4px 0 0; font-size: 13px; }
+.settings-floating-window .settings-modal-body { overflow: auto; min-height: 0; flex: 1 1 auto; }
+.settings-floating-window .settings-modal-foot { display: flex; justify-content: flex-start; gap: 8px; padding-top: 12px; margin-top: 12px; border-top: 1px solid #eef0f3; }
+.settings-floating-window .settings-icon-btn { background: none; border: none; color: #ED1525; cursor: pointer; padding: 2px 4px; display: inline-flex; }

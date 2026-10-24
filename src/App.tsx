@@ -2511,6 +2511,14 @@ const trackingListHeaders = [
   ...ordersListHeaders.slice(1),
 ] as const;
 
+/** An open worker/supervisor assignment window for one order (تشغيل تطريز). */
+type StaffWindowState = { workers: string[]; supervisors: string[]; saving: boolean; error: string };
+
+/** Same set of names regardless of order (used to detect unsaved assignment edits). */
+function sameNames(a: string[], b: string[]) {
+  return a.length === b.length && [...a].sort().join("\u0000") === [...b].sort().join("\u0000");
+}
+
 /** Calendar day (YYYY-MM-DD) of a timestamp in the business time zone. */
 function cairoDateKey(value: unknown): string {
   const parsed = new Date(String(value ?? ""));
@@ -2548,16 +2556,12 @@ function OrderHistoryDialog({ order, onClose }: { order: Order; onClose: () => v
   }, [order.id]);
   return (
     <DraggableDialog
-      overlayClassName="party-modal-overlay"
       dialogClassName="party-modal order-history-modal"
       headClassName="party-modal-head"
       closeClassName="party-modal-close"
       ariaLabel={`سجل تعديلات الأوردر ${order.order_number}`}
       onClose={onClose}
       title={<h2>سجل تعديلات الأوردر #{order.order_number}</h2>}
-      portal
-      dragFromEmptyArea
-      centerOnce
     >
       <div className="order-history-body">
         {error && <p className="tab-confirm-error">{error}</p>}
@@ -4028,15 +4032,6 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
     return () => window.clearTimeout(timer);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, onClose]);
-
   function runSearch() {
     const q = query.trim();
     if (!q || loading) return;
@@ -4083,12 +4078,15 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
   if (!open) return null;
 
   return (
-    <div className="osm-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="osm-panel" role="dialog" aria-modal="true" aria-label="بحث الأوردرات">
-        <header className="osm-head">
-          <div className="osm-title"><Search size={18} /><span>بحث الأوردرات</span></div>
-          <button type="button" className="osm-close" aria-label="إغلاق البحث" onClick={onClose}><X size={18} /></button>
-        </header>
+    <DraggableDialog
+      dialogClassName="osm-panel"
+      headClassName="osm-head"
+      closeClassName="osm-close"
+      closeLabel="إغلاق البحث"
+      ariaLabel="بحث الأوردرات"
+      onClose={onClose}
+      title={<div className="osm-title"><Search size={18} /><span>بحث الأوردرات</span></div>}
+    >
         <div className="osm-field">
           <input ref={inputRef} value={query} autoFocus={open} onChange={(event) => { setQuery(event.target.value); setSearched(false); setResults([]); setSelectedIndex(-1); }} onKeyDown={onSearchKeyDown} placeholder="ابحث برقم الأوردر / اسم العميل / كود العميل" />
           <button type="button" className="osm-go" onClick={runSearch} disabled={loading || !query.trim()}><Search size={16} /> بحث</button>
@@ -4109,8 +4107,7 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
             ))}
           </div>
         )}
-      </div>
-    </div>
+    </DraggableDialog>
   );
 }
 
@@ -5747,7 +5744,8 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   const [assignments, setAssignments] = useState<MachineAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [modal, setModal] = useState<MachineDistModal | null>(null);
+  const [addModal, setAddModal] = useState<Extract<MachineDistModal, { kind: "add" }> | null>(null);
+  const [editModal, setEditModal] = useState<Extract<MachineDistModal, { kind: "edit" }> | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [moveTarget, setMoveTarget] = useState("");
@@ -5800,29 +5798,44 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
       .sort((a, b) => (Number(a.position || 0)) - (Number(b.position || 0)));
   }
 
+  // The "add" and "edit" windows are independent floating windows; either can
+  // stay open while the other is used.
   function openAdd(machine: string, position: number) {
-    setSearchQuery("");
-    setSelectedOrderId(null);
+    // Re-targeting an open add window keeps the order already picked in it.
+    if (!addModal) {
+      setSearchQuery("");
+      setSelectedOrderId(null);
+    }
     setErr("");
     setMsg("");
-    setModal({ kind: "add", machine, position });
+    setAddModal({ kind: "add", machine, position });
   }
 
   function openEdit(assignmentId: string, machine: string) {
+    if (editModal && editModal.assignmentId !== assignmentId && moveTarget && moveTarget !== editModal.machine) {
+      setErr("احفظ أو أغلق نافذة تعديل التوزيع المفتوحة أولاً");
+      return;
+    }
+    if (editModal?.assignmentId === assignmentId) return;
     setMoveTarget(machine);
     setConfirmRemoveMode(false);
     setErr("");
     setMsg("");
-    setModal({ kind: "edit", assignmentId, machine });
+    setEditModal({ kind: "edit", assignmentId, machine });
   }
 
-  function closeModal() {
-    setModal(null);
+  function closeAddModal() {
+    setAddModal(null);
+  }
+
+  function closeEditModal() {
+    setEditModal(null);
     setConfirmRemoveMode(false);
   }
 
-  async function confirmAdd() {
-    if (!modal || modal.kind !== "add" || !selectedOrderId || !modal.machine || busy) return;
+  async function confirmAdd(): Promise<boolean> {
+    const modal = addModal;
+    if (!modal || modal.kind !== "add" || !selectedOrderId || !modal.machine || busy) return false;
     setBusy(true);
     setErr("");
     setMsg("");
@@ -5834,17 +5847,20 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
       const fresh = await backendJson<{ assignments: MachineAssignment[] }>("/api/machine-assignments");
       setAssignments(fresh.assignments);
       setMsg(`تم توزيع الأوردر على ${modal.machine}`);
-      setModal(null);
+      setAddModal(null);
+      return true;
     } catch (error) {
       setErr(error instanceof Error ? error.message : "تعذر حفظ التوزيع");
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  async function confirmMove() {
-    if (!modal || modal.kind !== "edit") return;
-    if (!moveTarget || moveTarget === modal.machine || busy) return;
+  async function confirmMove(): Promise<boolean> {
+    const modal = editModal;
+    if (!modal || modal.kind !== "edit") return false;
+    if (!moveTarget || moveTarget === modal.machine || busy) return false;
     setBusy(true);
     setErr("");
     setMsg("");
@@ -5854,11 +5870,13 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
         body: JSON.stringify({ machine_name: moveTarget }),
       });
       setAssignments((current) => current.map((a) => (a.id === data.assignment.id ? data.assignment : a)));
-      setModal({ kind: "edit", assignmentId: data.assignment.id, machine: data.assignment.machine_name });
+      setEditModal({ kind: "edit", assignmentId: data.assignment.id, machine: data.assignment.machine_name });
       setMoveTarget(data.assignment.machine_name);
       setMsg(`تم نقل الأوردر إلى ${data.assignment.machine_name}`);
+      return true;
     } catch (error) {
       setErr(error instanceof Error ? error.message : "تعذر نقل الأوردر");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -5897,6 +5915,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   }
 
   async function confirmRemove() {
+    const modal = editModal;
     if (!modal || modal.kind !== "edit" || busy) return;
     setBusy(true);
     setErr("");
@@ -5905,7 +5924,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
       await backendJson(`/api/machine-assignments/${encodeURIComponent(modal.assignmentId)}`, { method: "DELETE" });
       setAssignments((current) => current.filter((a) => a.id !== modal.assignmentId));
       setMsg("تمت إزالة الأوردر من الجدول (الأوردر نفسه لم يُحذف)");
-      setModal(null);
+      setEditModal(null);
     } catch (error) {
       setErr(error instanceof Error ? error.message : "تعذر إزالة الأوردر");
     } finally {
@@ -5914,6 +5933,8 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   }
 
   function openMachinesModal() {
+    // Already open: keep the unsaved draft instead of reloading it.
+    if (machinesModalOpen) return;
     setMachinesError("");
     setMachinesAddName("");
     setMachinesAddOpen(false);
@@ -5954,8 +5975,10 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     setMachinesDraft((current) => current.map((row) => row.name === machineName ? { ...row, remove: !row.remove } : row));
   }
 
-  async function saveMachines() {
-    if (machinesSaving) return;
+  const machinesDirty = machinesModalOpen && (Boolean(machinesAddName.trim()) || machinesDraft.some((row) => (row.isNew && !row.remove) || (!row.isNew && row.remove)));
+
+  async function saveMachines(): Promise<boolean> {
+    if (machinesSaving) return false;
     setMachinesSaving(true);
     setMachinesError("");
     try {
@@ -5976,9 +5999,11 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
       setMachinesAddName("");
       setMsg("تم حفظ المكن");
       onMachinesChanged?.();
+      return true;
     } catch (error) {
       setMachinesSaving(false);
       setMachinesError(error instanceof Error ? error.message : "تعذر حفظ المكن");
+      return false;
     }
   }
 
@@ -5996,9 +6021,8 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
         ariaLabel="الماكينات"
         onClose={closeMachinesModal}
         title={<h2>الماكينات</h2>}
-        modal={false}
-        closeOnBackdrop={false}
-        showCloseButton
+        dirty={machinesDirty}
+        onSave={saveMachines}
       >
         <div className="ws-modal-feedback">
           {machinesError && <div className="ws-modal-error">{machinesError}</div>}
@@ -6066,7 +6090,8 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   }
 
   function renderAddModal() {
-    if (!modal || modal.kind !== "add") return null;
+    const modal = addModal;
+    if (!modal) return null;
     const query = searchQuery.trim();
     const eligible = orders.filter((order) => !assignedOrderIds.has(order.id) && !order.draft && order.workStage !== "cancelled");
     const matches = eligible.filter((order) => !query || order.order_number.includes(query)).slice(0, 20);
@@ -6074,12 +6099,13 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const positionOptions = modal.machine ? Array.from({ length: (byMachine[modal.machine]?.size ?? 0) + 1 }, (_, index) => index + 1) : [];
     return (
       <DraggableDialog
-        overlayClassName="md-modal-backdrop"
         dialogClassName="md-modal"
         headClassName="md-modal-head"
-        showCloseButton={false}
+        closeClassName="ws-modal-close md-modal-close"
         ariaLabel={modal.machine ? `إضافة أوردر إلى ${modal.machine}` : "توزيع أوردر على المكن"}
-        onClose={closeModal}
+        onClose={closeAddModal}
+        dirty={Boolean(selectedOrderId)}
+        onSave={confirmAdd}
         title={<h3 className="md-modal-title">{modal.machine ? `إضافة أوردر إلى ${modal.machine}` : "توزيع أوردر على المكن"}</h3>}
       >
           <input className="md-search-input" autoFocus placeholder="ابحث برقم الأوردر…" value={searchQuery}
@@ -6104,20 +6130,20 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
           )}
           <div className="md-field">
             <label>المكنة:</label>
-            <select value={modal.machine} onChange={(event) => setModal((current) => current && current.kind === "add" ? { kind: "add", machine: event.target.value, position: (byMachine[event.target.value]?.size ?? 0) + 1 } : current)}>
+            <select value={modal.machine} onChange={(event) => setAddModal((current) => current && current.kind === "add" ? { kind: "add", machine: event.target.value, position: (byMachine[event.target.value]?.size ?? 0) + 1 } : current)}>
               <option value="">— اختر المكنة —</option>
               {boardMachines.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
             </select>
           </div>
           <div className="md-field">
             <label>موقع في الطابور:</label>
-            <select value={String(modal.position)} disabled={!modal.machine} onChange={(event) => setModal((current) => current && current.kind === "add" ? { ...current, position: Number(event.target.value) } : current)}>
+            <select value={String(modal.position)} disabled={!modal.machine} onChange={(event) => setAddModal((current) => current && current.kind === "add" ? { ...current, position: Number(event.target.value) } : current)}>
               {positionOptions.map((position) => (<option key={position} value={String(position)}>{position}</option>))}
             </select>
           </div>
           <div className="md-modal-actions">
             <button type="button" className="md-btn md-btn-primary" disabled={!selectedOrderId || !modal.machine || busy} onClick={confirmAdd}>حفظ</button>
-            <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeModal}>إلغاء</button>
+            <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeAddModal}>إلغاء</button>
           </div>
           {busy && <div className="md-modal-status">جارِ الحفظ…</div>}
       </DraggableDialog>
@@ -6125,7 +6151,8 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   }
 
   function renderEditModal() {
-    if (!modal || modal.kind !== "edit") return null;
+    const modal = editModal;
+    if (!modal) return null;
     const assignment = assignments.find((a) => a.id === modal.assignmentId);
     if (!assignment) return null;
     const queue = machineQueue(assignment.machine_name);
@@ -6133,12 +6160,13 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const order = orderById.get(assignment.order_id);
     return (
       <DraggableDialog
-        overlayClassName="md-modal-backdrop"
         dialogClassName="md-modal"
         headClassName="md-modal-head"
-        showCloseButton={false}
+        closeClassName="ws-modal-close md-modal-close"
         ariaLabel="تعديل توزيع المكن"
-        onClose={closeModal}
+        onClose={closeEditModal}
+        dirty={Boolean(moveTarget) && moveTarget !== assignment.machine_name}
+        onSave={confirmMove}
         title={<h3 className="md-modal-title">تعديل توزيع المكن</h3>}
       >
           <div className="md-edit-order">
@@ -6164,7 +6192,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
             <button type="button" className="md-btn md-btn-danger" disabled={busy} onClick={() => { if (!confirmRemoveMode) setConfirmRemoveMode(true); else void confirmRemove(); }}>
               {confirmRemoveMode ? "تأكيد الإزالة" : "إزالة من الجدول"}
             </button>
-            <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeModal}>إلغاء</button>
+            <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeEditModal}>إلغاء</button>
           </div>
           {order?.order_number && (
             <button type="button" className="md-btn md-btn-open" disabled={busy} onClick={() => onOrderClick?.(order.id)}>فتح الأوردر</button>
@@ -6231,7 +6259,8 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
       <div className="md-tools-bar">
         <button type="button" className="md-machines-btn" onClick={openMachinesModal}>الماكينات</button>
       </div>
-      {modal && (modal.kind === "add" ? renderAddModal() : renderEditModal())}
+      {renderAddModal()}
+      {renderEditModal()}
       {renderMachinesModal()}
     </div>
   );
@@ -6322,11 +6351,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [workerOverrides, setWorkerOverrides] = useState<Record<string, string>>({});
   const [statusOverrides, setStatusOverrides] = useState<Record<string, Partial<Record<"started" | "finished", boolean>>>>({});
   const [problemOverrides, setProblemOverrides] = useState<Record<string, string>>({});
-  const [staffOpenId, setStaffOpenId] = useState<string | null>(null);
-  const [staffWorkers, setStaffWorkers] = useState<string[]>([]);
-  const [staffSupervisors, setStaffSupervisors] = useState<string[]>([]);
-  const [staffSaving, setStaffSaving] = useState(false);
-  const [staffError, setStaffError] = useState("");
+  const [staffWindows, setStaffWindows] = useState<Record<string, StaffWindowState>>({});
   const [highlightOrderId, setHighlightOrderId] = useState<string | null>(null);
   const [gotoNotice, setGotoNotice] = useState("");
   const [userDisplayNames, setUserDisplayNames] = useState<Record<string, string>>({});
@@ -6583,33 +6608,51 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     addAudit(session, "ORDER_DELETED", "orders", id);
   }
 
+  // One floating assignment window per order; opening an order that already has
+  // a window keeps its unsaved selections.
   function openStaffPanel(order: Order) {
-    setStaffWorkers(order.operationWorkers ?? []);
-    setStaffSupervisors(order.operationSupervisors ?? []);
-    setStaffError("");
-    setStaffOpenId(order.id);
+    setStaffWindows((current) => (current[order.id]
+      ? current
+      : { ...current, [order.id]: { workers: order.operationWorkers ?? [], supervisors: order.operationSupervisors ?? [], saving: false, error: "" } }));
   }
 
-  function saveStaffPanel(id: string) {
+  function updateStaffWindow(id: string, patch: Partial<StaffWindowState>) {
+    setStaffWindows((current) => (current[id] ? { ...current, [id]: { ...current[id], ...patch } } : current));
+  }
+
+  function closeStaffWindow(id: string) {
+    setStaffWindows((current) => {
+      if (!current[id]) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }
+
+  function saveStaffPanel(id: string): Promise<boolean> {
+    const draft = staffWindows[id];
+    if (!draft || draft.saving) return Promise.resolve(false);
     const key = `${id}:staff`;
-    setStaffSaving(true);
-    setStaffError("");
-    backendJson(`/api/orders/${encodeURIComponent(id)}/staff`, {
+    updateStaffWindow(id, { saving: true, error: "" });
+    return backendJson(`/api/orders/${encodeURIComponent(id)}/staff`, {
       method: "PATCH",
-      body: JSON.stringify({ worker_names: staffWorkers, supervisor_names: staffSupervisors }),
+      body: JSON.stringify({ worker_names: draft.workers, supervisor_names: draft.supervisors }),
     })
       .then(() => {
         setCellSaving((current) => withoutKey(current, key));
-        setOrders((current) => current.map((order) => order.id === id ? { ...order, operationWorkers: staffWorkers, operationSupervisors: staffSupervisors } : order));
-        setStaffOpenId(null);
+        setOrders((current) => current.map((order) => order.id === id ? { ...order, operationWorkers: draft.workers, operationSupervisors: draft.supervisors } : order));
+        closeStaffWindow(id);
+        return true;
       })
       .catch((error) => {
-        setStaffSaving(false);
-        setStaffError(error instanceof Error ? error.message : "تعذر حفظ الأسماء");
+        updateStaffWindow(id, { saving: false, error: error instanceof Error ? error.message : "تعذر حفظ الأسماء" });
+        return false;
       });
   }
 
   function openWorkersModal(department: string) {
+    // Already open for this department: keep its form and messages as they are.
+    if (workersDept === department) return;
     setWorkersError("");
     setWorkersFeedback("");
     setWorkerForm(null);
@@ -6631,14 +6674,14 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       : { id: null, name: "", card_id: "", phone: "" });
   }
 
-  function saveWorkerForm() {
-    if (!workerForm || !workersDept || workersSaving) return;
+  function saveWorkerForm(): Promise<boolean> {
+    if (!workerForm || !workersDept || workersSaving) return Promise.resolve(false);
     const name = workerForm.name.trim();
     const card_id = workerForm.card_id.trim();
     const phone = workerForm.phone.trim();
-    if (!name) { setWorkersError("اسم العامل مطلوب"); return; }
-    if (!card_id) { setWorkersError("رقم البطاقة مطلوب"); return; }
-    if (!phone) { setWorkersError("رقم التليفون مطلوب"); return; }
+    if (!name) { setWorkersError("اسم العامل مطلوب"); return Promise.resolve(false); }
+    if (!card_id) { setWorkersError("رقم البطاقة مطلوب"); return Promise.resolve(false); }
+    if (!phone) { setWorkersError("رقم التليفون مطلوب"); return Promise.resolve(false); }
     setWorkersSaving(true);
     setWorkersError("");
     setWorkersFeedback("");
@@ -6651,7 +6694,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           method: "POST",
           body: JSON.stringify({ name, card_id, phone, department: workersDept }),
         });
-    request
+    return request
       .then(({ worker }) => {
         setWorkersSaving(false);
         const updated = worker.active && worker.department === workersDept;
@@ -6662,12 +6705,22 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           : current));
         setWorkersFeedback(workerForm.id ? "تم حفظ بيانات العامل" : "تم إضافة العامل بنجاح");
         setWorkerForm(null);
+        return true;
       })
       .catch((error) => {
         setWorkersSaving(false);
         setWorkersError(error instanceof Error ? error.message : "تعذر حفظ بيانات العامل");
+        return false;
       });
   }
+
+  // The add/edit form holds values that differ from what is saved.
+  const workerFormDirty = (() => {
+    if (!workerForm) return false;
+    const saved = workerForm.id ? workersRegistry.find((worker) => worker.id === workerForm.id) : null;
+    const base = saved ? { name: saved.name, card_id: saved.card_id, phone: saved.phone } : { name: "", card_id: "", phone: "" };
+    return workerForm.name.trim() !== base.name.trim() || workerForm.card_id.trim() !== String(base.card_id ?? "").trim() || workerForm.phone.trim() !== String(base.phone ?? "").trim();
+  })();
 
   function removeWorker(worker: WorkerRecord) {
     if (workersSaving) return;
@@ -7284,31 +7337,34 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       return null;
     }
 
-    function toggleWorkerName(name: string) {
-      setStaffWorkers((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
+    function toggleStaffName(id: string, field: "workers" | "supervisors", name: string) {
+      setStaffWindows((all) => {
+        const draft = all[id];
+        if (!draft) return all;
+        const list = draft[field];
+        return { ...all, [id]: { ...draft, [field]: list.includes(name) ? list.filter((item) => item !== name) : [...list, name] } };
+      });
     }
 
-    function toggleSupervisorName(name: string) {
-      setStaffSupervisors((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
-    }
-
-    function renderStaffPanel() {
-      if (!staffOpenId) return null;
-      const current = staffOrderForRow(staffOpenId);
-      if (!current) return null;
-      const allWorkers = Array.from(new Set([...workerNameOptions(), ...(current.operationWorkers ?? [])])).filter((name) => name.trim().length > 0);
-      const allSupervisors = Array.from(new Set([...supervisorNameOptions(), ...(current.operationSupervisors ?? [])])).filter((name) => name.trim().length > 0);
-      return (
-        <DraggableDialog
-          overlayClassName="ws-staff-overlay"
-          dialogClassName="ws-staff-panel"
-          headClassName="ws-staff-panel-head"
-          closeClassName="ws-staff-close"
-          ariaLabel={`تفاصيل الأوردر رقم ${current.order_number}`}
-          onClose={() => setStaffOpenId(null)}
-          title={<h3>تفاصيل الأوردر رقم {current.order_number}</h3>}
-        >
-          <div className="ws-staff-meta">
+    function renderStaffPanels() {
+      return Object.entries(staffWindows).map(([id, draft]) => {
+        const current = staffOrderForRow(id);
+        if (!current) return null;
+        const allWorkers = Array.from(new Set([...workerNameOptions(), ...(current.operationWorkers ?? [])])).filter((name) => name.trim().length > 0);
+        const allSupervisors = Array.from(new Set([...supervisorNameOptions(), ...(current.operationSupervisors ?? [])])).filter((name) => name.trim().length > 0);
+        return (
+          <DraggableDialog
+            key={id}
+            dialogClassName="ws-staff-panel"
+            headClassName="ws-staff-panel-head"
+            closeClassName="ws-staff-close"
+            ariaLabel={`العمال والمشرفين للأوردر ${current.order_number}`}
+            onClose={() => closeStaffWindow(id)}
+            title={<h3>العمال والمشرفين · أوردر {current.order_number}</h3>}
+            dirty={!sameNames(draft.workers, current.operationWorkers ?? []) || !sameNames(draft.supervisors, current.operationSupervisors ?? [])}
+            onSave={() => saveStaffPanel(id)}
+          >
+            <div className="ws-staff-meta">
               <span><strong>العميل:</strong> {current.client_name}</span>
               <span><strong>الطرف:</strong> {current.source_person}</span>
               <span><strong>النوع:</strong> {current.order_type || current.productName || ""}</span>
@@ -7316,7 +7372,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               <span><strong>تاريخ التسليم:</strong> {formatDisplayDate(current.delivery_date)}</span>
               <span><strong>الماكينة:</strong> {current.machineName || "—"}</span>
             </div>
-            {staffError && <div className="ws-staff-error">{staffError}</div>}
+            {draft.error && <div className="ws-staff-error">{draft.error}</div>}
             <div className="ws-staff-section ws-staff-workers">
               <h4>أسماء العمال</h4>
               {allWorkers.length === 0 ? (
@@ -7324,8 +7380,8 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               ) : (
                 <div className="ws-staff-options">
                   {allWorkers.map((name) => (
-                    <label key={name} className={`ws-staff-option${staffWorkers.includes(name) ? " ws-staff-checked" : ""}`}>
-                      <input type="checkbox" checked={staffWorkers.includes(name)} onChange={() => toggleWorkerName(name)} />
+                    <label key={name} className={`ws-staff-option${draft.workers.includes(name) ? " ws-staff-checked" : ""}`}>
+                      <input type="checkbox" checked={draft.workers.includes(name)} onChange={() => toggleStaffName(id, "workers", name)} />
                       <span>{name}</span>
                     </label>
                   ))}
@@ -7339,8 +7395,8 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               ) : (
                 <div className="ws-staff-options">
                   {allSupervisors.map((name) => (
-                    <label key={name} className={`ws-staff-option${staffSupervisors.includes(name) ? " ws-staff-checked" : ""}`}>
-                      <input type="checkbox" checked={staffSupervisors.includes(name)} onChange={() => toggleSupervisorName(name)} />
+                    <label key={name} className={`ws-staff-option${draft.supervisors.includes(name) ? " ws-staff-checked" : ""}`}>
+                      <input type="checkbox" checked={draft.supervisors.includes(name)} onChange={() => toggleStaffName(id, "supervisors", name)} />
                       <span>{name}</span>
                     </label>
                   ))}
@@ -7348,13 +7404,14 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               )}
             </div>
             <div className="ws-staff-panel-actions">
-              <button type="button" className="ws-btn-save" disabled={staffSaving} onClick={() => saveStaffPanel(staffOpenId)}>
-                {staffSaving ? "جارِ الحفظ…" : "حفظ"}
+              <button type="button" className="ws-btn-save" disabled={draft.saving} onClick={() => void saveStaffPanel(id)}>
+                {draft.saving ? "جارِ الحفظ…" : "حفظ"}
               </button>
-              <button type="button" className="ws-btn-cancel" onClick={() => setStaffOpenId(null)}>إلغاء</button>
+              <button type="button" className="ws-btn-cancel" onClick={() => closeStaffWindow(id)}>إلغاء</button>
             </div>
-        </DraggableDialog>
-      );
+          </DraggableDialog>
+        );
+      });
     }
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
@@ -7468,7 +7525,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
             <button type="button" className="ws-distribute-btn" onClick={onDistribute}>توزيع مكن</button>
           )}
         </div>
-        {renderStaffPanel()}
+        {renderStaffPanels()}
       </div>
     );
   }
@@ -7478,12 +7535,13 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     const departmentWorkers = workersRegistry.filter((worker) => worker.department === workersDept);
     return (
       <DraggableDialog
-        overlayClassName="ws-modal-overlay"
         dialogClassName="ws-modal ws-management-modal ws-workers-modal"
         headClassName="ws-modal-head"
         ariaLabel={`عمال ${workerDepartmentLabel(workersDept)}`}
         onClose={closeWorkersModal}
         title={<h2>عمال {workerDepartmentLabel(workersDept)}</h2>}
+        dirty={workerFormDirty}
+        onSave={saveWorkerForm}
       >
         <div className="ws-modal-feedback">
           {workersError && <div className="ws-modal-error">{workersError}</div>}

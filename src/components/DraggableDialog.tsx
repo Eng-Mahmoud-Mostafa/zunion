@@ -11,7 +11,17 @@ import {
 import { createPortal } from "react-dom";
 
 const EDGE = 8;
-const NO_DRAG = "button, a, input, select, textarea, label, option, [data-no-drag]";
+const CASCADE = 26;
+const NO_DRAG = "button, a, input, select, textarea, label, option, table, [data-no-drag]";
+
+/**
+ * Stacking for floating windows: every window that is opened or clicked takes the
+ * next z-index, so the window the user is working in is always on top. Explicit
+ * confirmation overlays sit above this whole range (see styles.css).
+ */
+let topZ = 2000;
+let openWindows = 0;
+const nextZ = () => ++topZ;
 
 type Point = { x: number; y: number };
 
@@ -25,20 +35,24 @@ export type DraggableDialogProps = {
   closeClassName?: string;
   closeLabel?: string;
   closeDisabled?: boolean;
+  /** Modal dialogs only (explicit confirmations): close when the backdrop is clicked. */
   closeOnBackdrop?: boolean;
   showCloseButton?: boolean;
   ariaLabel?: string;
+  /**
+   * false (default): a floating, non-modal window. No backdrop, nothing outside it
+   * closes it, several can be open at once, and the page stays usable.
+   * true: a blocking dialog with a backdrop, for explicit confirmations only.
+   */
   modal?: boolean;
-  /** Render the overlay into document.body so it is never trapped by an ancestor. */
+  /** Modal dialogs only: render into document.body. Floating windows always do. */
   portal?: boolean;
   /** Only start a drag when the pointer lands on the title bar itself, not its contents. */
   dragFromEmptyArea?: boolean;
-  /**
-   * Center the window once on open and then keep its top-left corner fixed, even
-   * while its content grows or shrinks. Without this, a flex-centered window
-   * drifts every time its own list/notice changes (which looks like a jump).
-   */
-  centerOnce?: boolean;
+  /** The window holds edits that are not saved yet; × then asks حفظ / تجاهل التغييرات / إلغاء. */
+  dirty?: boolean;
+  /** Saves the window's pending edits; resolve false when saving failed (the window stays open). */
+  onSave?: () => Promise<boolean | void> | boolean | void;
 };
 
 export function DraggableDialog({
@@ -54,65 +68,59 @@ export function DraggableDialog({
   closeOnBackdrop = true,
   showCloseButton = true,
   ariaLabel,
-  modal = true,
+  modal = false,
   portal = false,
   dragFromEmptyArea = false,
-  centerOnce = false,
+  dirty = false,
+  onSave,
 }: DraggableDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
   const backdropDownRef = useRef(false);
-  const offsetRef = useRef<Point>({ x: 0, y: 0 });
+  const posRef = useRef<Point | null>(null);
   const stopDragRef = useRef<(() => void) | null>(null);
-  const [offset, setOffset] = useState<Point>({ x: 0, y: 0 });
-  const [availHeight, setAvailHeight] = useState<number | undefined>(undefined);
+  const [pos, setPos] = useState<Point | null>(null);
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
+  const [z, setZ] = useState(() => nextZ());
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [savingBeforeClose, setSavingBeforeClose] = useState(false);
 
-  const applyOffset = useCallback((next: Point) => {
-    offsetRef.current = next;
-    setOffset(next);
+  const applyPos = useCallback((next: Point) => {
+    posRef.current = next;
+    setPos(next);
+    setMaxHeight(Math.max(160, Math.round(window.innerHeight - next.y - EDGE)));
   }, []);
 
-  /** Keeps the whole window (title bar and close button included) on screen. */
-  const clampOffset = useCallback((x: number, y: number): Point => {
+  /** Keeps the whole window (title bar and × included) inside the viewport. */
+  const clampPos = useCallback((x: number, y: number): Point => {
     const node = dialogRef.current;
-    if (!node) return { x, y };
-    const rect = node.getBoundingClientRect();
-    const maxX = Math.max(0, window.innerWidth - rect.width - EDGE);
-    const maxY = Math.max(0, window.innerHeight - rect.height - EDGE);
+    const width = node?.offsetWidth ?? 0;
+    const height = Math.min(node?.offsetHeight ?? 0, window.innerHeight - 2 * EDGE);
     return {
-      x: Math.min(Math.max(x, -maxX), maxX),
-      y: Math.min(Math.max(y, -maxY), maxY),
+      x: Math.min(Math.max(x, EDGE), Math.max(EDGE, window.innerWidth - width - EDGE)),
+      y: Math.min(Math.max(y, EDGE), Math.max(EDGE, window.innerHeight - height - EDGE)),
     };
   }, []);
 
-  // Center once on open, then leave the window exactly where it is. The offset
-  // converts the (one-time) centered position into a fixed one, and the overlay
-  // is top-left aligned, so later content growth extends downward instead of
-  // re-centering the window.
+  // Floating windows are placed once, centred and cascaded so several open
+  // windows never sit exactly on top of each other, then they stay where the
+  // user leaves them: content changes and page re-renders never move them.
   useLayoutEffect(() => {
-    if (!centerOnce) return;
-    const dialog = dialogRef.current;
-    const overlay = overlayRef.current;
-    if (!dialog || !overlay) return;
-    const o = overlay.getBoundingClientRect();
-    const d = dialog.getBoundingClientRect();
-    const cur = offsetRef.current;
-    const naturalLeft = d.left - cur.x;
-    const naturalTop = d.top - cur.y;
-    const desiredLeft = Math.max(o.left + EDGE, o.left + (o.width - d.width) / 2);
-    const desiredTop = Math.max(o.top + EDGE, o.top + (o.height - d.height) / 2);
-    setAvailHeight(Math.max(160, Math.round(o.bottom - desiredTop - EDGE)));
-    applyOffset(clampOffset(desiredLeft - naturalLeft, desiredTop - naturalTop));
-  }, [centerOnce, applyOffset, clampOffset]);
+    if (modal) return;
+    const node = dialogRef.current;
+    if (!node) return;
+    const step = (openWindows % 6) * CASCADE;
+    openWindows += 1;
+    const width = node.offsetWidth;
+    const height = Math.min(node.offsetHeight, window.innerHeight - 2 * EDGE);
+    applyPos(clampPos((window.innerWidth - width) / 2 + step, Math.max(EDGE, (window.innerHeight - height) / 2 - 40) + step));
+    return () => { openWindows = Math.max(0, openWindows - 1); };
+  }, [modal, applyPos, clampPos]);
 
-  // Re-clamp when the viewport shrinks so the window can never end up off-screen.
-  useLayoutEffect(() => {
+  // Re-clamp when the viewport shrinks so a window can never end up off-screen.
+  useEffect(() => {
+    if (modal) return;
     const onResize = () => {
-      applyOffset(clampOffset(offsetRef.current.x, offsetRef.current.y));
-      if (centerOnce) {
-        const node = dialogRef.current;
-        if (node) setAvailHeight(Math.max(160, Math.round(window.innerHeight - node.getBoundingClientRect().top - EDGE)));
-      }
+      if (posRef.current) applyPos(clampPos(posRef.current.x, posRef.current.y));
     };
     window.addEventListener("resize", onResize);
     window.addEventListener("orientationchange", onResize);
@@ -120,25 +128,24 @@ export function DraggableDialog({
       window.removeEventListener("resize", onResize);
       window.removeEventListener("orientationchange", onResize);
     };
-  }, [applyOffset, clampOffset, centerOnce]);
-
-  // NOTE: there is deliberately no ResizeObserver that re-clamps on content
-  // changes. Doing so moved the window whenever its own list grew (a row added,
-  // a notice shown, the list refreshed) even though the user never dragged.
-  // Content growth is absorbed by the dialog's own internal scrolling instead.
+  }, [modal, applyPos, clampPos]);
 
   useEffect(() => () => {
     stopDragRef.current?.();
   }, []);
 
+  const bringToFront = () => {
+    if (!modal && z !== topZ) setZ(nextZ());
+  };
+
   const onHeadPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
-    // Dragging must begin only from an empty part of the title bar: never from
-    // the title text, buttons, inputs, table rows, or scrollbars.
+    // Dragging begins only from the title bar itself: never from buttons,
+    // inputs, tables or scrollbars inside it.
     if (dragFromEmptyArea && event.target !== event.currentTarget) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest(NO_DRAG)) return;
-    if (!dialogRef.current) return;
+    if (!dialogRef.current || modal) return;
 
     // Stops the browser from starting a text selection or native drag image.
     event.preventDefault();
@@ -147,20 +154,16 @@ export function DraggableDialog({
     const pointerId = event.pointerId;
     const startX = event.clientX;
     const startY = event.clientY;
-    // Absolute, one-time base coordinates. Every move is computed from these
-    // plus the pointer's total delta — never accumulated from the last frame.
-    const baseX = offsetRef.current.x;
-    const baseY = offsetRef.current.y;
+    // Absolute base coordinates: every move is base + total pointer delta, never
+    // accumulated frame by frame, so the window cannot drift.
+    const base = posRef.current ?? { x: dialogRef.current.offsetLeft, y: dialogRef.current.offsetTop };
 
     const move = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return;
-      const next = clampOffset(
-        baseX + (moveEvent.clientX - startX),
-        baseY + (moveEvent.clientY - startY),
-      );
-      if (next.x === offsetRef.current.x && next.y === offsetRef.current.y) return;
+      const next = clampPos(base.x + (moveEvent.clientX - startX), base.y + (moveEvent.clientY - startY));
+      if (posRef.current && next.x === posRef.current.x && next.y === posRef.current.y) return;
       moveEvent.preventDefault();
-      applyOffset(next);
+      applyPos(next);
     };
     const end = (endEvent?: Event) => {
       const id = (endEvent as PointerEvent | undefined)?.pointerId;
@@ -175,73 +178,123 @@ export function DraggableDialog({
       stopDragRef.current = null;
     };
 
-    // Pointer capture routes every subsequent event to the header, even when the
-    // pointer leaves the window, so the drag can never get "stuck" following it.
+    // Pointer capture routes every event to the title bar until release, so the
+    // window stops the moment the button is let go, wherever the pointer is.
     try { head.setPointerCapture(pointerId); } catch {}
     head.addEventListener("pointermove", move);
     head.addEventListener("pointerup", end);
     head.addEventListener("pointercancel", end);
     head.addEventListener("lostpointercapture", end);
-    // Losing focus (alt-tab, OS dialog, etc.) must also end the drag.
     window.addEventListener("blur", end);
     document.body.style.setProperty("user-select", "none");
     stopDragRef.current = end;
   };
 
-  const style: CSSProperties | undefined = (offset.x !== 0 || offset.y !== 0 || availHeight !== undefined)
-    ? {
-        transform: offset.x !== 0 || offset.y !== 0 ? `translate3d(${offset.x}px, ${offset.y}px, 0)` : undefined,
-        maxHeight: availHeight !== undefined ? `${availHeight}px` : undefined,
-      }
-    : undefined;
+  const requestClose = () => {
+    if (dirty) setConfirmClose(true);
+    else onClose();
+  };
+
+  const saveThenClose = async () => {
+    if (!onSave || savingBeforeClose) return;
+    setSavingBeforeClose(true);
+    try {
+      const result = await onSave();
+      setConfirmClose(false);
+      if (result !== false) onClose();
+    } catch {
+      setConfirmClose(false);
+    } finally {
+      setSavingBeforeClose(false);
+    }
+  };
+
+  const floatingStyle: CSSProperties | undefined = modal
+    ? undefined
+    : {
+        position: "fixed",
+        left: pos?.x ?? 0,
+        top: pos?.y ?? 0,
+        margin: 0,
+        transform: "none",
+        zIndex: z,
+        maxHeight,
+        maxWidth: `calc(100vw - ${2 * EDGE}px)`,
+        visibility: pos ? undefined : "hidden",
+      };
 
   const dialog = (
     <div
       ref={dialogRef}
-      className={`${dialogClassName} dd-dialog`}
-      style={style}
+      className={`${dialogClassName} dd-dialog${modal ? "" : " dd-floating"}`}
+      style={floatingStyle}
       role="dialog"
       aria-modal={modal ? "true" : "false"}
       aria-label={ariaLabel}
+      onPointerDownCapture={bringToFront}
+      onFocusCapture={bringToFront}
     >
       <div className={`${headClassName} dd-head`} onPointerDown={onHeadPointerDown}>
         {title}
-          {showCloseButton ? (
-            <button type="button" className={closeClassName} aria-label={closeLabel || "إغلاق"} title={closeLabel || "إغلاق"} disabled={closeDisabled} onClick={onClose}>
-              <svg className="close-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M6 6L18 18M6 18L18 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-              </svg>
-            </button>
-          ) : null}
+        {showCloseButton ? (
+          <button type="button" className={closeClassName} aria-label={closeLabel || "إغلاق"} title={closeLabel || "إغلاق"} disabled={closeDisabled} onClick={requestClose}>
+            <svg className="close-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M6 6L18 18M6 18L18 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        ) : null}
       </div>
       {children}
     </div>
   );
 
+  const unsavedPrompt = confirmClose
+    ? createPortal(
+        <div className="dd-confirm-overlay" role="presentation">
+          <div className="tab-confirm" role="alertdialog" aria-modal="true" aria-label="تغييرات غير محفوظة">
+            <h3>توجد تغييرات غير محفوظة</h3>
+            <p className="muted">هل تريد حفظ التغييرات قبل إغلاق النافذة؟</p>
+            <div className="tab-confirm-actions">
+              {onSave && <button type="button" className="primary-btn" onClick={() => void saveThenClose()} disabled={savingBeforeClose}>{savingBeforeClose ? "جارٍ الحفظ..." : "حفظ"}</button>}
+              <button type="button" className="ghost-btn" onClick={() => { setConfirmClose(false); onClose(); }} disabled={savingBeforeClose}>تجاهل التغييرات</button>
+              <button type="button" className="ghost-btn" onClick={() => setConfirmClose(false)} disabled={savingBeforeClose}>إلغاء</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
   if (!modal) {
-    return portal ? createPortal(dialog, document.body) : dialog;
+    // Floating windows live in document.body: fixed to the viewport, never
+    // clipped by a scrolling page, and untouched by re-renders of the page.
+    return (
+      <>
+        {createPortal(dialog, document.body)}
+        {unsavedPrompt}
+      </>
+    );
   }
 
   const overlay = (
     <div
-      ref={overlayRef}
       className={overlayClassName}
       onPointerDown={(event) => {
-        // Only a pointer press that STARTED on the backdrop may close it. A
-        // press that started inside the dialog (e.g. dragging the window) and
-        // happens to be released over the backdrop must not count as a click.
+        // Only a press that STARTED on the backdrop may close a modal dialog.
         backdropDownRef.current = event.target === event.currentTarget;
       }}
       onClick={(event) => {
-        if (closeOnBackdrop && backdropDownRef.current && event.target === event.currentTarget) onClose();
+        if (closeOnBackdrop && backdropDownRef.current && event.target === event.currentTarget) requestClose();
       }}
     >
       {dialog}
     </div>
   );
 
-  // Rendering through a portal keeps the dialog out of the surrounding form's
-  // layout/stacking context, so the fixed overlay truly covers the viewport and
-  // never drifts with the form's scroll or relayout.
-  return portal ? createPortal(overlay, document.body) : overlay;
+  return (
+    <>
+      {portal ? createPortal(overlay, document.body) : overlay}
+      {unsavedPrompt}
+    </>
+  );
 }
