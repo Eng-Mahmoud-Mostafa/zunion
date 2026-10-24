@@ -254,6 +254,27 @@ async function syncPhotosTable(log: (msg: string) => void) {
   );
 }
 
+/**
+ * One row per successful order edit: who (the authenticated user), when (server
+ * clock) and which fields changed. Rows are only written by PUT /api/orders/:id
+ * when at least one field actually changed; history is never backfilled.
+ */
+async function syncOrderEditsTable(log: (msg: string) => void) {
+  await guarded(
+    () => query(`create table if not exists order_edits (
+      id uuid primary key default gen_random_uuid(),
+      order_id uuid not null references orders(id) on delete cascade,
+      editor_id uuid references users(id) on delete set null,
+      editor_name text not null default '',
+      changes jsonb not null default '[]'::jsonb,
+      created_at timestamptz not null default now()
+    );
+    create index if not exists order_edits_order_idx on order_edits (order_id, created_at desc);`),
+    log,
+    "order_edits table drift",
+  );
+}
+
 async function syncWorkersTable(log: (msg: string) => void) {
   await guarded(
     () => query(`create table if not exists workers (
@@ -373,13 +394,15 @@ async function syncPartiesTable(log: (msg: string) => void) {
     () => query(`insert into parties (name, position)
       select name, row_number() over (order by name)
       from (
-        select name from (values ('أحمد'), ('حسن'), ('خليفة'), ('أخرى')) as seed(name)
+        select name from (values ('أحمد'), ('حسن'), ('خليفة')) as seed(name)
         union
         select distinct btrim(source_party) from orders where source_party is not null and btrim(source_party) <> ''
         union
         select distinct btrim(source_party) from customers where source_party is not null and btrim(source_party) <> ''
       ) all_names
-      where not exists (select 1 from parties p where lower(btrim(p.name)) = lower(btrim(all_names.name)))`),
+      -- "أخرى" is the Master-only "manage parties" action in the UI, never a party.
+      where btrim(all_names.name) <> 'أخرى'
+        and not exists (select 1 from parties p where lower(btrim(p.name)) = lower(btrim(all_names.name)))`),
     log,
     "parties seed/backfill",
   );
@@ -475,6 +498,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncOrderStatusEnum(log);
   await syncOrdersTriggers(log);
   await syncPhotosTable(log);
+  await syncOrderEditsTable(log);
   await syncWorkersTable(log);
   await syncMachinesTable(log);
   await syncPartiesTable(log);

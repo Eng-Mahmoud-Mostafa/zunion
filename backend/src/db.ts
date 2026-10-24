@@ -1,5 +1,10 @@
-import { Pool, type QueryResultRow } from "pg";
+import { Pool, types, type QueryResultRow } from "pg";
 import { config, databaseConfigured } from "./config.js";
+
+// Return `date` columns (e.g. orders.delivery_date) as the raw "YYYY-MM-DD" text.
+// The default parser builds a local-midnight Date, which serializes as a full ISO
+// timestamp and shifts the calendar day whenever the server is not on UTC.
+types.setTypeParser(types.builtins.DATE, (value: string) => value);
 
 export class DatabaseNotConfiguredError extends Error {
   constructor() {

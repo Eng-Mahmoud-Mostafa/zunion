@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+/** "أخرى" opens party management in the UI; it must never be stored as a party value. */
+export const OTHER_PARTY_NAME = "أخرى";
+const isOtherParty = (value: string | null | undefined) => String(value ?? "").trim() === OTHER_PARTY_NAME;
+const otherPartyMessage = "\"أخرى\" ليست طرفاً. اختر طرفاً من القائمة";
+
 export const orderStatuses = [
   "NEW",
   "SENT_TO_WORKER",
@@ -80,6 +85,9 @@ export const orderSchema = z.object({
     logoUrl: z.string().optional().default(""),
   })).optional().default([]),
 }).superRefine((order, ctx) => {
+  if (isOtherParty(order.source_party)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["source_party"], message: otherPartyMessage });
+  }
   const isDraft = order.draft === true;
   if (isDraft) {
     order.quantity = Math.max(0, Math.abs(order.quantity));
@@ -135,11 +143,11 @@ export const machineUpdateSchema = z.object({
 });
 
 export const partyCreateSchema = z.object({
-  name: z.string().trim().min(1).max(120),
+  name: z.string().trim().min(1).max(120).refine((name) => !isOtherParty(name), otherPartyMessage),
 });
 
 export const partyUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
+  name: z.string().trim().min(1).max(120).refine((name) => !isOtherParty(name), otherPartyMessage).optional(),
   active: z.boolean().optional(),
 });
 
@@ -193,7 +201,7 @@ export const customerSchema = z.object({
   phone: z.string().min(1),
   email: z.string().trim().toLowerCase().email().or(z.literal("")).optional().default(""),
   address: z.string().trim().optional().default(""),
-  source_party: z.string().optional().default(""),
+  source_party: z.string().optional().default("").refine((name) => !isOtherParty(name), otherPartyMessage),
   source_party_id: z.string().uuid().nullish(),
   old_balance: z.coerce.number().default(0),
   notes: z.string().optional().default(""),

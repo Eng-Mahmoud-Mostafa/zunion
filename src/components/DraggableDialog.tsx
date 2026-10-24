@@ -49,7 +49,7 @@ export function DraggableDialog({
   dialogClassName,
   headClassName,
   closeClassName = "ws-modal-close",
-  closeLabel = "����",
+  closeLabel = "إغلاق",
   closeDisabled,
   closeOnBackdrop = true,
   showCloseButton = true,

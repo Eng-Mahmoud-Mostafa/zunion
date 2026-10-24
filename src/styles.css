@@ -9433,3 +9433,41 @@ input[type="number"] {
 .party-status.active { background: #e7f6ec; color: #146c2e; }
 .party-status.inactive { background: #f1f1f1; color: #777; }
 .party-manager-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Order view/edit actions */
+.nf-actionbar-edit .nf-btn-edit, .nf-actionbar-edit .nf-btn-save-edits { background: #ED1525; border-color: #ED1525; color: #fff; }
+.nf-actionbar-edit .nf-btn-edit:hover, .nf-actionbar-edit .nf-btn-save-edits:hover { background: #d41120; border-color: #d41120; }
+.image-view-btn { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Internal image viewer tab */
+.image-viewer { display: flex; flex-direction: column; gap: 10px; height: calc(100vh - 150px); min-height: 360px; }
+.image-viewer-toolbar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 8px 12px; }
+.image-viewer-title { font-size: 14px; color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.image-viewer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.image-viewer-actions .ghost-btn { display: inline-flex; align-items: center; gap: 5px; }
+.image-viewer-actions .ghost-btn.active { border-color: #ED1525; color: #b3121f; background: #fde8ea; }
+.image-viewer-zoom { min-width: 52px; text-align: center; font-weight: 700; color: #4b5563; font-size: 13px; }
+.image-viewer-stage { flex: 1 1 auto; min-height: 0; overflow: auto; background: #f3f4f6; border: 1px solid #e3e6ea; border-radius: 10px; display: flex; }
+.image-viewer-stage img { margin: auto; display: block; max-width: none; max-height: none; flex: 0 0 auto; background: #fff; box-shadow: 0 2px 10px rgba(15,23,42,.12); user-select: none; }
+.image-viewer-stage.fit { overflow: hidden; }
+.image-viewer-stage .attachment-loading, .image-viewer-stage .attachment-retry { margin: auto; }
+
+/* متابعة أوردرات: optional date range */
+.orders-range-filter { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; background: #fff; border: 1px solid #e3e6ea; border-radius: 10px; padding: 8px 12px; }
+.orders-range-filter label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 700; color: #4b5563; }
+.orders-range-filter select, .orders-range-filter input { font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
+.orders-range-filter small { margin-inline-start: auto; align-self: center; }
+.order-edit-count { font-weight: 700; min-width: 24px; }
+
+/* Order edit history popup */
+.order-history-modal { width: min(720px, calc(100vw - 32px)); }
+.order-history-body { overflow: auto; min-height: 0; }
+.order-history-created { margin: 0 0 10px; font-size: 14px; }
+.order-history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.order-history-list > li { border: 1px solid #eef0f3; border-radius: 10px; padding: 8px 10px; }
+.order-history-meta { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; margin-bottom: 4px; }
+.order-history-meta span { color: #6b7280; direction: ltr; }
+.order-history-list ul { margin: 0; padding-inline-start: 18px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+.order-history-field { font-weight: 700; }
+.order-history-from { color: #9ca3af; text-decoration: line-through; }
+.order-history-to { color: #146c2e; font-weight: 700; }

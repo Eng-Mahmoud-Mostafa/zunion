@@ -13,6 +13,7 @@ import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, 
 import { sendVerificationEmail } from "./email.js";
 import { customerSchema, customerTransactionSchema, customerTransactionUpdateSchema, finishingSchema, machineAssignmentSchema, machineCreateSchema, machineMoveSchema, machineReorderSchema, machineSchema, machineUpdateSchema, orderSchema, partyCreateSchema, partyUpdateSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
+import { ORDER_EDIT_SUMMARY_JOIN, ORDER_EDIT_SUMMARY_SELECT, diffOrder, loadOrderHistory, queryWithEditSummary, recordOrderEdit } from "./orderEdits.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { activateMachine, createOrReactivateMachine, deactivateMachine, findMachineByName, listMachines, loadMachine, removeMachine, renameMachine } from "./machines.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions, updateTransaction } from "./customerAccounts.js";
@@ -1101,7 +1102,9 @@ app.get("/api/orders", requireAuth, async (req, res) => {
     filters.push(`draft = ${draft === "true"}`);
   }
   const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
-  const { rows } = await query(`select o.*, coalesce(u.full_name, u.username) as creator_name from orders o left join users u on u.id=o.created_by ${sqlWhere} order by created_at desc`, params);
+  const { rows } = await queryWithEditSummary((withEdits) =>
+    `select o.*, coalesce(u.full_name, u.username) as creator_name${withEdits ? `, ${ORDER_EDIT_SUMMARY_SELECT}` : ""}
+     from orders o left join users u on u.id=o.created_by ${withEdits ? ORDER_EDIT_SUMMARY_JOIN : ""} ${sqlWhere} order by o.created_at desc`, params);
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
@@ -1138,7 +1141,9 @@ app.get("/api/orders/archive", requireAuth, async (req, res) => {
     filters.push(`completed_at::date <= $${params.length}::date`);
   }
   const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
-  const { rows } = await query(`select o.*, coalesce(u.full_name, u.username) as creator_name from orders o left join users u on u.id=o.created_by ${sqlWhere} order by o.completed_at desc, o.created_at desc`, params);
+  const { rows } = await queryWithEditSummary((withEdits) =>
+    `select o.*, coalesce(u.full_name, u.username) as creator_name${withEdits ? `, ${ORDER_EDIT_SUMMARY_SELECT}` : ""}
+     from orders o left join users u on u.id=o.created_by ${withEdits ? ORDER_EDIT_SUMMARY_JOIN : ""} ${sqlWhere} order by o.completed_at desc, o.created_at desc`, params);
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
@@ -1268,7 +1273,39 @@ app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operato
       orderPartyId = pid.rows[0]?.id ?? "";
     }
   }
-  let customerClient: unknown;
+  const next: Record<string, unknown> = {
+    source_party: order.source_party,
+    customer_name_snapshot: order.customer_name_snapshot,
+    customer_code_snapshot: order.customer_code_snapshot,
+    phone_snapshot: order.phone_snapshot,
+    delivery_date: order.delivery_date || null,
+    type: order.type,
+    product_name_snapshot: order.productName || order.type,
+    payment_method: order.paymentMethod,
+    custom_payment_method: order.customPaymentMethod || null,
+    materials_status: order.materialsStatus ?? oldOrder.materials_status ?? "",
+    machine_name: order.machineName ?? "",
+    worker_name: order.worker_name ?? "",
+    operation_methods: JSON.stringify(order.operationMethods),
+    operation_attachments: JSON.stringify(order.operation_attachments ?? []),
+    quantity: order.quantity,
+    price: order.price,
+    paid: order.paid,
+    old_account: order.old_account,
+    status: order.status,
+    work_stage: order.workStage ?? workStageFromStatus(order.status),
+    notes: order.notes,
+    message_text: order.message_text,
+    quality_notes: order.quality_notes,
+    damaged_pieces: order.damaged_pieces,
+    production_notes: order.production_notes,
+    finishing_notes: order.finishing_notes,
+    details: order.details,
+    draft: order.draft === true,
+  };
+  const changes = diffOrder(oldOrder, next);
+  // An unchanged save is not an edit: nothing is written and the edit count stays the same.
+  if (!changes.length) return res.json({ ok: true, changed: false });
   try {
     await tx(async (client) => {
       try {
@@ -1295,16 +1332,27 @@ app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operato
          materials_status=$12, machine_name=$13, worker_name=$14, operation_methods=$15, operation_attachments=$16, quantity=$17, price=$18, paid=$19, old_account=$20, status=$21, work_stage=$22, notes=$23,
          message_text=$24, quality_notes=$25, damaged_pieces=$26, production_notes=$27, finishing_notes=$28, details=$29, draft=$30, updated_by=$31
          where id=$32`,
-        [order.source_party, orderPartyId || null, order.customer_name_snapshot, order.customer_code_snapshot, order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type, order.paymentMethod, order.customPaymentMethod || null, order.materialsStatus ?? oldOrder.materials_status ?? "", order.machineName ?? "", order.worker_name ?? "", JSON.stringify(order.operationMethods), JSON.stringify(order.operation_attachments ?? []), order.quantity, order.price, order.paid, order.old_account, order.status, order.workStage ?? workStageFromStatus(order.status), order.notes, order.message_text, order.quality_notes, order.damaged_pieces, order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, id],
+        [next.source_party, orderPartyId || null, next.customer_name_snapshot, next.customer_code_snapshot, next.phone_snapshot, next.delivery_date, next.type, order.productId ?? null, next.product_name_snapshot, next.payment_method, next.custom_payment_method, next.materials_status, next.machine_name, next.worker_name, next.operation_methods, next.operation_attachments, next.quantity, next.price, next.paid, next.old_account, next.status, next.work_stage, next.notes, next.message_text, next.quality_notes, next.damaged_pieces, next.production_notes, next.finishing_notes, next.details, next.draft, req.user!.id, id],
       );
+      await recordOrderEdit(client, id, req.user!, changes);
     });
   } catch (error) {
     const err = error as { zunionCode?: string };
     if (err.zunionCode === "PARTY_MISMATCH") return res.status(400).json({ message: "الطرف المختار لا يطابق طرف العميل" });
     throw error;
   }
-  await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, order);
-  res.json({ ok: true });
+  await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, { changes });
+  res.json({ ok: true, changed: true, changes });
+});
+
+app.get("/api/orders/:id/history", requireAuth, async (req, res) => {
+  const history = await loadOrderHistory(param(req.params.id));
+  if (!history) return res.status(404).json({ message: "Order not found" });
+  if (!canSeeFinancials(req.user!.role)) {
+    const hidden = new Set(["price", "paid", "old_account"]);
+    history.edits = history.edits.map((edit) => ({ ...edit, changes: (edit.changes || []).filter((change) => !hidden.has(change.field)) }));
+  }
+  res.json(history);
 });
 
 app.patch("/api/orders/:id/machine", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
@@ -1679,7 +1727,7 @@ app.get("/api/parties", requireAuth, async (_req, res) => {
 
 app.post("/api/parties", requireAuth, requireRole("Master"), async (req, res) => {
   const parsed = partyCreateSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "اسم الطرف مطلوب", issues: parsed.error.issues });
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues.find((issue) => issue.code === "custom")?.message ?? "اسم الطرف مطلوب", issues: parsed.error.issues });
   const name = parsed.data.name.trim();
   const duplicate = await query<{ id: string }>("select id from parties where lower(btrim(name)) = lower($1) limit 1", [name]);
   if (duplicate.rows.length) return res.status(409).json({ message: "هذا الطرف موجود بالفعل" });
@@ -1696,7 +1744,7 @@ app.post("/api/parties", requireAuth, requireRole("Master"), async (req, res) =>
 app.patch("/api/parties/:id", requireAuth, requireRole("Master"), async (req, res) => {
   const id = param(req.params.id);
   const parsed = partyUpdateSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "بيانات الطرف غير صالحة", issues: parsed.error.issues });
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues.find((issue) => issue.code === "custom")?.message ?? "بيانات الطرف غير صالحة", issues: parsed.error.issues });
   const current = (await query<{ id: string; name: string; active: boolean }>("select * from parties where id=$1", [id])).rows[0];
   if (!current) return res.status(404).json({ message: "Party not found" });
   const currentName = String(current.name).trim();

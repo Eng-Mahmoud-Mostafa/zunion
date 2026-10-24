@@ -19,6 +19,7 @@ import {
   Cog,
   History,
   Copy,
+  Eye,
   FilePlus,
   FileText,
   Home,
@@ -32,15 +33,18 @@ import {
   LogOut,
   Mail,
   MapPin,
+  Maximize2,
   Menu,
   Minus,
   PackagePlus,
   Paintbrush,
+  Pencil,
   Phone,
   Plus,
   Printer,
   Receipt,
   RefreshCw,
+  Save,
   Search,
   Send,
   Scissors,
@@ -58,6 +62,8 @@ import {
   Wrench,
   X,
   XCircle,
+  ZoomIn,
+  ZoomOut,
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
@@ -83,7 +89,7 @@ import { allPermissionKeys, roleDefaultPermissions, type PermissionKey } from ".
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings" | "image";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -230,6 +236,18 @@ type Order = {
   created_at: string;
   updated_at: string;
   completedAt: string;
+  /** Server-side fields: never sent back on save. */
+  creator_name?: string;
+  edit_count?: number;
+  last_editor_name?: string;
+  last_edited_at?: string;
+  /**
+   * The backend status as loaded and the status the form would derive from it.
+   * When an edit leaves the derived status unchanged, the loaded status is sent
+   * back, so saving unrelated fields never rewrites e.g. WORKER_STARTED.
+   */
+  apiStatus?: string;
+  apiStatusDerived?: string;
 };
 
 const allowedEmail = "mahmoudmostafa3104@gmail.com";
@@ -1313,7 +1331,14 @@ const demoOrders: Order[] = [
 function isoOffset(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+// Calendar dates (delivery date) are plain YYYY-MM-DD strings. Older API responses
+// and cached rows may carry a full ISO timestamp; keep only the date part.
+function dateOnly(value: unknown): string {
+  const match = normalizeDigitsToEnglish(value).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : "";
 }
 
 function calculate(order: Order): Order {
@@ -1389,7 +1414,7 @@ async function backendJson<T>(path: string, options: RequestInit = {}): Promise<
     } catch {
       message = raw || message;
     }
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: response.status });
   }
   return response.json() as Promise<T>;
 }
@@ -1426,7 +1451,7 @@ function orderFromApi(row: Record<string, unknown>): Order {
     client_name: String(row.customer_name_snapshot ?? row.customer_name ?? ""),
     client_code: String(row.customer_code_snapshot ?? ""),
     phone: String(row.phone_snapshot ?? row.phone ?? ""),
-    delivery_date: String(row.delivery_date ?? ""),
+    delivery_date: dateOnly(row.delivery_date),
     price: Number(row.price ?? 0),
     quantity: Number(row.quantity ?? row.pieces_count ?? 1),
     total: Number(row.total ?? 0),
@@ -1509,7 +1534,13 @@ function orderFromApi(row: Record<string, unknown>): Order {
           workOrderImage: String(item.workOrderUrl ?? ""),
         } as OperationItem));
     })(),
+    creator_name: String(row.creator_name ?? ""),
+    edit_count: Number(row.edit_count ?? 0),
+    last_editor_name: String(row.last_editor_name ?? ""),
+    last_edited_at: String(row.last_edited_at ?? ""),
   });
+  order.apiStatus = String(row.status ?? "");
+  order.apiStatusDerived = apiStatusFromOrder(order);
   return order;
 }
 
@@ -1542,7 +1573,10 @@ function orderToApi(order: Order) {
     price: calculated.price,
     paid: calculated.paid,
     old_account: calculated.old_balance,
-    status: apiStatusFromOrder(calculated),
+    status: (() => {
+      const derived = apiStatusFromOrder(calculated);
+      return calculated.apiStatus && derived === calculated.apiStatusDerived ? calculated.apiStatus : derived;
+    })(),
     workStage: calculated.workStage,
     notes: calculated.notes,
     message_text: calculated.client_message,
@@ -1735,7 +1769,14 @@ function useOrders(session: Session | null) {
     });
   };
 
-  return { orders, setOrders };
+  // For changes the caller has already persisted with its own request (persistOrder,
+  // DELETE). Going through setOrders would replay them: a second POST for every new
+  // order and a second PUT for every edit.
+  const setOrdersLocal: React.Dispatch<React.SetStateAction<Order[]>> = (action) => {
+    setLocalOrders(action);
+  };
+
+  return { orders, setOrders, setOrdersLocal, refreshOrders };
 }
 
 async function syncOrders(previous: Order[], next: Order[]) {
@@ -2064,8 +2105,8 @@ function apiErrorMessage(payload: Record<string, unknown>, fallback: string) {
 }
 
 function Login({ onLogin }: { onLogin: (session: Session) => void }) {
-  const [username, setUsername] = useState("mahmoud");
-  const [password, setPassword] = useState("1234");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [stayLoggedIn, setStayLoggedIn] = useState(true);
   const [message, setMessage] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -2462,13 +2503,100 @@ const finishListHeaders = [
   "شغل جاهز",
 ] as const;
 
+/** متابعة أوردرات: the base list plus who last edited the order and how often. */
+const trackingListHeaders = [
+  ordersListHeaders[0],
+  "آخر تعديل بواسطة",
+  "عدد التعديلات",
+  ...ordersListHeaders.slice(1),
+] as const;
+
+/** Calendar day (YYYY-MM-DD) of a timestamp in the business time zone. */
+function cairoDateKey(value: unknown): string {
+  const parsed = new Date(String(value ?? ""));
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(parsed);
+}
+
+type OrderHistory = {
+  created_at: string;
+  creator_name: string;
+  edits: { id: string; editor_name: string; created_at: string; changes: { field: string; label: string; from: unknown; to: unknown }[] }[];
+};
+
+function historyValueText(field: string, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (field === "delivery_date") return formatDisplayDate(value) || "—";
+  if (field === "draft") return value === true || value === "true" ? "نعم" : "لا";
+  if (field === "operation_attachments" && Array.isArray(value)) {
+    return value.map((item: { method?: string; workOrder?: boolean; logo?: boolean }) => [item.method, item.workOrder ? "أمر شغل" : "", item.logo ? "لوجو" : ""].filter(Boolean).join(" · ")).join(" | ") || "—";
+  }
+  if (Array.isArray(value)) return value.map((item) => String(item)).join("، ") || "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return normalizeDigitsToEnglish(value);
+}
+
+function OrderHistoryDialog({ order, onClose }: { order: Order; onClose: () => void }) {
+  const [history, setHistory] = useState<OrderHistory | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    backendJson<OrderHistory>(`/api/orders/${encodeURIComponent(order.id)}/history`)
+      .then((data) => { if (active) setHistory(data); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "تعذر تحميل سجل التعديلات"); });
+    return () => { active = false; };
+  }, [order.id]);
+  return (
+    <DraggableDialog
+      overlayClassName="party-modal-overlay"
+      dialogClassName="party-modal order-history-modal"
+      headClassName="party-modal-head"
+      closeClassName="party-modal-close"
+      ariaLabel={`سجل تعديلات الأوردر ${order.order_number}`}
+      onClose={onClose}
+      title={<h2>سجل تعديلات الأوردر #{order.order_number}</h2>}
+      portal
+      dragFromEmptyArea
+      centerOnce
+    >
+      <div className="order-history-body">
+        {error && <p className="tab-confirm-error">{error}</p>}
+        {!history && !error && <div className="attachment-loading"><Loader2 size={16} className="spin" /><span>جارٍ التحميل…</span></div>}
+        {history && (
+          <>
+            <p className="order-history-created">أنشأه <strong>{history.creator_name || "مستخدم غير معروف"}</strong> في {formatDateTimeCairo(history.created_at)}</p>
+            {history.edits.length === 0 ? (
+              <p className="muted">لا توجد تعديلات مسجلة على هذا الأوردر.</p>
+            ) : (
+              <ol className="order-history-list">
+                {history.edits.map((edit) => (
+                  <li key={edit.id}>
+                    <div className="order-history-meta"><strong>{edit.editor_name || "مستخدم غير معروف"}</strong><span>{formatDateTimeCairo(edit.created_at)}</span></div>
+                    <ul>
+                      {edit.changes.map((change) => (
+                        <li key={change.field}><span className="order-history-field">{change.label}:</span> <span className="order-history-from">{historyValueText(change.field, change.from)}</span> ← <span className="order-history-to">{historyValueText(change.field, change.to)}</span></li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </>
+        )}
+      </div>
+    </DraggableDialog>
+  );
+}
+
 function valueText(value: unknown, fallback = "—") {
   const text = normalizeDigitsToEnglish(value).trim();
   return text || fallback;
 }
 
 function orderCreatedBy(order: OrdersListRecord) {
-  return valueText(order.creator_name || order.created_by || order.added_by || order.username || order.user_email, "مستخدم غير معروف");
+  // created_by is a user id; never show it raw when the readable name is unavailable.
+  const createdBy = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(order.created_by ?? "")) ? "" : order.created_by;
+  return valueText(order.creator_name || createdBy || order.added_by || order.username || order.user_email, "مستخدم غير معروف");
 }
 
 function orderDisplayNumber(order: OrdersListRecord) {
@@ -3717,7 +3845,7 @@ function UserDrawer({ open, onClose, user, orders }: {
   );
 }
 
-function OrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; highlight?: boolean }) {
+function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onHistoryClick?: () => void; highlight?: boolean }) {
   const operationStatus = orderOperationStatusText(order);
   const finishingStatus = orderFinishingStatusText(order);
   const readyStatus = orderReadyStatus(order);
@@ -3730,6 +3858,12 @@ function OrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { or
   return (
     <tr className={highlight ? "ws-row-highlight" : undefined} data-order-row-id={order.id}>
       <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
+      {onHistoryClick && (
+        <>
+          <td>{valueText(order.last_editor_name)}</td>
+          <td><button type="button" className="cd-client-link order-edit-count" onClick={onHistoryClick} title="عرض سجل التعديلات">{formatNumber(order.edit_count ?? 0)}</button></td>
+        </>
+      )}
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
       <td className="orders-list-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}{thumbSrc && <span className="orders-list-thumb"><AttachmentImage src={thumbSrc} alt="صورة الأوردر" /></span>}</td>
       <td>{handleClick ? <button type="button" className="cd-client-link" onClick={handleClick}>{clientName}</button> : clientName}</td>
@@ -3979,8 +4113,13 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
   );
 }
 
-function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, canManageParties = false, onAddProduct, onCreateParty, onUpdateParty, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly = false, onPrint, closeSaveMode = "save", onDirtyChange, registerActions }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; canManageParties?: boolean; onAddProduct?: () => void; onCreateParty?: (name: string) => Promise<void> | void; onUpdateParty?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; onPrint?: (order: Order) => void; tabId?: string; closeSaveMode?: "draft" | "save"; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
-  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: activePartyNames(parties)[0] ?? "", delivery_date: isoOffset(0), created_at: new Date().toISOString() });
+function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, canManageParties = false, onAddProduct, onCreateParty, onUpdateParty, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly: readOnlyProp = false, canEdit = false, onViewImage, onPrint, closeSaveMode = "save", onDirtyChange, registerActions }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; canManageParties?: boolean; onAddProduct?: () => void; onCreateParty?: (name: string) => Promise<void> | void; onUpdateParty?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; canEdit?: boolean; onViewImage?: (src: string, title: string) => void; onPrint?: (order: Order) => void; tabId?: string; closeSaveMode?: "draft" | "save"; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
+  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: activePartyNames(parties)[0] ?? "", delivery_date: "", created_at: new Date().toISOString() });
+  // A saved order opens read-only; "تعديل الأوردر" unlocks it and "إلغاء" restores the saved values.
+  const isSavedOrder = !!initial && !startAsDraft;
+  const [editing, setEditing] = useState(false);
+  const savedFormRef = useRef<Order>(form);
+  const readOnly = readOnlyProp || (isSavedOrder && !editing);
   const firstActiveParty = activePartyNames(parties)[0] ?? "";
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -4452,7 +4591,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
         id: createId(),
         source_person: form.source_person,
         order_number: nextCustomerCode(customers, form.source_person || firstActiveParty).replace(/^[^-]+-/, '').replace(/^0+/, '') || String(Date.now()).slice(-6),
-        delivery_date: isoOffset(0),
+        delivery_date: "",
         created_at: new Date().toISOString(),
         operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
         items: [],
@@ -4530,6 +4669,10 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
       }
       baselineRef.current = JSON.stringify(form);
       onDirtyChangeRef.current?.(false);
+      if (isSavedOrder) {
+        savedFormRef.current = saved && typeof saved === "object" ? saved : order;
+        setEditing(false);
+      }
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "تعذر حفظ الأوردر. حاول مرة أخرى.");
       setSaving(false);
@@ -4537,6 +4680,47 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
     }
     setSaving(false);
     return true;
+  }
+
+  function startEditing() {
+    savedFormRef.current = form;
+    setErrors({});
+    setSaveError("");
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    setForm(savedFormRef.current);
+    baselineRef.current = null;
+    setErrors({});
+    setSaveError("");
+    setEditing(false);
+  }
+
+  async function saveEdits() {
+    if (saving) return;
+    // Nothing changed: leave edit mode without a request, so no edit is recorded.
+    if (JSON.stringify(form) === JSON.stringify(savedFormRef.current)) {
+      setEditing(false);
+      return;
+    }
+    const order = buildValidatedOrder(false);
+    if (!order) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const saved = await onSave(order);
+      const committed = saved && typeof saved === "object" ? saved : order;
+      savedFormRef.current = committed;
+      setForm(committed);
+      baselineRef.current = null;
+      setEditing(false);
+    } catch (error) {
+      // Keep everything the user entered (including pasted images) so they can retry.
+      setSaveError(error instanceof Error ? error.message : "تعذر حفظ التعديلات. حاول مرة أخرى.");
+    } finally {
+      setSaving(false);
+    }
   }
   const canSubmit = Boolean(
     form.client_name.trim() &&
@@ -4574,6 +4758,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
             onPaste={() => pasteFromClipboard(index, "workOrderImage")}
             onRemove={() => removeOperationAttachment(index, "workOrderImage")}
             onDropFile={(file) => setOperationAttachment(index, "workOrderImage", file)}
+            onView={onViewImage ? () => onViewImage(item.workOrderImage, `أمر الشغل${form.order_number ? ` · ${form.order_number}` : ""}`) : undefined}
             disabled={readOnly}
           />
           <ImageInputWithClipboard
@@ -4591,6 +4776,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
             onPaste={() => pasteFromClipboard(index, "logoImage")}
             onRemove={() => removeOperationAttachment(index, "logoImage")}
             onDropFile={(file) => setOperationAttachment(index, "logoImage", file)}
+            onView={onViewImage ? () => onViewImage(item.logoImage, `أمر اللوجو${form.order_number ? ` · ${form.order_number}` : ""}`) : undefined}
             disabled={readOnly}
           />
         </div>
@@ -4807,6 +4993,22 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
       <div className="nf-draft-notice">
         {draftNotice && <small className="field-success">{draftNotice}</small>}
       </div>
+
+      {isEdit && (
+        <div className="nf-actionbar nf-actionbar-edit">
+          {editing ? (
+            <>
+              <button type="button" className="primary-btn nf-btn nf-btn-save-edits" onClick={() => void saveEdits()} disabled={saving}><Save size={16} /> {saving ? "جارٍ الحفظ..." : "حفظ التعديلات"}</button>
+              <button type="button" className="ghost-btn nf-btn nf-btn-cancel" onClick={cancelEditing} disabled={saving}><X size={16} /> إلغاء</button>
+            </>
+          ) : (
+            <>
+              {canEdit && !readOnlyProp && <button type="button" className="primary-btn nf-btn nf-btn-edit" onClick={startEditing}><Pencil size={16} /> تعديل الأوردر</button>}
+              {onPrint && <button type="button" className="primary-btn nf-btn nf-btn-print" onClick={() => onPrint(computed)}><Printer size={16} /> طباعة</button>}
+            </>
+          )}
+        </div>
+      )}
 
       {!isEdit && (
       <div className="nf-actionbar">
@@ -5065,6 +5267,8 @@ type ImageInputWithClipboardProps = {
   onPaste: () => void;
   onRemove: () => void;
   onDropFile?: (file: File) => void;
+  /** Opens the image in an internal viewer tab (preview click and "عرض الصورة"). */
+  onView?: () => void;
 };
 
 function formatFileSize(size?: number) {
@@ -5074,7 +5278,7 @@ function formatFileSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function AttachmentImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+function AttachmentImage({ src, alt, className, onOpen }: { src: string; alt: string; className?: string; onOpen?: () => void }) {
   const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -5116,7 +5320,11 @@ function AttachmentImage({ src, alt, className }: { src: string; alt: string; cl
             src={src}
             alt={alt}
             className="upload-preview"
-            onClick={() => setPreviewOpen(true)}
+            onClick={(event) => {
+              if (!onOpen) return setPreviewOpen(true);
+              event.stopPropagation();
+              onOpen();
+            }}
             onError={() => setStatus("error")}
           />
         )}
@@ -5131,7 +5339,73 @@ function AttachmentImage({ src, alt, className }: { src: string; alt: string; cl
   );
 }
 
-function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, pasteLabel, error, disabled, onActivate, onPaste, onRemove, onDropFile }: ImageInputWithClipboardProps) {
+const VIEWER_MIN_SCALE = 0.05;
+const VIEWER_MAX_SCALE = 8;
+const VIEWER_STEP = 1.25;
+
+/** Internal image tab: zoom in/out, fit to the available area, or show at original size. */
+function ImageViewer({ src, title }: { src: string; title: string }) {
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const [mode, setMode] = useState<"fit" | "manual">("fit");
+  const [scale, setScale] = useState(1);
+  const [failed, setFailed] = useState(false);
+
+  const fitScale = useCallback(() => {
+    const stage = stageRef.current;
+    if (!stage || !natural || !stage.clientWidth || !stage.clientHeight) return null;
+    return Math.min(stage.clientWidth / natural.w, stage.clientHeight / natural.h);
+  }, [natural]);
+
+  useEffect(() => {
+    setFailed(false);
+    setNatural(null);
+    const probe = new window.Image();
+    probe.onload = () => setNatural({ w: probe.naturalWidth || 1, h: probe.naturalHeight || 1 });
+    probe.onerror = () => setFailed(true);
+    probe.src = src;
+  }, [src]);
+
+  // Keep "fit" fitted while the tab is resized or becomes visible again (hidden tabs measure 0).
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || mode !== "fit") return;
+    const apply = () => { const next = fitScale(); if (next) setScale(next); };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [mode, fitScale]);
+
+  const zoomBy = (factor: number) => {
+    setMode("manual");
+    setScale((current) => Math.min(VIEWER_MAX_SCALE, Math.max(VIEWER_MIN_SCALE, current * factor)));
+  };
+
+  return (
+    <div className="image-viewer">
+      <div className="image-viewer-toolbar" role="toolbar" aria-label="أدوات عرض الصورة">
+        <strong className="image-viewer-title">{title}</strong>
+        <div className="image-viewer-actions">
+          <button type="button" className="ghost-btn compact" onClick={() => zoomBy(VIEWER_STEP)} disabled={!natural || scale >= VIEWER_MAX_SCALE} aria-label="تكبير"><ZoomIn size={15} /> تكبير</button>
+          <button type="button" className="ghost-btn compact" onClick={() => zoomBy(1 / VIEWER_STEP)} disabled={!natural || scale <= VIEWER_MIN_SCALE} aria-label="تصغير"><ZoomOut size={15} /> تصغير</button>
+          <button type="button" className={`ghost-btn compact${mode === "fit" ? " active" : ""}`} onClick={() => setMode("fit")} disabled={!natural} aria-label="ملاءمة للشاشة"><Maximize2 size={15} /> ملاءمة للشاشة</button>
+          <button type="button" className={`ghost-btn compact${mode === "manual" && scale === 1 ? " active" : ""}`} onClick={() => { setMode("manual"); setScale(1); }} disabled={!natural} aria-label="الحجم الأصلي">الحجم الأصلي</button>
+          <span className="image-viewer-zoom" dir="ltr">{Math.round(scale * 100)}%</span>
+        </div>
+      </div>
+      <div ref={stageRef} className={`image-viewer-stage${mode === "fit" ? " fit" : ""}`}>
+        {failed && <div className="attachment-retry"><ImageOff size={16} /><span>تعذر تحميل الصورة</span></div>}
+        {!failed && !natural && <div className="attachment-loading"><Loader2 size={16} className="spin" /><span>جارٍ التحميل…</span></div>}
+        {natural && !failed && (
+          <img src={src} alt={title} draggable={false} style={{ width: Math.max(1, Math.round(natural.w * scale)), height: Math.max(1, Math.round(natural.h * scale)) }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ImageInputWithClipboard({ label, value, fileName, fileSize, source, active, status, large, required, pasteOnly, pasteLabel, error, disabled, onActivate, onPaste, onRemove, onDropFile, onView }: ImageInputWithClipboardProps) {
   const [dragOver, setDragOver] = useState(false);
   const classNames = `image-clipboard-field${active ? " active" : ""}${large ? " large" : ""}${dragOver ? " drag-over" : ""}${error ? " has-error" : ""}${disabled ? " nf-readonly-control" : ""}`;
   return (
@@ -5148,11 +5422,12 @@ function ImageInputWithClipboard({ label, value, fileName, fileSize, source, act
       <span className="image-field-label">{label}{required && <em className="nf-required">*</em>}</span>
       <div className="image-field-actions">
         {!disabled && <button type="button" className="ghost-btn compact image-paste-btn" aria-label={`لصق ${label} من الحافظة`} onClick={onPaste}>{pasteOnly ? "لصق" : (pasteLabel || "لصق الصورة من الحافظة")}</button>}
+        {value && onView && <button type="button" className="ghost-btn compact image-view-btn" aria-label={`عرض ${label}`} onClick={(event) => { event.stopPropagation(); onView(); }}><Eye size={13} /> عرض الصورة</button>}
         {value && !disabled && <button type="button" className="ghost-btn compact" aria-label={`حذف ${label}`} onClick={onRemove}>حذف الصورة</button>}
       </div>
       {value && (
         <div className="image-preview-box">
-          <AttachmentImage src={value} alt={`معاينة ${label}`} />
+          <AttachmentImage src={value} alt={`معاينة ${label}`} onOpen={onView} />
         </div>
       )}
       <div className="image-file-meta">
@@ -6032,6 +6307,10 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [editing, setEditing] = useState<Order | null>(null);
   const [rowLimit, setRowLimit] = useState(100);
   const [dateSort, setDateSort] = useState<"none" | "asc" | "desc">("none");
+  const [rangeField, setRangeField] = useState<"delivery" | "created">("delivery");
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
+  const [historyOrder, setHistoryOrder] = useState<Order | null>(null);
   const [spreadSort, setSpreadSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [machineOverrides, setMachineOverrides] = useState<Record<string, string>>({});
   const [cellSaving, setCellSaving] = useState<Record<string, boolean>>({});
@@ -6261,13 +6540,21 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   }, [orders, queue, session.role]);
 
   const filtered = useMemo(() => {
-    if (dateSort === "none") return baseOrders;
-    return [...baseOrders].sort((a, b) => {
+    // Optional date range (tracking only): both ends inclusive, either end may be empty.
+    const ranged = queue || (!rangeFrom && !rangeTo) ? baseOrders : baseOrders.filter((order) => {
+      const day = rangeField === "created" ? cairoDateKey(order.created_at) : dateOnly(order.delivery_date);
+      if (!day) return false;
+      if (rangeFrom && day < rangeFrom) return false;
+      if (rangeTo && day > rangeTo) return false;
+      return true;
+    });
+    if (dateSort === "none") return ranged;
+    return [...ranged].sort((a, b) => {
       const first = new Date(a.delivery_date || "").getTime() || 0;
       const second = new Date(b.delivery_date || "").getTime() || 0;
       return dateSort === "asc" ? first - second : second - first;
     });
-  }, [baseOrders, dateSort]);
+  }, [baseOrders, dateSort, queue, rangeField, rangeFrom, rangeTo]);
 
   function save(order: Order) {
     const previous = orders.find((item) => item.id === order.id);
@@ -7263,17 +7550,39 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       <div className="stack orders-classic-list">
         {editing && <OrderForm initial={editing} onSave={save} onCancel={() => setEditing(null)} />}
         {gotoNotice && <div className="notice">{gotoNotice}</div>}
+        {!queue && (
+          <div className="orders-range-filter" role="group" aria-label="تصفية حسب التاريخ">
+            <label>
+              <span>التاريخ</span>
+              <select value={rangeField} onChange={(event) => setRangeField(event.target.value as "delivery" | "created")}>
+                <option value="delivery">تاريخ التسليم</option>
+                <option value="created">تاريخ عمل الأوردر</option>
+              </select>
+            </label>
+            <label>
+              <span>من</span>
+              <input type="date" value={rangeFrom} max={rangeTo || undefined} onChange={(event) => setRangeFrom(normalizeDigitsToEnglish(event.target.value))} />
+            </label>
+            <label>
+              <span>إلى</span>
+              <input type="date" value={rangeTo} min={rangeFrom || undefined} onChange={(event) => setRangeTo(normalizeDigitsToEnglish(event.target.value))} />
+            </label>
+            {(rangeFrom || rangeTo) && <button type="button" className="ghost-btn compact" onClick={() => { setRangeFrom(""); setRangeTo(""); }}>مسح التاريخ</button>}
+            <small className="muted">{formatNumber(filtered.length)} أوردر</small>
+          </div>
+        )}
         <OrdersInfiniteList
-          headers={renderOrdersListHeaders(queue === "finish" ? finishListHeaders : undefined)}
+          headers={renderOrdersListHeaders(queue === "finish" ? finishListHeaders : queue ? undefined : trackingListHeaders)}
           rows={filtered.slice(0, rowLimit).map((order) => queue === "finish"
             ? <FinishOrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />
-            : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
+            : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} onHistoryClick={queue ? undefined : () => setHistoryOrder(order)} />)}
           total={filtered.length}
-          colSpan={queue === "finish" ? finishListHeaders.length : ordersListHeaders.length}
+          colSpan={queue === "finish" ? finishListHeaders.length : queue ? ordersListHeaders.length : trackingListHeaders.length}
           rowLimit={rowLimit}
           onLoadMore={() => setRowLimit((value) => value + 100)}
           empty={filtered.length === 0}
         />
+        {historyOrder && <OrderHistoryDialog order={historyOrder} onClose={() => setHistoryOrder(null)} />}
       </div>
     );
   }
@@ -8336,9 +8645,12 @@ const TAB_META: Record<View, { label: string; icon: LucideIcon }> = {
   import: { label: "استيراد وتصدير", icon: FileText },
   alerts: { label: "تنبيهات التسليم", icon: Bell },
   settings: { label: "الإعدادات", icon: Settings },
+  image: { label: "عرض الصورة", icon: Image },
 };
 
-const RECORD_VIEWS: View[] = ["editOrder", "draftEdit"];
+// "image" is deliberately not in knownViews: its source lives only in memory, so a
+// reload with #image/... falls back to the dashboard instead of an empty viewer.
+const RECORD_VIEWS: View[] = ["editOrder", "draftEdit", "image"];
 
 function tabIdFor(view: View, recordId?: string) {
   return recordId ? `${view}:${recordId}` : view;
@@ -8560,7 +8872,7 @@ function ZunionApp() {
   const [finishGoOrderId, setFinishGoOrderId] = useState<string | null>(null);
   const [productDrawer, setProductDrawer] = useState<Product | null>(null);
   const [userDrawer, setUserDrawer] = useState<SearchableUser | null>(null);
-  const { orders, setOrders } = useOrders(session);
+  const { orders, setOrders, setOrdersLocal, refreshOrders } = useOrders(session);
   const orderDrawerOrder = useMemo(() => orderDrawerOrderNumber ? orders.find((o) => o.order_number === orderDrawerOrderNumber) || null : null, [orderDrawerOrderNumber, orders]);
   useEffect(() => {
     if (!sentNotice) return;
@@ -8644,6 +8956,23 @@ function ZunionApp() {
     activateTabObject(tab);
   }
 
+  // Image viewer tabs keep their source in memory only (pasted images are data
+  // URLs that may be megabytes); the tab id is a short key derived from it.
+  const [imageTabs, setImageTabs] = useState<Record<string, { src: string; title: string }>>({});
+  const imageKeys = useRef(new Map<string, string>());
+
+  function openImageViewer(src: string, title: string) {
+    if (!src) return;
+    let key = imageKeys.current.get(src);
+    if (!key) {
+      const photoId = src.match(/\/api\/photos\/([0-9a-f-]{36})/i)?.[1];
+      key = photoId ?? `local-${imageKeys.current.size + 1}-${Date.now().toString(36)}`;
+      imageKeys.current.set(src, key);
+    }
+    setImageTabs((current) => ({ ...current, [key]: { src, title } }));
+    openView("image", key, title);
+  }
+
   function activateTab(id: string) {
     const tab = tabs.find((item) => item.id === id);
     if (tab && tab.id !== activeTabId) activateTabObject(tab);
@@ -8651,6 +8980,16 @@ function ZunionApp() {
 
   function removeTab(id: string) {
     tabControllers.current.delete(id);
+    if (id.startsWith("image:")) {
+      const key = id.slice("image:".length);
+      setImageTabs((current) => {
+        if (!(key in current)) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      for (const [src, value] of imageKeys.current) if (value === key) imageKeys.current.delete(src);
+    }
     setDirtyMap((map) => {
       if (!(id in map)) return map;
       const next = { ...map };
@@ -8824,8 +9163,11 @@ function ZunionApp() {
       try {
         await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body });
         return orderWithRefs;
-      } catch {
-        // Fall back to idempotent create (handles orders that never reached the backend).
+      } catch (error) {
+        // Only an order the backend has never seen may fall back to create. Any other
+        // failure must surface: the create endpoint answers 200 for an existing id
+        // without applying the changes, which would report a lost edit as saved.
+        if ((error as { status?: number }).status !== 404) throw error;
       }
     }
     const result = await backendJson<{ id: string; order_number?: string }>("/api/orders", { method: "POST", body });
@@ -8834,7 +9176,7 @@ function ZunionApp() {
 
   async function saveNew(order: Order): Promise<Order> {
     const saved = await persistOrder(order);
-    setOrders((current) => [saved, ...current.filter((o) => o.id !== saved.id)]);
+    setOrdersLocal((current) => [saved, ...current.filter((o) => o.id !== saved.id)]);
     addAudit(session, "ORDER_CREATED", "orders", saved.id, undefined, saved);
     setCreatedOrder(saved);
     setSearchGoOrderId(saved.id);
@@ -8843,20 +9185,19 @@ function ZunionApp() {
   }
 
   async function saveEdited(order: Order): Promise<Order> {
-    if ((session?.role ?? "Master") !== "Master") return order;
     const previous = orders.find(o => o.id === order.id);
+    if (!canEditOrder(previous ?? order)) throw new Error("غير مصرح لك بتعديل هذا الأوردر");
     const saved = await persistOrder(order);
-    setOrders(current => current.map(o => o.id === saved.id ? saved : o));
+    setOrdersLocal(current => current.map(o => o.id === saved.id ? saved : o));
     addAudit(session, "ORDER_EDITED", "orders", saved.id, previous, saved);
-    setSearchGoOrderId(saved.id);
-    openView("search");
+    void refreshOrders();
     return saved;
   }
 
   async function saveDraftOrder(order: Order): Promise<Order> {
     const previous = orders.find((o) => o.id === order.id);
     const saved = await persistOrder(order);
-    setOrders((current) => {
+    setOrdersLocal((current) => {
       const prev = current.find((o) => o.id === saved.id);
       return prev ? current.map((o) => o.id === saved.id ? saved : o) : [saved, ...current];
     });
@@ -8866,7 +9207,7 @@ function ZunionApp() {
   }
 
   function openOrderFromSearch(order: Order) {
-    setOrders((current) => {
+    setOrdersLocal((current) => {
       if (current.some((existing) => existing.id === order.id)) return current;
       return [order, ...current];
     });
@@ -8876,7 +9217,7 @@ function ZunionApp() {
   async function sendOrderToOperation(order: Order): Promise<Order> {
     const previous = orders.find((o) => o.id === order.id);
     const saved = await persistOrder(order);
-    setOrders((current) => {
+    setOrdersLocal((current) => {
       const prev = current.find((o) => o.id === saved.id);
       return prev ? current.map((o) => o.id === saved.id ? saved : o) : [saved, ...current];
     });
@@ -8896,11 +9237,18 @@ function ZunionApp() {
     const current = orders.find((o) => o.id === order.id);
     if (!current || !current.draft) throw new Error("هذا الأوردر لم يعد مسودة محفوظة مؤقتًا");
     await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "DELETE" });
-    setOrders((list) => list.filter((o) => o.id !== order.id));
+    setOrdersLocal((list) => list.filter((o) => o.id !== order.id));
     addAudit(session, "ORDER_DELETED", "orders", order.id, current, undefined);
   }
 
   const currentRole = session?.role ?? "Master";
+  // Mirrors the backend rule on PUT /api/orders/:id (the backend stays authoritative).
+  function canEditOrder(order: Order) {
+    if (!hasPermission(session, "orders.edit")) return false;
+    if (!["Master", "Helper", "Operator", "Supervisor"].includes(currentRole)) return false;
+    if (currentRole === "Helper" && !["NEW", "SENT_TO_WORKER"].includes(order.apiStatus || "NEW")) return false;
+    return true;
+  }
   const visibleOrders = roleOrders(currentRole, orders);
   const isMaster = currentRole === "Master";
   const isOperator = currentRole === "Operator" || currentRole === "Helper";
@@ -9028,23 +9376,28 @@ function ZunionApp() {
   function renderTabContent(tab: ShellTab) {
     if (!session) return null;
     switch (tab.view) {
+      case "image": {
+        const image = tab.recordId ? imageTabs[tab.recordId] : undefined;
+        if (!image) return <ErrorPanel message="الصورة لم تعد متاحة. افتحها مرة أخرى من الأوردر." />;
+        return <ImageViewer src={image.src} title={image.title} />;
+      }
       case "dashboard":
         return <Dashboard setView={(next) => openView(next)} canSeeFinancials={canManageFinancials(session.role)} />;
       case "orders":
         return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
       case "new":
-        return <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       case "drafts":
         return <DraftsPage orders={orders} onResume={resumeDraft} onDelete={canDeleteOrder(currentRole) ? deleteDraft : undefined} />;
       case "draftEdit": {
         const draft = tab.recordId ? orders.find((item) => item.id === tab.recordId && item.draft) : null;
         if (!draft) return <ErrorPanel message="لم يتم العثور على المسودة المطلوبة" />;
-        return <OrderForm initial={draft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <OrderForm initial={draft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       }
       case "editOrder": {
         const order = tab.recordId ? orders.find((item) => item.order_number === tab.recordId) : null;
         if (!order) return <ErrorPanel message="لم يتم العثور على الأوردر المطلوب" />;
-        return <OrderForm initial={order} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} readOnly={!isMaster} onOpenOrder={openOrderFromSearch} onPrint={(ord) => printOrderFromForm(ord, orders)} tabId={tab.id} closeSaveMode="save" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <OrderForm initial={order} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} canEdit={canEditOrder(order)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(ord) => printOrderFromForm(ord, orders)} tabId={tab.id} closeSaveMode="save" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       }
       case "addCustomer":
         return <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} parties={parties} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} tabId={tab.id} onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
