@@ -2711,7 +2711,7 @@ function ordersListPrintRow(order: OrdersListRecord) {
   ];
 }
 
-function CustomerDrawer({ open, onClose, customerCode, customerName, customers, orders, session, setView }: {
+function CustomerDrawer({ open, onClose, customerCode, customerName, customers, orders, session, setView, onOrderClick }: {
   open: boolean;
   onClose: () => void;
   customerCode: string;
@@ -2720,6 +2720,7 @@ function CustomerDrawer({ open, onClose, customerCode, customerName, customers, 
   orders: Order[];
   session: Session;
   setView: (view: View) => void;
+  onOrderClick?: (orderId: string) => void;
 }) {
   const [drawerQuery, setDrawerQuery] = useState("");
   const [drawerStatus, setDrawerStatus] = useState("");
@@ -2837,7 +2838,7 @@ function CustomerDrawer({ open, onClose, customerCode, customerName, customers, 
                 {filteredOrders.length === 0 && <tr><td colSpan={7} className="cd-empty">لا توجد أوردرات مطابقة</td></tr>}
                 {filteredOrders.map((o) => (
                   <tr key={o.id}>
-                    <td className="cd-order-num">{o.order_number}</td>
+                    <td className="cd-order-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(o.id)}>{o.order_number}</button> : o.order_number}</td>
                     <td>{formatDateArabic(o.delivery_date)}</td>
                     <td>{o.order_type || o.productName || "--"}</td>
                     <td>{o.quantity}</td>
@@ -3845,7 +3846,7 @@ function UserDrawer({ open, onClose, user, orders }: {
   );
 }
 
-function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onHistoryClick?: () => void; highlight?: boolean }) {
+function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void; onHistoryClick?: () => void; highlight?: boolean }) {
   const operationStatus = orderOperationStatusText(order);
   const finishingStatus = orderFinishingStatusText(order);
   const readyStatus = orderReadyStatus(order);
@@ -3865,7 +3866,7 @@ function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, h
         </>
       )}
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
-      <td className="orders-list-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}{thumbSrc && <span className="orders-list-thumb"><AttachmentImage src={thumbSrc} alt="صورة الأوردر" /></span>}</td>
+      <td className="orders-list-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.id || order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}{thumbSrc && <span className="orders-list-thumb"><AttachmentImage src={thumbSrc} alt="صورة الأوردر" /></span>}</td>
       <td>{handleClick ? <button type="button" className="cd-client-link" onClick={handleClick}>{clientName}</button> : clientName}</td>
       <td>{orderDisplayType(order)}</td>
       <td>{orderDisplayLogo(order)}</td>
@@ -3878,7 +3879,7 @@ function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, h
   );
 }
 
-function FinishOrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; highlight?: boolean }) {
+function FinishOrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void; highlight?: boolean }) {
   const finishingStatus = orderFinishingStatusText(order);
   const readyStatus = orderReadyStatus(order);
   const createdBy = orderCreatedBy(order);
@@ -3890,7 +3891,7 @@ function FinishOrdersListRow({ order, onCustomerClick, onOrderClick, highlight }
   return (
     <tr className={highlight ? "ws-row-highlight" : undefined} data-order-row-id={order.id}>
       <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
-      <td className="orders-list-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}{thumbSrc && <span className="orders-list-thumb"><AttachmentImage src={thumbSrc} alt="صورة الأوردر" /></span>}</td>
+      <td className="orders-list-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.id || order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}{thumbSrc && <span className="orders-list-thumb"><AttachmentImage src={thumbSrc} alt="صورة الأوردر" /></span>}</td>
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
       <td>{handleClick ? <button type="button" className="cd-client-link" onClick={handleClick}>{clientName}</button> : clientName}</td>
       <td>{orderDisplayType(order)}</td>
@@ -5742,7 +5743,7 @@ type MachineDistModal =
 
 type MachineDraftRow = { id: string | null; name: string; active: boolean; isNew: boolean; remove: boolean };
 
-function MachineDistributionPage({ orders, session, machines, onMachinesChanged, onOrderClick }: { orders: Order[]; session: Session; machines: MachineRecord[]; onMachinesChanged?: () => void; onOrderClick?: (orderNumber: string) => void }) {
+function MachineDistributionPage({ orders, session, machines, onMachinesChanged, onOrderClick }: { orders: Order[]; session: Session; machines: MachineRecord[]; onMachinesChanged?: () => void; onOrderClick?: (orderId: string) => void }) {
   const [assignments, setAssignments] = useState<MachineAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -6166,7 +6167,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
             <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeModal}>إلغاء</button>
           </div>
           {order?.order_number && (
-            <button type="button" className="md-btn md-btn-open" disabled={busy} onClick={() => onOrderClick?.(order.order_number)}>فتح الأوردر</button>
+            <button type="button" className="md-btn md-btn-open" disabled={busy} onClick={() => onOrderClick?.(order.id)}>فتح الأوردر</button>
           )}
           {busy && <div className="md-modal-status">جارِ الحفظ…</div>}
       </DraggableDialog>
@@ -6300,7 +6301,7 @@ function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMor
   );
 }
 
-function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" | "sewing" | "printing"; machines?: MachineRecord[]; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
+function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustomerClick, onOrderClick, onFinished, goToOrderId, onGoToOrderHandled, onDistribute }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; queue?: "worker" | "finish" | "sewing" | "printing"; machines?: MachineRecord[]; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void; onFinished?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void; onDistribute?: () => void }) {
   const [remoteOps, setRemoteOps] = useState<OperationStats | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(Boolean(queue));
   const [remoteError, setRemoteError] = useState("");
@@ -6777,7 +6778,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
-                  <td className="ws-num"><span className="ws-num-static">{row.orderNumber}</span></td>
+                  <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
                   <td>{row.client}</td>
                   <td>{row.type}</td>
                   <td className="ws-logo">{row.logo || "—"}</td>
@@ -6922,7 +6923,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
-                  <td className="ws-num"><span className="ws-num-static">{row.orderNumber}</span></td>
+                  <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
                   <td>{row.client}</td>
                   <td>{row.type}</td>
                   <td className="ws-logo">{row.logo || "—"}</td>
@@ -7065,7 +7066,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               {rows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
-                  <td className="ws-num"><span className="ws-num-static">{row.orderNumber}</span></td>
+                  <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td>{row.client}</td>
                   <td>{row.type}</td>
@@ -7395,7 +7396,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
-                  <td className="ws-num"><button type="button" className="ws-num-text" onClick={() => { const order = staffOrderForRow(row.id); if (order) openStaffPanel(order); }}>{row.orderNumber}</button></td>
+                  <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
                   <td>{row.client}</td>
                   <td>{row.type}</td>
                   <td className="ws-logo">{row.logo || "—"}</td>
@@ -7423,6 +7424,15 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                         {row.worker || "—"}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="ws-staff-btn"
+                      onClick={() => { const order = staffOrderForRow(row.id); if (order) openStaffPanel(order); }}
+                      aria-label={`العمال والمشرفين للأوردر ${row.orderNumber}`}
+                      title="العمال والمشرفين"
+                    >
+                      <Users size={13} />
+                    </button>
                     {cellFeedback(row.id, "worker")}
                   </td>
                   <td className={`ws-cell-action${row.started ? " ws-tam-on" : ""}`}>
@@ -7800,7 +7810,7 @@ function AddCustomerPage({ customers, setCustomers, session, parties = [], canMa
   );
 }
 
-function SearchPage({ orders, setOrders, session, onCustomerClick, onOrderClick, goToOrderId, onGoToOrderHandled }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderNumber: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
+function SearchPage({ orders, setOrders, session, onCustomerClick, onOrderClick, goToOrderId, onGoToOrderHandled }: { orders: Order[]; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; session: Session; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void; goToOrderId?: string | null; onGoToOrderHandled?: () => void }) {
   return <OrdersPage orders={orders} setOrders={setOrders} session={session} goToOrderId={goToOrderId} onGoToOrderHandled={onGoToOrderHandled} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />;
 }
 
@@ -8378,12 +8388,14 @@ const emptyArchiveFilters: ArchiveFilters = { orderNumber: "", customer: "", typ
  * as archived. Filters are sent to the server, which matches them against the
  * whole database rather than only the rows already loaded here.
  */
-function ArchivePage({ customers, setOrders, session, setView, onCustomerClick }: {
+function ArchivePage({ customers, setOrders, session, setView, onCustomerClick, onOrderClick }: {
   customers: Customer[];
   setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
   session: Session;
   setView: (view: View) => void;
   onCustomerClick?: (code: string, name: string) => void;
+  /** Opens the shared order-details tab; the row is passed along for orders outside the shared feed. */
+  onOrderClick?: (orderId: string, order?: Order) => void;
 }) {
   const [filters, setFilters] = useState<ArchiveFilters>(emptyArchiveFilters);
   const [applied, setApplied] = useState<ArchiveFilters>(emptyArchiveFilters);
@@ -8487,7 +8499,7 @@ function ArchivePage({ customers, setOrders, session, setView, onCustomerClick }
             )}
             {!loading && !error && rows.map((order) => (
               <tr key={order.id}>
-                <td className="ar-num">{order.order_number}</td>
+                <td className="ar-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(order.id, order)}>{order.order_number}</button> : order.order_number}</td>
                 <td>{order.client_name}</td>
                 <td>{orderDisplayType({ order_type: order.order_type } as OrdersListRecord)}</td>
                 <td>{orderDisplayType(order as unknown as OrdersListRecord)}</td>
@@ -8495,7 +8507,7 @@ function ArchivePage({ customers, setOrders, session, setView, onCustomerClick }
                 <td>{formatDateArabic(order.completedAt || order.updated_at)}</td>
                 <td><span className={listBadgeClass(orderStatusLabel(order))}>{orderStatusLabel(order)}</span></td>
                 <td>
-                  <button type="button" className="ar-view-btn" onClick={() => setSelected(order)}>عرض الأوردر</button>
+                  <button type="button" className="ar-view-btn" onClick={() => (onOrderClick ? onOrderClick(order.id, order) : setSelected(order))}>عرض الأوردر</button>
                 </td>
               </tr>
             ))}
@@ -9065,11 +9077,15 @@ function ZunionApp() {
 
   const openViewRef = useRef(openView);
   openViewRef.current = openView;
+  const openOrderDetailsRef = useRef(openOrderDetails);
+  openOrderDetailsRef.current = openOrderDetails;
 
   useEffect(() => {
     const onHash = () => {
       const parsed = parseHash();
-      openViewRef.current(parsed.view, parsed.recordId);
+      // Order links resolve to the order's id so a hash with an order number never opens a duplicate tab.
+      if (parsed.view === "editOrder" && parsed.recordId) openOrderDetailsRef.current(parsed.recordId);
+      else openViewRef.current(parsed.view, parsed.recordId);
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -9088,7 +9104,10 @@ function ZunionApp() {
       if (prev.length) return prev;
       const parsed = parseHash();
       const target = canAccessView(session, parsed.view) ? parsed.view : firstAllowedView(session);
-      const tab = makeShellTab(target, target === parsed.view ? parsed.recordId : undefined);
+      let recordId = target === parsed.view ? parsed.recordId : undefined;
+      // Older links address an order by its number; key the details tab by the order's id.
+      if (target === "editOrder" && recordId) recordId = findOrderByKey(recordId)?.id ?? recordId;
+      const tab = makeShellTab(target, recordId);
       setActiveTabId(tab.id);
       try {
         window.history.replaceState(null, "", encodeTabHash(tab));
@@ -9151,7 +9170,7 @@ function ZunionApp() {
   }
 
   async function persistOrder(order: Order): Promise<Order> {
-    const exists = orders.some((o) => o.id === order.id);
+    const exists = orders.some((o) => o.id === order.id) || Boolean(externalOrders[order.id]);
     let orderWithRefs: Order;
     try {
       orderWithRefs = await uploadOrderImages(order);
@@ -9185,10 +9204,11 @@ function ZunionApp() {
   }
 
   async function saveEdited(order: Order): Promise<Order> {
-    const previous = orders.find(o => o.id === order.id);
+    const previous = findOrderByKey(order.id) ?? undefined;
     if (!canEditOrder(previous ?? order)) throw new Error("غير مصرح لك بتعديل هذا الأوردر");
     const saved = await persistOrder(order);
     setOrdersLocal(current => current.map(o => o.id === saved.id ? saved : o));
+    setExternalOrders((current) => (current[saved.id] ? { ...current, [saved.id]: saved } : current));
     addAudit(session, "ORDER_EDITED", "orders", saved.id, previous, saved);
     void refreshOrders();
     return saved;
@@ -9206,12 +9226,35 @@ function ZunionApp() {
     return saved;
   }
 
+  // Orders opened from a list the shared orders feed does not contain (e.g. an
+  // archive row for a role whose feed is filtered) are kept here so their details
+  // tab survives the periodic refresh.
+  const [externalOrders, setExternalOrders] = useState<Record<string, Order>>({});
+
+  function findOrderByKey(key: string): Order | null {
+    return orders.find((o) => o.id === key) ?? externalOrders[key] ?? orders.find((o) => o.order_number === key) ?? null;
+  }
+
+  function orderDetailsLabel(order: Order) {
+    return order.client_name ? `${order.client_name} · ${order.order_number}` : `أوردر ${order.order_number}`;
+  }
+
+  /**
+   * The one way to open an existing order: the shared order-details tab, keyed by
+   * the order's database id. Opening the same order again (from any section)
+   * activates its existing tab, so unsaved edits there are kept.
+   */
+  function openOrderDetails(key: string, fallback?: Order) {
+    if (!key || !canAccessView(session, "editOrder")) return;
+    const order = findOrderByKey(key) ?? fallback ?? null;
+    if (order && !orders.some((o) => o.id === order.id) && !externalOrders[order.id]) {
+      setExternalOrders((current) => ({ ...current, [order.id]: order }));
+    }
+    openView("editOrder", order?.id ?? key, order ? orderDetailsLabel(order) : undefined);
+  }
+
   function openOrderFromSearch(order: Order) {
-    setOrdersLocal((current) => {
-      if (current.some((existing) => existing.id === order.id)) return current;
-      return [order, ...current];
-    });
-    openView("editOrder", order.order_number, order.client_name ? `${order.client_name} · ${order.order_number}` : undefined);
+    openOrderDetails(order.id, order);
   }
 
   async function sendOrderToOperation(order: Order): Promise<Order> {
@@ -9359,10 +9402,9 @@ function ZunionApp() {
     managePermissions: hasPermission(session, "permissions.manage"),
   };
 
-  const orderTabLabel = (orderNumber: string) => {
-    const match = orders.find((item) => item.order_number === orderNumber);
-    return match?.client_name ? `${match.client_name} · ${orderNumber}` : `أوردر ${orderNumber}`;
-  };
+  // Every رقم الأوردر link in every section opens the shared order-details tab;
+  // roles that cannot open order details get plain text instead of a dead link.
+  const onOrderNumberClick = canAccessView(session, "editOrder") ? (key: string, order?: Order) => openOrderDetails(key, order) : undefined;
 
   const reportDirty = (id: string) => (dirty: boolean) => {
     setDirtyMap((map) => (map[id] === dirty ? map : { ...map, [id]: dirty }));
@@ -9384,7 +9426,7 @@ function ZunionApp() {
       case "dashboard":
         return <Dashboard setView={(next) => openView(next)} canSeeFinancials={canManageFinancials(session.role)} />;
       case "orders":
-        return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "new":
         return <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       case "drafts":
@@ -9395,7 +9437,7 @@ function ZunionApp() {
         return <OrderForm initial={draft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       }
       case "editOrder": {
-        const order = tab.recordId ? orders.find((item) => item.order_number === tab.recordId) : null;
+        const order = tab.recordId ? findOrderByKey(tab.recordId) : null;
         if (!order) return <ErrorPanel message="لم يتم العثور على الأوردر المطلوب" />;
         return <OrderForm initial={order} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} canEdit={canEditOrder(order)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(ord) => printOrderFromForm(ord, orders)} tabId={tab.id} closeSaveMode="save" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       }
@@ -9404,23 +9446,23 @@ function ZunionApp() {
       case "addProduct":
         return <ProductManagerPage products={products} setProducts={setProducts} session={session} />;
       case "search":
-        return <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+        return <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "worker":
-        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); openView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} onDistribute={() => openView("machineDist")} />;
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); openView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} onDistribute={() => openView("machineDist")} />;
       case "machineDist":
-        return <MachineDistributionPage orders={orders} session={session} machines={machines} onMachinesChanged={refreshMachines} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+        return <MachineDistributionPage orders={orders} session={session} machines={machines} onMachinesChanged={refreshMachines} onOrderClick={onOrderNumberClick} />;
       case "finish":
-        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="finish" goToOrderId={finishGoOrderId} onGoToOrderHandled={() => setFinishGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "print":
-        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="printing" goToOrderId={printingGoOrderId} onGoToOrderHandled={() => setPrintingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="printing" goToOrderId={printingGoOrderId} onGoToOrderHandled={() => setPrintingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "sewing":
-        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={(num) => openView("editOrder", num, orderTabLabel(num))} />;
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="sewing" goToOrderId={sewingGoOrderId} onGoToOrderHandled={() => setSewingGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "archive":
-        return <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} />;
+        return <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "customers":
         return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} />;
       case "customerAccounts":
-        return <CustomerAccountsPage orders={orders} customers={customers} session={session} />;
+        return <CustomerAccountsPage orders={orders} customers={customers} session={session} onOrderClick={onOrderNumberClick} />;
       case "finance":
         return <FinancePageModern session={session} />;
       case "reports":
@@ -9512,7 +9554,7 @@ function ZunionApp() {
           </>}
         </section>
       </main>
-      <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={(next) => openView(next)} />
+      <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={(next) => openView(next)} onOrderClick={onOrderNumberClick ? (key) => { setCustomerDrawer(null); onOrderNumberClick(key); } : undefined} />
       <OrderDetailsDrawer open={!!orderDrawerOrder} onClose={() => setOrderDrawerOrderNumber(null)} order={orderDrawerOrder} customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => { setOrderDrawerOrderNumber(null); setCustomerDrawer({ code, name }); }} />
       <ProductDrawer open={!!productDrawer} onClose={() => setProductDrawer(null)} product={productDrawer} orders={orders} setView={(next) => openView(next)} />
       <UserDrawer open={!!userDrawer} onClose={() => setUserDrawer(null)} user={userDrawer} orders={orders} />

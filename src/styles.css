@@ -9471,3 +9471,8 @@ input[type="number"] {
 .order-history-field { font-weight: 700; }
 .order-history-from { color: #9ca3af; text-decoration: line-through; }
 .order-history-to { color: #146c2e; font-weight: 700; }
+
+/* تشغيل تطريز: worker/supervisor assignment now has its own control (رقم الأوردر opens order details) */
+.ws-staff-btn { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; margin-inline-start: 4px; padding: 3px 5px; border: 1px solid #D1D5DB; border-radius: 4px; background: #fff; color: #4B5563; cursor: pointer; }
+.ws-staff-btn:hover { background: #F3F4F6; color: #b3121f; border-color: #ED1525; }
+.cd-order-num .cd-client-link, .ar-num .cd-client-link, .ss-order-link { font: inherit; font-weight: 700; }

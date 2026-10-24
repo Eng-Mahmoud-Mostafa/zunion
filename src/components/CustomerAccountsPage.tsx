@@ -64,6 +64,8 @@ type Props = {
   customers: AccountCustomer[];
   orders: AccountOrder[];
   session: AccountSession;
+  /** Opens the shared order-details tab for a row's order. */
+  onOrderClick?: (orderId: string) => void;
 };
 
 function accountDay(row: Pick<AccountTransaction, "txn_date" | "txn_date_text">) {
@@ -130,7 +132,7 @@ function printableCell(value: unknown) {
 type DraftFields = { quantity?: string; price?: string; credit?: string };
 type ChargeDraft = { orderId: string; logo: string; quantity: string; price: string };
 
-export default function CustomerAccountsPage({ customers, orders, session }: Props) {
+export default function CustomerAccountsPage({ customers, orders, session, onOrderClick }: Props) {
   const [customerId, setCustomerId] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -575,7 +577,7 @@ export default function CustomerAccountsPage({ customers, orders, session }: Pro
                   </td>
                   {showCustomer && <td className="grp-gray">{row.customer_name || "—"}</td>}
                   <td className="grp-gray">{accountDay(row)}</td>
-                  <td className="grp-gray">{row.order_number || "—"}</td>
+                  <td className="grp-gray">{row.order_id && row.order_number && onOrderClick ? <button type="button" className="cd-client-link ss-order-link" onClick={() => onOrderClick(row.order_id!)}>{row.order_number}</button> : row.order_number || "—"}</td>
                   <td className={"ss-type" + (row.entry_type === "payment" ? " ss-pay-type" : "")}>{row.entry_type === "payment" ? "دفعة" : "شغل"}</td>
                   <td>{row.logo || "—"}</td>
                   {editable && row.entry_type === "charge" ? (
