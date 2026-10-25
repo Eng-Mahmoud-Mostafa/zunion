@@ -57,6 +57,7 @@ export const orderSchema = z.object({
   type: z.string().optional().default(""),
   productId: z.string().uuid().optional(),
   productName: z.string().optional().default(""),
+  color: z.string().optional().default(""),
   paymentMethod: z.enum(paymentMethods).default("cash"),
   customPaymentMethod: z.string().optional().default(""),
   materialsStatus: z.preprocess(normalizeMaterialsStatus, z.enum(materialsStatuses).default("available").optional()),
@@ -115,6 +116,17 @@ export const orderSchema = z.object({
   if (order.paymentMethod === "other" && !order.customPaymentMethod.trim()) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["customPaymentMethod"], message: "اكتب طريقة الدفع" });
   }
+});
+
+export const attendanceImportSchema = z.object({
+  rows: z.array(z.object({
+    code: z.string().optional().default(""),
+    name: z.string().optional().default(""),
+    datetime: z.string().optional().default(""),
+    movement: z.string().optional().default(""),
+    adjusted: z.string().optional().default(""),
+    exception: z.string().optional().default(""),
+  })).max(50000),
 });
 
 export const statusSchema = z.object({

@@ -22,6 +22,7 @@ const REQUIRED_ORDER_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ["type", "text"],
   ["product_id", "uuid"],
   ["product_name_snapshot", "text"],
+  ["color", "text"],
   ["payment_method", "text not null default 'cash'"],
   ["custom_payment_method", "text"],
   ["materials_status", "text not null default ''"],
@@ -275,6 +276,46 @@ async function syncOrderEditsTable(log: (msg: string) => void) {
   );
 }
 
+/**
+ * الحضور والانصراف: raw fingerprint punches plus the auto-created employees they
+ * belong to. Worked days/hours are derived from punches by aggregation, so the
+ * import stays idempotent — the unique index on (employee_id, punched_at,
+ * movement) makes re-importing the same sheet a no-op.
+ */
+async function syncAttendanceTables(log: (msg: string) => void) {
+  await guarded(
+    () => query(`create table if not exists attendance_employees (
+      id uuid primary key default gen_random_uuid(),
+      code text,
+      name text not null default '',
+      normalized_name text not null default '',
+      active boolean not null default true,
+      first_seen date,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create unique index if not exists attendance_employees_code_uniq on attendance_employees (code) where code is not null and code <> '';
+    create index if not exists attendance_employees_norm_idx on attendance_employees (normalized_name);
+    create table if not exists attendance_punches (
+      id uuid primary key default gen_random_uuid(),
+      employee_id uuid not null references attendance_employees(id) on delete cascade,
+      punched_at timestamp not null,
+      work_date date not null,
+      work_month text not null default '',
+      movement text not null default '',
+      adjusted text not null default '',
+      exception text not null default '',
+      source_name text not null default '',
+      created_at timestamptz not null default now()
+    );
+    create unique index if not exists attendance_punches_uniq on attendance_punches (employee_id, punched_at, movement);
+    create index if not exists attendance_punches_emp_month_idx on attendance_punches (employee_id, work_month);
+    create index if not exists attendance_punches_date_idx on attendance_punches (work_date);`),
+    log,
+    "attendance tables drift",
+  );
+}
+
 async function syncWorkersTable(log: (msg: string) => void) {
   await guarded(
     () => query(`create table if not exists workers (
@@ -499,6 +540,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncOrdersTriggers(log);
   await syncPhotosTable(log);
   await syncOrderEditsTable(log);
+  await syncAttendanceTables(log);
   await syncWorkersTable(log);
   await syncMachinesTable(log);
   await syncPartiesTable(log);

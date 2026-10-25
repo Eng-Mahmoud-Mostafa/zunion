@@ -11,6 +11,7 @@ export const ORDER_EDIT_FIELDS: ReadonlyArray<readonly [string, string]> = [
   ["delivery_date", "تاريخ التسليم"],
   ["type", "نوع الأوردر"],
   ["product_name_snapshot", "المنتج"],
+  ["color", "اللون"],
   ["payment_method", "طريقة الدفع"],
   ["custom_payment_method", "طريقة دفع أخرى"],
   ["materials_status", "الخامات"],

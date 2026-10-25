@@ -11,6 +11,7 @@ import {
   Bell,
   Building2,
   Calendar,
+  CalendarClock,
   CheckCircle,
   ChevronDown,
   CircleDollarSign,
@@ -19,6 +20,7 @@ import {
   Cog,
   History,
   Copy,
+  Download,
   Eye,
   FilePlus,
   FileText,
@@ -42,6 +44,7 @@ import {
   Phone,
   Plus,
   Printer,
+  QrCode,
   Receipt,
   RefreshCw,
   Save,
@@ -89,7 +92,7 @@ import { allPermissionKeys, roleDefaultPermissions, type PermissionKey } from ".
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "alerts" | "settings" | "image";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "image";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -196,6 +199,8 @@ type Order = {
   order_type: string;
   productId?: string;
   productName?: string;
+  /** Optional free-text colour (اللون); existing orders may have none. */
+  color?: string;
   paymentMethod?: string;
   customPaymentMethod?: string;
   customParty?: string;
@@ -587,6 +592,7 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   finance: "dailyAccounts.view",
   reports: "reports.view",
   import: "import.export",
+  attendance: "import.export",
   audit: "audit.view",
   settings: "settings.view",
   alerts: "orders.view",
@@ -1040,11 +1046,49 @@ function printableRecord(fields: Array<[string, unknown]>) {
   return `<div class="grid">${fields.map(([label, value]) => `<div class="box"><strong>${escapeHtml(label)}</strong><span class="record-value">${printableCell(value)}</span></div>`).join("")}</div>`;
 }
 
+/**
+ * The app's canonical base URL. Prefer the configured production URL so a QR code
+ * generated on localhost or a preview build still points at production; fall back
+ * to the current origin when it is not configured.
+ */
+function appBaseUrl() {
+  const configured = String(import.meta.env.VITE_PUBLIC_APP_URL ?? "").trim().replace(/\/+$/, "");
+  return configured || window.location.origin;
+}
+
+/**
+ * A stable, shareable link to an order's read-only details, built from the app's
+ * production URL and the order's database id. Opening it requires the usual login
+ * and permissions (the app gates every view), and it carries no personal data,
+ * tokens, or edit authorization — the details tab opens view-only (edit mode is
+ * only ever granted from متابعة أوردرات). The link never changes when the order is
+ * edited, because it is keyed by the immutable database id.
+ */
 function orderQrUrl(order: Order) {
   const id = order.id || "";
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)
-    ? `${window.location.origin}/api/orders/${encodeURIComponent(id)}/qr`
+    ? `${appBaseUrl()}/#editOrder/${encodeURIComponent(id)}`
     : "";
+}
+
+/** Render an order's QR link to a scannable PNG data URL for download/printing. */
+async function orderQrPng(order: Order, size = 512): Promise<string> {
+  const url = orderQrUrl(order);
+  if (!url) return "";
+  return QRCode.toDataURL(url, { width: size, margin: 2, errorCorrectionLevel: "M" });
+}
+
+/** Download an order's QR code as a PNG named after the order number. */
+async function downloadOrderQr(order: Order) {
+  const dataUrl = await orderQrPng(order, 512).catch(() => "");
+  if (!dataUrl) return;
+  const safeName = String(order.order_number || order.id || "order").replace(/[\\/:*?"<>|]+/g, "_");
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = `${safeName}.png`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function QrImage({ text, size = 72, className }: { text: string; size?: number; className?: string }) {
@@ -1223,6 +1267,7 @@ const emptyOrder: Order = {
   order_type: "",
   productId: "",
   productName: "",
+  color: "",
   paymentMethod: "cash",
   customPaymentMethod: "",
   customParty: "",
@@ -1460,6 +1505,7 @@ function orderFromApi(row: Record<string, unknown>): Order {
     order_type: String(row.type ?? ""),
     productId: String(row.product_id ?? ""),
     productName: String(row.product_name_snapshot ?? row.type ?? row.service_type ?? ""),
+    color: String(row.color ?? ""),
     paymentMethod: String(row.payment_method ?? "cash"),
     customPaymentMethod: String(row.custom_payment_method ?? ""),
     materialsStatus: normalizeMaterialsStatus(row.materials_status),
@@ -1558,6 +1604,7 @@ function orderToApi(order: Order) {
     type: calculated.order_type || "",
     productId: calculated.productId || undefined,
     productName: calculated.productName || "",
+    color: calculated.color || "",
     paymentMethod: calculated.paymentMethod || "cash",
     customPaymentMethod: calculated.customPaymentMethod || "",
     materialsStatus: normalizeMaterialsStatus(calculated.materialsStatus) || "available",
@@ -2503,13 +2550,28 @@ const finishListHeaders = [
   "شغل جاهز",
 ] as const;
 
-/** متابعة أوردرات: the base list plus who last edited the order and how often. */
+/** متابعة أوردرات: the base list plus who last edited the order, how often, and a QR column. */
 const trackingListHeaders = [
   ordersListHeaders[0],
   "آخر تعديل بواسطة",
   "عدد التعديلات",
   ...ordersListHeaders.slice(1),
+  "QR Code",
 ] as const;
+
+/**
+ * Fixed column widths (px) per header set, so the one table that renders both the
+ * header and the body sizes every column identically and each heading sits exactly
+ * above its values. Index order matches the matching *Headers array.
+ */
+const ordersListColWidths = [240, 130, 150, 150, 90, 90, 80, 130, 130, 110, 170];
+const finishListColWidths = [240, 150, 130, 150, 90, 90, 80, 140, 130, 110];
+const trackingListColWidths = [240, 150, 110, 130, 150, 150, 90, 90, 80, 130, 130, 110, 170, 150];
+function colWidthsFor(headers: readonly string[]): number[] {
+  if (headers === finishListHeaders) return finishListColWidths;
+  if (headers === trackingListHeaders) return trackingListColWidths;
+  return ordersListColWidths;
+}
 
 /** An open worker/supervisor assignment window for one order (تشغيل تطريز). */
 type StaffWindowState = { workers: string[]; supervisors: string[]; saving: boolean; error: string };
@@ -2587,6 +2649,27 @@ function OrderHistoryDialog({ order, onClose }: { order: Order; onClose: () => v
             )}
           </>
         )}
+      </div>
+    </DraggableDialog>
+  );
+}
+
+/** Floating, non-modal viewer for an order's QR code (matches other floating windows). */
+function OrderQrDialog({ order, onClose }: { order: Order; onClose: () => void }) {
+  const url = orderQrUrl(order);
+  return (
+    <DraggableDialog
+      dialogClassName="party-modal order-qr-modal"
+      headClassName="party-modal-head"
+      closeClassName="party-modal-close"
+      ariaLabel={`QR code للأوردر ${order.order_number}`}
+      onClose={onClose}
+      title={<h2>QR Code · أوردر #{order.order_number}</h2>}
+    >
+      <div className="order-qr-body">
+        {url ? <QrImage text={url} size={240} className="order-qr-image" /> : <p className="muted">تعذر توليد رمز QR لهذا الأوردر.</p>}
+        <p className="order-qr-number">أوردر رقم <strong>{order.order_number || "—"}</strong></p>
+        {url && <button type="button" className="orders-qr-btn" onClick={() => { void downloadOrderQr(order); }}><Download size={14} /> تحميل PNG</button>}
       </div>
     </DraggableDialog>
   );
@@ -2996,6 +3079,7 @@ function OrderDetailsDrawer({ open, onClose, order, customers, setOrders, sessio
           <h3 className="cd-section-title"><PackagePlus size={16} /> تفاصيل المنتج</h3>
           <div className="cd-info-grid">
             {(order.order_type || order.productName) && <div className="cd-info-row"><span className="cd-info-label">المنتج</span><span>{order.productName || order.order_type}</span></div>}
+            {order.color && <div className="cd-info-row"><span className="cd-info-label">اللون</span><span>{order.color}</span></div>}
             {order.quantity && <div className="cd-info-row"><span className="cd-info-label">العدد</span><span>{order.quantity}</span></div>}
             {order.price > 0 && <div className="cd-info-row"><span className="cd-info-label">السعر</span><span>{formatMoney(0)}</span></div>}
             <div className="cd-info-row"><span className="cd-info-label">الإجمالي</span><span className="od-total">{formatMoney(order.total)}</span></div>
@@ -3850,7 +3934,7 @@ function UserDrawer({ open, onClose, user, orders }: {
   );
 }
 
-function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void; onHistoryClick?: () => void; highlight?: boolean }) {
+function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, qrActions, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void; onHistoryClick?: () => void; qrActions?: { onView: () => void; onDownload: () => void }; highlight?: boolean }) {
   const operationStatus = orderOperationStatusText(order);
   const finishingStatus = orderFinishingStatusText(order);
   const readyStatus = orderReadyStatus(order);
@@ -3879,6 +3963,14 @@ function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, h
       <td><span className={listBadgeClass(finishingStatus)}>{finishingStatus}</span></td>
       <td><span className={listBadgeClass(readyStatus)}>{readyStatus}</span></td>
       <td>{valueText(order.client_message || order.message_text)}</td>
+      {qrActions && (
+        <td className="orders-list-qr-cell">
+          <div className="orders-list-qr-actions">
+            <button type="button" className="orders-qr-btn" onClick={qrActions.onDownload}><Download size={13} /> تحميل</button>
+            <button type="button" className="orders-qr-btn" onClick={qrActions.onView}><QrCode size={13} /> عرض</button>
+          </div>
+        </td>
+      )}
     </tr>
   );
 }
@@ -4134,6 +4226,14 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
     }
     onDirtyChangeRef.current?.(serialized !== baselineRef.current);
   }, [form]);
+  // Edit mode is granted by whoever opened the order, and only متابعة أوردرات
+  // grants it. If that permission is withdrawn while the shared details tab is
+  // open — e.g. the same order is reopened from a production/archive section —
+  // leave edit mode but keep the current (possibly unsaved) values, so no work
+  // is lost and edit mode never carries into a view-only context.
+  useEffect(() => {
+    if (!canEdit && editing) setEditing(false);
+  }, [canEdit, editing]);
   const saveForCloseRef = useRef<() => Promise<boolean>>(async () => true);
   saveForCloseRef.current = saveForClose;
   const registerActionsRef = useRef(registerActions);
@@ -4921,6 +5021,10 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
                   )}
                 </div>
                 <ErrorText message={errors.productId} />
+              </label>
+              <label className="nf-field">
+                <span>اللون</span>
+                <input value={form.color ?? ""} onChange={(event) => set("color", event.target.value)} placeholder="اختياري" disabled={readOnly} />
               </label>
               <label className={`nf-field${errors.quantity ? " nf-field-invalid" : ""}`}>
                 <span>العدد<em className="nf-required">*</em></span>
@@ -6269,8 +6373,9 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   );
 }
 
-function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMore, empty }: {
+function OrdersInfiniteList({ headers, columns, rows, total, colSpan, rowLimit, onLoadMore, empty }: {
   headers: React.ReactNode;
+  columns: number[];
   rows: React.ReactNode[];
   total: number;
   colSpan: number;
@@ -6278,27 +6383,13 @@ function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMor
   onLoadMore: () => void;
   empty: boolean;
 }) {
-  const headRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLTableRowElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
   onLoadMoreRef.current = onLoadMore;
-
-  useEffect(() => {
-    const body = bodyRef.current;
-    const head = headRef.current;
-    if (!body || !head) return;
-    let frame = 0;
-    const sync = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => { head.scrollLeft = body.scrollLeft; frame = 0; });
-    };
-    body.addEventListener("scroll", sync, { passive: true });
-    return () => {
-      body.removeEventListener("scroll", sync);
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, []);
+  // One table for header + body guarantees every heading sits exactly above its
+  // values; the colgroup gives both the identical, fixed column widths.
+  const minWidth = columns.reduce((sum, width) => sum + width, 0);
 
   useEffect(() => {
     const body = bodyRef.current;
@@ -6313,11 +6404,10 @@ function OrdersInfiniteList({ headers, rows, total, colSpan, rowLimit, onLoadMor
 
   return (
     <section className="table-wrap orders-list-table-wrap orders-infinite-list">
-      <div className="orders-table-sticky" ref={headRef}>
-        <table className="orders-list-table"><thead><tr>{headers}</tr></thead></table>
-      </div>
       <div className="orders-table-scroll" ref={bodyRef}>
-        <table className="orders-list-table">
+        <table className="orders-list-table" style={{ minWidth, tableLayout: "fixed" }}>
+          <colgroup>{columns.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+          <thead><tr>{headers}</tr></thead>
           <tbody>
             {empty && <EmptyRow colSpan={colSpan} />}
             {rows}
@@ -6344,6 +6434,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [rangeFrom, setRangeFrom] = useState("");
   const [rangeTo, setRangeTo] = useState("");
   const [historyOrder, setHistoryOrder] = useState<Order | null>(null);
+  const [qrOrder, setQrOrder] = useState<Order | null>(null);
   const [spreadSort, setSpreadSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [machineOverrides, setMachineOverrides] = useState<Record<string, string>>({});
   const [cellSaving, setCellSaving] = useState<Record<string, boolean>>({});
@@ -6551,6 +6642,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
         </section>
         <OrdersInfiniteList
           headers={renderOrdersListHeaders(queue === "finish" ? finishListHeaders : undefined)}
+          columns={colWidthsFor(queue === "finish" ? finishListHeaders : ordersListHeaders)}
           rows={sortedRemote.slice(0, rowLimit).map((order) => queue === "finish" ? <FinishOrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} /> : <OrdersListRow key={order.id} order={order} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
           total={sortedRemote.length}
           colSpan={queue === "finish" ? finishListHeaders.length : ordersListHeaders.length}
@@ -7644,9 +7736,10 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
         )}
         <OrdersInfiniteList
           headers={renderOrdersListHeaders(queue === "finish" ? finishListHeaders : queue ? undefined : trackingListHeaders)}
+          columns={colWidthsFor(queue === "finish" ? finishListHeaders : queue ? ordersListHeaders : trackingListHeaders)}
           rows={filtered.slice(0, rowLimit).map((order) => queue === "finish"
             ? <FinishOrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />
-            : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} onHistoryClick={queue ? undefined : () => setHistoryOrder(order)} />)}
+            : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} onHistoryClick={queue ? undefined : () => setHistoryOrder(order)} qrActions={queue ? undefined : { onView: () => setQrOrder(order), onDownload: () => { void downloadOrderQr(order); } }} />)}
           total={filtered.length}
           colSpan={queue === "finish" ? finishListHeaders.length : queue ? ordersListHeaders.length : trackingListHeaders.length}
           rowLimit={rowLimit}
@@ -7654,6 +7747,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           empty={filtered.length === 0}
         />
         {historyOrder && <OrderHistoryDialog order={historyOrder} onClose={() => setHistoryOrder(null)} />}
+        {qrOrder && <OrderQrDialog order={qrOrder} onClose={() => setQrOrder(null)} />}
       </div>
     );
   }
@@ -7663,6 +7757,243 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       {body}
       {workersDept && renderWorkersModal()}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// الحضور والانصراف — attendance import from the fingerprint-machine Excel export.
+// ---------------------------------------------------------------------------
+
+type AttendanceRawRow = { code: string; name: string; datetime: string; movement: string; adjusted: string; exception: string };
+type AttendanceAnalysis = {
+  totalRows: number;
+  validPunches: number;
+  invalid: Array<{ index: number; reason: string; code: string; name: string; datetime: string }>;
+  months: string[];
+  employees: Array<{ code: string | null; name: string; status: "new" | "existing" | "ambiguous"; punchCount: number; firstSeen: string }>;
+  newEmployees: number;
+  existingEmployees: number;
+  ambiguousEmployees: number;
+};
+type AttendanceImportSummary = AttendanceAnalysis & { createdEmployees: number; insertedPunches: number; duplicatePunches: number; skippedAmbiguousPunches: number };
+type AttendanceEmployeeTotals = { id: string; code: string | null; name: string; active: boolean; first_seen: string | null; worked_days: number; worked_hours: number; first_day: string | null; last_day: string | null };
+
+/** Normalize a header cell for fuzzy column matching (handles diacritics + alef forms). */
+function normalizeAttendanceHeader(value: unknown): string {
+  return String(value ?? "")
+    .replace(/[ً-ٰٟـ]/g, "")
+    .replace(/[آأإٱ]/g, "ا")
+    .replace(/ة/g, "ه")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Map the machine's grid to typed rows. Columns are matched by header text with
+ * fallbacks to the known fixed positions (رقم البصمه, —, الإسم, الميعاد, نوع الحركه,
+ * الحركه المعدله, الإستثناءات), so the import still works if the header text is
+ * garbled by the file's legacy encoding.
+ */
+function mapAttendanceRows(grid: unknown[][]): AttendanceRawRow[] {
+  if (!grid.length) return [];
+  const header = (grid[0] || []).map(normalizeAttendanceHeader);
+  const find = (aliases: string[]) => header.findIndex((h) => h && aliases.some((a) => h.includes(a)));
+  const idx = {
+    code: find(["رقم البصمه", "البصمه", "code", "كود", "الرقم الوظيفي"]),
+    name: find(["الاسم", "name", "الموظف"]),
+    datetime: find(["الميعاد", "التاريخ", "الوقت", "date", "time"]),
+    movement: find(["نوع الحركه", "الحركه", "movement", "status"]),
+    adjusted: find(["الحركه المعدله", "المعدله", "adjusted"]),
+    exception: find(["الاستثناءات", "exception"]),
+  };
+  if (idx.code < 0) idx.code = 0;
+  if (idx.name < 0) idx.name = 2;
+  if (idx.datetime < 0) idx.datetime = 3;
+  if (idx.movement < 0) idx.movement = 4;
+  if (idx.adjusted < 0) idx.adjusted = 5;
+  if (idx.exception < 0) idx.exception = 6;
+  const out: AttendanceRawRow[] = [];
+  for (let i = 1; i < grid.length; i++) {
+    const row = grid[i] || [];
+    const get = (j: number) => (j >= 0 ? String(row[j] ?? "").trim() : "");
+    const code = get(idx.code), name = get(idx.name), datetime = get(idx.datetime);
+    if (!code && !name && !datetime) continue;
+    out.push({ code, name, datetime, movement: get(idx.movement), adjusted: get(idx.adjusted), exception: get(idx.exception) });
+  }
+  return out;
+}
+
+function attendanceStatusLabel(status: "new" | "existing" | "ambiguous") {
+  return status === "new" ? "جديد" : status === "ambiguous" ? "غير محدد" : "موجود";
+}
+
+function AttendancePage({ session }: { session: Session }) {
+  const [rows, setRows] = useState<AttendanceRawRow[] | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [preview, setPreview] = useState<AttendanceAnalysis | null>(null);
+  const [summary, setSummary] = useState<AttendanceImportSummary | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [totals, setTotals] = useState<AttendanceEmployeeTotals[]>([]);
+  const [months, setMonths] = useState<string[]>([]);
+  const [month, setMonth] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const canImport = hasPermission(session, "import.export");
+
+  const loadTotals = useCallback((selected: string) => {
+    backendJson<{ employees: AttendanceEmployeeTotals[]; months: string[] }>(`/api/attendance/employees${selected ? `?month=${encodeURIComponent(selected)}` : ""}`)
+      .then((data) => { setTotals(data.employees); setMonths(data.months); })
+      .catch(() => { /* table stays empty; import still works */ });
+  }, []);
+
+  useEffect(() => { loadTotals(month); }, [month, loadTotals, summary]);
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setError(""); setPreview(null); setSummary(null); setRows(null); setFileName("");
+    setBusy(true);
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", codepage: 1256 });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "" });
+      const mapped = mapAttendanceRows(grid);
+      if (!mapped.length) { setError("لم يتم العثور على صفوف حضور في الملف."); return; }
+      const analysis = await backendJson<AttendanceAnalysis>("/api/attendance/preview", { method: "POST", body: JSON.stringify({ rows: mapped }) });
+      setRows(mapped);
+      setFileName(file.name);
+      setPreview(analysis);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تعذر قراءة الملف.");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function confirmImport() {
+    if (!rows || busy) return;
+    setBusy(true); setError("");
+    try {
+      const result = await backendJson<AttendanceImportSummary>("/api/attendance/import", { method: "POST", body: JSON.stringify({ rows }) });
+      setSummary(result);
+      setPreview(null); setRows(null); setFileName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "تعذر استيراد الملف.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function cancelPreview() {
+    setPreview(null); setRows(null); setFileName(""); setError("");
+  }
+
+  return (
+    <div className="stack attendance-page">
+      <section className="panel">
+        <h2>الحضور والانصراف</h2>
+        <p className="muted">استيراد ملف البصمة (Excel). يتم إنشاء الموظفين الجدد تلقائياً وإضافة حركات كل شهر دون تكرار عند إعادة الاستيراد.</p>
+        {canImport ? (
+          <div className="attendance-import">
+            <label className="primary-btn nf-btn">
+              <Download size={16} /> اختر ملف الحضور
+              <input ref={fileRef} type="file" accept=".xls,.xlsx,.csv" hidden disabled={busy} onChange={(e) => void handleFile(e.target.files?.[0])} />
+            </label>
+            {fileName && <span className="muted attendance-filename">{fileName}</span>}
+            {busy && <span className="muted"><Loader2 size={14} className="spin" /> جارٍ المعالجة…</span>}
+          </div>
+        ) : (
+          <p className="tab-confirm-error">ليس لديك صلاحية استيراد بيانات الحضور.</p>
+        )}
+        {error && <p className="tab-confirm-error">{error}</p>}
+        {summary && (
+          <div className="attendance-result notice">
+            تم الاستيراد: {formatNumber(summary.createdEmployees)} موظف جديد، {formatNumber(summary.insertedPunches)} حركة مضافة،
+            {" "}{formatNumber(summary.duplicatePunches)} حركة مكررة تم تجاهلها
+            {summary.skippedAmbiguousPunches > 0 && <>، {formatNumber(summary.skippedAmbiguousPunches)} حركة لأسماء غير محددة لم تُضف</>}.
+            {summary.months.length > 0 && <> الأشهر: {summary.months.join("، ")}.</>}
+          </div>
+        )}
+      </section>
+
+      {preview && (
+        <section className="panel">
+          <h3>مراجعة قبل الاستيراد</h3>
+          <div className="attendance-stats">
+            <span>الحركات الصالحة: <strong>{formatNumber(preview.validPunches)}</strong></span>
+            <span>موظفون جدد: <strong>{formatNumber(preview.newEmployees)}</strong></span>
+            <span>موظفون حاليون: <strong>{formatNumber(preview.existingEmployees)}</strong></span>
+            {preview.ambiguousEmployees > 0 && <span className="attendance-warn">أسماء غير محددة: <strong>{formatNumber(preview.ambiguousEmployees)}</strong></span>}
+            {preview.invalid.length > 0 && <span className="attendance-warn">صفوف غير صالحة: <strong>{formatNumber(preview.invalid.length)}</strong></span>}
+            {preview.months.length > 0 && <span>الأشهر: <strong>{preview.months.join("، ")}</strong></span>}
+          </div>
+          <div className="table-wrap accounts-table attendance-preview-table">
+            <table>
+              <thead><tr><th>كود البصمة</th><th>الاسم</th><th>الحالة</th><th>عدد الحركات</th><th>أول ظهور</th></tr></thead>
+              <tbody>
+                {preview.employees.map((emp, i) => (
+                  <tr key={`${emp.code ?? "n"}-${i}`} className={emp.status === "ambiguous" ? "attendance-row-warn" : undefined}>
+                    <td>{emp.code || "—"}</td>
+                    <td>{emp.name || "—"}</td>
+                    <td><span className={`attendance-badge attendance-badge-${emp.status}`}>{attendanceStatusLabel(emp.status)}</span></td>
+                    <td>{formatNumber(emp.punchCount)}</td>
+                    <td>{emp.firstSeen || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {preview.invalid.length > 0 && (
+            <details className="attendance-invalid">
+              <summary>صفوف غير صالحة ({formatNumber(preview.invalid.length)})</summary>
+              <ul>
+                {preview.invalid.slice(0, 50).map((row) => (
+                  <li key={row.index}>سطر {row.index + 2}: {row.reason} — {[row.code, row.name, row.datetime].filter(Boolean).join(" · ") || "فارغ"}</li>
+                ))}
+                {preview.invalid.length > 50 && <li>… و{formatNumber(preview.invalid.length - 50)} أخرى</li>}
+              </ul>
+            </details>
+          )}
+          <div className="nf-actionbar">
+            <button type="button" className="primary-btn nf-btn" disabled={busy} onClick={() => void confirmImport()}><Save size={16} /> {busy ? "جارٍ الاستيراد…" : "تأكيد الاستيراد"}</button>
+            <button type="button" className="ghost-btn nf-btn" disabled={busy} onClick={cancelPreview}><X size={16} /> إلغاء</button>
+          </div>
+        </section>
+      )}
+
+      <section className="panel">
+        <div className="attendance-totals-head">
+          <h3>سجل الموظفين وأيام/ساعات العمل</h3>
+          <label className="attendance-month-select">
+            <span>الشهر</span>
+            <select value={month} onChange={(e) => setMonth(e.target.value)}>
+              <option value="">كل الأشهر (تراكمي)</option>
+              {months.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="table-wrap accounts-table">
+          <table>
+            <thead><tr><th>كود البصمة</th><th>الاسم</th><th>أيام العمل</th><th>ساعات العمل</th><th>أول يوم</th><th>آخر يوم</th></tr></thead>
+            <tbody>
+              {totals.length === 0 && <tr><td colSpan={6} className="muted" style={{ textAlign: "center" }}>لا توجد بيانات حضور بعد.</td></tr>}
+              {totals.map((emp) => (
+                <tr key={emp.id}>
+                  <td>{emp.code || "—"}</td>
+                  <td>{emp.name || "—"}</td>
+                  <td>{formatNumber(emp.worked_days)}</td>
+                  <td>{formatNumber(Math.round(Number(emp.worked_hours) * 100) / 100)}</td>
+                  <td>{emp.first_day || "—"}</td>
+                  <td>{emp.last_day || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -8690,7 +9021,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "alerts", "settings"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "attendance", "alerts", "settings"];
 
 type ShellTab = { id: string; view: View; recordId?: string; label: string };
 
@@ -8716,6 +9047,7 @@ const TAB_META: Record<View, { label: string; icon: LucideIcon }> = {
   reports: { label: "التقارير", icon: BarChart3 },
   audit: { label: "سجل العمليات", icon: History },
   import: { label: "استيراد وتصدير", icon: FileText },
+  attendance: { label: "الحضور والانصراف", icon: CalendarClock },
   alerts: { label: "تنبيهات التسليم", icon: Bell },
   settings: { label: "الإعدادات", icon: Settings },
   image: { label: "عرض الصورة", icon: Image },
@@ -9292,6 +9624,13 @@ function ZunionApp() {
   // tab survives the periodic refresh.
   const [externalOrders, setExternalOrders] = useState<Record<string, Order>>({});
 
+  // Which open order-details tabs may be edited, keyed by order id. Editing is
+  // only ever allowed when the order was opened from متابعة أوردرات; opening the
+  // same (shared) tab from any other section — the whole تشغيل menu, الأرشيف,
+  // البحث, حسابات العملاء, توزيع المكن — makes it view-only. Reopening updates the
+  // flag, so edit mode is never carried into a view-only context.
+  const [orderTabEdit, setOrderTabEdit] = useState<Record<string, boolean>>({});
+
   function findOrderByKey(key: string): Order | null {
     return orders.find((o) => o.id === key) ?? externalOrders[key] ?? orders.find((o) => o.order_number === key) ?? null;
   }
@@ -9305,13 +9644,17 @@ function ZunionApp() {
    * the order's database id. Opening the same order again (from any section)
    * activates its existing tab, so unsaved edits there are kept.
    */
-  function openOrderDetails(key: string, fallback?: Order) {
+  function openOrderDetails(key: string, fallback?: Order, allowEdit = false) {
     if (!key || !canAccessView(session, "editOrder")) return;
     const order = findOrderByKey(key) ?? fallback ?? null;
     if (order && !orders.some((o) => o.id === order.id) && !externalOrders[order.id]) {
       setExternalOrders((current) => ({ ...current, [order.id]: order }));
     }
-    openView("editOrder", order?.id ?? key, order ? orderDetailsLabel(order) : undefined);
+    const tabKey = order?.id ?? key;
+    // Record whether this open may edit. A view-only open forces the flag off so
+    // reopening a tracking edit session from production drops its edit mode.
+    setOrderTabEdit((current) => (current[tabKey] === allowEdit ? current : { ...current, [tabKey]: allowEdit }));
+    openView("editOrder", tabKey, order ? orderDetailsLabel(order) : undefined);
   }
 
   // توزيع مكن opens the board in one floating window that survives tab switches;
@@ -9410,6 +9753,7 @@ function ZunionApp() {
       },
       { id: "machineDist", label: "توزيع المكن", visible: false, icon: LayoutGrid },
       { id: "finance", label: "مصروفات وإيرادات", visible: true, icon: WalletCards },
+      { id: "attendance", label: "الحضور والانصراف", visible: true, icon: CalendarClock },
       { id: "reports", label: "التقارير", visible: true, icon: BarChart3 },
       { id: "audit", label: "سجل العمليات", visible: true, icon: History },
       { id: "settings", label: "الإعدادات", visible: true, icon: Settings },
@@ -9481,9 +9825,13 @@ function ZunionApp() {
     managePermissions: hasPermission(session, "permissions.manage"),
   };
 
-  // Every رقم الأوردر link in every section opens the shared order-details tab;
-  // roles that cannot open order details get plain text instead of a dead link.
-  const onOrderNumberClick = canAccessView(session, "editOrder") ? (key: string, order?: Order) => openOrderDetails(key, order) : undefined;
+  // Every رقم الأوردر link in every section opens the same shared order-details
+  // tab; roles that cannot open order details get plain text instead of a dead
+  // link. Only the link in متابعة أوردرات opens it editable (subject to the edit
+  // permission); every other section opens it view-only.
+  const canOpenOrder = canAccessView(session, "editOrder");
+  const onOrderNumberClick = canOpenOrder ? (key: string, order?: Order) => openOrderDetails(key, order, false) : undefined;
+  const onOrderNumberClickTracking = canOpenOrder ? (key: string, order?: Order) => openOrderDetails(key, order, true) : undefined;
 
   const reportDirty = (id: string) => (dirty: boolean) => {
     setDirtyMap((map) => (map[id] === dirty ? map : { ...map, [id]: dirty }));
@@ -9505,7 +9853,7 @@ function ZunionApp() {
       case "dashboard":
         return <Dashboard setView={(next) => openView(next)} canSeeFinancials={canManageFinancials(session.role)} />;
       case "orders":
-        return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClickTracking} />;
       case "new":
         return <OrderForm customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveNew} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       case "drafts":
@@ -9518,7 +9866,7 @@ function ZunionApp() {
       case "editOrder": {
         const order = tab.recordId ? findOrderByKey(tab.recordId) : null;
         if (!order) return <ErrorPanel message="لم يتم العثور على الأوردر المطلوب" />;
-        return <OrderForm initial={order} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} canEdit={canEditOrder(order)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(ord) => printOrderFromForm(ord, orders)} tabId={tab.id} closeSaveMode="save" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <OrderForm initial={order} customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={saveEdited} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} canEdit={canEditOrder(order) && (orderTabEdit[tab.recordId ?? ""] ?? false)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(ord) => printOrderFromForm(ord, orders)} tabId={tab.id} closeSaveMode="save" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       }
       case "addCustomer":
         return <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} parties={parties} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} tabId={tab.id} onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
@@ -9548,6 +9896,8 @@ function ZunionApp() {
         return <ReportsPage session={session} />;
       case "import":
         return <ImportExport orders={orders} setOrders={setOrders} session={session} />;
+      case "attendance":
+        return <AttendancePage session={session} />;
       case "audit":
         return <AuditLog />;
       case "settings":

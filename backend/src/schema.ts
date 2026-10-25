@@ -178,6 +178,7 @@ create table if not exists orders (
   type text,
   product_id uuid,
   product_name_snapshot text,
+  color text,
   payment_method text not null default 'cash',
   custom_payment_method text,
   materials_status text not null default '',
@@ -224,6 +225,7 @@ alter table orders add column if not exists draft boolean not null default false
 alter table orders add column if not exists work_stage text not null default 'new';
 alter table orders add column if not exists product_id uuid;
 alter table orders add column if not exists product_name_snapshot text;
+alter table orders add column if not exists color text;
 alter table orders add column if not exists payment_method text not null default 'cash';
 alter table orders add column if not exists custom_payment_method text;
 alter table orders add column if not exists materials_status text not null default '';

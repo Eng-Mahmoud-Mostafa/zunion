@@ -2202,80 +2202,24 @@ textarea::placeholder {
   background: #fff;
 }
 
+/* One table renders both header and body; a colgroup (set in JS) gives every
+   column a single fixed width, so each heading sits exactly above its values. */
 .orders-list-table {
-  width: auto;
+  width: 100%;
   border-collapse: collapse;
-  table-layout: auto;
+  table-layout: fixed;
 }
 
 .orders-list-table th,
 .orders-list-table td {
   border: 1px solid #d9dee8;
-  height: 44px !important;
+  height: 44px;
+  padding: 6px 10px;
   text-align: center;
   vertical-align: middle;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* per-column min widths (order matches ordersListHeaders) */
-.orders-list-table th:nth-child(1),
-.orders-list-table td:nth-child(1) {
-  min-width: 260px;
-  max-width: 260px;
-}
-
-.orders-list-table th:nth-child(2),
-.orders-list-table td:nth-child(2) {
-  min-width: 140px;
-  max-width: 140px;
-}
-
-.orders-list-table th:nth-child(3),
-.orders-list-table td:nth-child(3) {
-  min-width: 180px;
-}
-
-.orders-list-table th:nth-child(4),
-.orders-list-table td:nth-child(4) {
-  min-width: 150px;
-}
-
-.orders-list-table th:nth-child(5),
-.orders-list-table td:nth-child(5) {
-  min-width: 100px;
-}
-
-.orders-list-table th:nth-child(6),
-.orders-list-table td:nth-child(6) {
-  min-width: 100px;
-}
-
-.orders-list-table th:nth-child(7),
-.orders-list-table td:nth-child(7) {
-  min-width: 80px;
-}
-
-.orders-list-table th:nth-child(8),
-.orders-list-table td:nth-child(8) {
-  min-width: 140px;
-}
-
-.orders-list-table th:nth-child(9),
-.orders-list-table td:nth-child(9) {
-  min-width: 140px;
-}
-
-.orders-list-table th:nth-child(10),
-.orders-list-table td:nth-child(10) {
-  min-width: 120px;
-}
-
-.orders-list-table th:nth-child(11),
-.orders-list-table td:nth-child(11) {
-  min-width: 180px;
-  max-width: 180px;
 }
 
 .orders-list-table th {
@@ -2285,10 +2229,175 @@ textarea::placeholder {
   background: #f8fafc !important;
   color: #000 !important;
   font-weight: 800;
+  font-size: 15px;
 }
 
 .orders-list-table td {
   font-weight: 700;
+  font-size: 14px;
+}
+
+/* QR Code column: two compact buttons per row (never a large image in the cell). */
+.orders-list-qr-cell {
+  padding: 4px 6px !important;
+}
+
+.orders-list-qr-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.orders-qr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--zunion-red, #ED1525);
+  border-radius: 7px;
+  background: var(--zunion-red, #ED1525);
+  color: #fff;
+  font-weight: 800;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.orders-qr-btn:hover,
+.orders-qr-btn:focus-visible {
+  background: #c40f1d;
+  border-color: #c40f1d;
+  outline: none;
+}
+
+.order-qr-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 20px;
+}
+
+.order-qr-image {
+  width: 240px;
+  height: 240px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px;
+  background: #fff;
+}
+
+.order-qr-number {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* ---------- الحضور والانصراف (attendance) ---------- */
+.attendance-import {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.attendance-import label.primary-btn {
+  cursor: pointer;
+}
+
+.attendance-filename {
+  font-weight: 700;
+}
+
+.attendance-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin: 8px 0 14px;
+  font-size: 14px;
+}
+
+.attendance-stats .attendance-warn {
+  color: #b42318;
+}
+
+.attendance-result {
+  margin-top: 12px;
+}
+
+.attendance-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 12.5px;
+}
+
+.attendance-badge-new {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.attendance-badge-existing {
+  background: #e5edff;
+  color: #1e40af;
+}
+
+.attendance-badge-ambiguous {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.attendance-row-warn {
+  background: #fffbeb;
+}
+
+.attendance-preview-table {
+  max-height: 340px;
+  overflow: auto;
+}
+
+.attendance-invalid {
+  margin: 10px 0;
+  font-size: 13px;
+}
+
+.attendance-invalid summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: #b42318;
+}
+
+.attendance-invalid ul {
+  margin: 8px 0 0;
+  padding-inline-start: 18px;
+  line-height: 1.9;
+}
+
+.attendance-totals-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.attendance-month-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.attendance-month-select select {
+  min-width: 180px;
 }
 
 .table-sort-button {
@@ -8315,27 +8424,18 @@ tr.ws-row-highlight td {
 }
 
 .orders-list-table-wrap.orders-infinite-list {
-  overflow: visible;
+  overflow: hidden;
   max-height: none;
   border-radius: 10px;
 }
 
-.orders-infinite-list .orders-table-sticky {
-  position: sticky;
-  top: 72px;
-  z-index: 5;
-  overflow: hidden;
-  background: #fff;
-  border-bottom: 1px solid #d9dee8;
-}
-
-.orders-infinite-list .orders-table-sticky table {
-  margin: 0;
-}
-
+/* A single bounded scroll box: the sticky <thead> stays visible while the body
+   scrolls vertically, and wide tables scroll horizontally instead of squeezing
+   or overlapping columns. Infinite loading keeps continuous vertical access. */
 .orders-infinite-list .orders-table-scroll {
   overflow: auto;
-  max-height: none;
+  max-height: calc(100vh - 210px);
+  min-height: 240px;
 }
 
 .orders-infinite-list .orders-table-more td {
@@ -8347,8 +8447,8 @@ tr.ws-row-highlight td {
 }
 
 @media (max-width: 1024px) {
-  .orders-infinite-list .orders-table-sticky {
-    top: 64px;
+  .orders-infinite-list .orders-table-scroll {
+    max-height: calc(100vh - 180px);
   }
 }
 

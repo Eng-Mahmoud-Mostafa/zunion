@@ -11,7 +11,8 @@ import { config, type UserRole } from "./config.js";
 import { query, tx } from "./db.js";
 import { appSessionLive, audit, canSeeFinancials, hashSecret, nextTokenVersion, otpCode, randomToken, requireAuth, requireRole, signAppSession, verifyAppSession, type AppSession } from "./security.js";
 import { sendVerificationEmail } from "./email.js";
-import { customerSchema, customerTransactionSchema, customerTransactionUpdateSchema, finishingSchema, machineAssignmentSchema, machineCreateSchema, machineMoveSchema, machineReorderSchema, machineSchema, machineUpdateSchema, orderSchema, partyCreateSchema, partyUpdateSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
+import { attendanceImportSchema, customerSchema, customerTransactionSchema, customerTransactionUpdateSchema, finishingSchema, machineAssignmentSchema, machineCreateSchema, machineMoveSchema, machineReorderSchema, machineSchema, machineUpdateSchema, orderSchema, partyCreateSchema, partyUpdateSchema, printingSchema, problemSchema, productSchema, sewingSchema, staffSchema, statusSchema, workerCreateSchema, workerSchema, workerUpdateSchema } from "./validation.js";
+import { analyzeImport, applyImport, type ExistingEmployee } from "./attendance.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { ORDER_EDIT_SUMMARY_JOIN, ORDER_EDIT_SUMMARY_SELECT, diffOrder, loadOrderHistory, queryWithEditSummary, recordOrderEdit } from "./orderEdits.js";
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
@@ -27,6 +28,10 @@ fs.mkdirSync(config.uploadDir, { recursive: true });
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(cors({ origin: config.appOrigin, credentials: true }));
+// Attendance imports can carry thousands of punch rows; give them a larger body
+// limit. Registered before the global parser so express.json skips the already-
+// parsed body for these paths and every other route keeps the tighter 1mb cap.
+app.use("/api/attendance", express.json({ limit: "25mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
@@ -190,6 +195,7 @@ function orderQrPage(row: Record<string, unknown>) {
     { label: "كود العميل", value: safeHtml(row.customer_code_snapshot) },
     { label: "على", value: safeHtml(row.source_party) },
     { label: "نوع المنتج", value: safeHtml(row.product_name_snapshot ?? row.type) },
+    { label: "اللون", value: safeHtml(row.color) },
     { label: "العدد", value: safeHtml(row.quantity) },
     { label: "الخامات", value: qrMaterials(row.materials_status) },
   ];
@@ -1181,8 +1187,8 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
               id, order_number, customer_id, source_party, source_party_id, customer_name_snapshot, customer_code_snapshot, phone_snapshot,
               delivery_date, type, product_id, product_name_snapshot, payment_method, custom_payment_method, materials_status, machine_name, worker_name, operation_methods, operation_attachments,
               quantity, price, paid, old_account, status, work_stage, notes, message_text, quality_notes,
-              damaged_pieces, production_notes, finishing_notes, details, draft, created_by, updated_by
-            ) values (coalesce($1, gen_random_uuid()),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35) on conflict (id) do nothing returning id`,
+              damaged_pieces, production_notes, finishing_notes, details, draft, created_by, updated_by, color
+            ) values (coalesce($1, gen_random_uuid()),$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36) on conflict (id) do nothing returning id`,
             [
               clientId, number, customerId, order.source_party, orderPartyId || null, order.customer_name_snapshot, order.customer_code_snapshot,
               order.phone_snapshot, order.delivery_date || null, order.type, order.productId ?? null, order.productName || order.type,
@@ -1191,7 +1197,7 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
               JSON.stringify(order.operation_attachments ?? []),
               order.quantity, order.price, order.paid,
               order.old_account, order.status ?? "NEW", order.workStage ?? "new", order.notes, order.message_text, order.quality_notes, order.damaged_pieces,
-              order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, req.user!.id,
+              order.production_notes, order.finishing_notes, order.details, order.draft === true, req.user!.id, req.user!.id, order.color ?? null,
             ],
           );
           if (result.rows[0]) return { id: result.rows[0].id, created: true, order_number: number };
@@ -1281,6 +1287,7 @@ app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operato
     delivery_date: order.delivery_date || null,
     type: order.type,
     product_name_snapshot: order.productName || order.type,
+    color: order.color ?? "",
     payment_method: order.paymentMethod,
     custom_payment_method: order.customPaymentMethod || null,
     materials_status: order.materialsStatus ?? oldOrder.materials_status ?? "",
@@ -1330,9 +1337,9 @@ app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operato
         `update orders set source_party=$1, source_party_id=$2, customer_name_snapshot=$3, customer_code_snapshot=$4, phone_snapshot=$5,
          delivery_date=$6, type=$7, product_id=$8, product_name_snapshot=$9, payment_method=$10, custom_payment_method=$11,
          materials_status=$12, machine_name=$13, worker_name=$14, operation_methods=$15, operation_attachments=$16, quantity=$17, price=$18, paid=$19, old_account=$20, status=$21, work_stage=$22, notes=$23,
-         message_text=$24, quality_notes=$25, damaged_pieces=$26, production_notes=$27, finishing_notes=$28, details=$29, draft=$30, updated_by=$31
-         where id=$32`,
-        [next.source_party, orderPartyId || null, next.customer_name_snapshot, next.customer_code_snapshot, next.phone_snapshot, next.delivery_date, next.type, order.productId ?? null, next.product_name_snapshot, next.payment_method, next.custom_payment_method, next.materials_status, next.machine_name, next.worker_name, next.operation_methods, next.operation_attachments, next.quantity, next.price, next.paid, next.old_account, next.status, next.work_stage, next.notes, next.message_text, next.quality_notes, next.damaged_pieces, next.production_notes, next.finishing_notes, next.details, next.draft, req.user!.id, id],
+         message_text=$24, quality_notes=$25, damaged_pieces=$26, production_notes=$27, finishing_notes=$28, details=$29, draft=$30, updated_by=$31, color=$32
+         where id=$33`,
+        [next.source_party, orderPartyId || null, next.customer_name_snapshot, next.customer_code_snapshot, next.phone_snapshot, next.delivery_date, next.type, order.productId ?? null, next.product_name_snapshot, next.payment_method, next.custom_payment_method, next.materials_status, next.machine_name, next.worker_name, next.operation_methods, next.operation_attachments, next.quantity, next.price, next.paid, next.old_account, next.status, next.work_stage, next.notes, next.message_text, next.quality_notes, next.damaged_pieces, next.production_notes, next.finishing_notes, next.details, next.draft, req.user!.id, next.color, id],
       );
       await recordOrderEdit(client, id, req.user!, changes);
     });
@@ -1564,6 +1571,73 @@ app.delete("/api/workers/:id", requireAuth, requireRole("Master", "Helper", "Ope
   await query(`delete from workers where id = $1`, [id]);
   await audit(req.user!, "WORKER_DELETED", "workers", id, found.rows[0], undefined);
   res.json({ worker: found.rows[0], deleted: true });
+});
+
+// ---------------------------------------------------------------------------
+// الحضور والانصراف — attendance import from the fingerprint-machine export.
+// ---------------------------------------------------------------------------
+
+const ATTENDANCE_ROLES = ["Master", "Helper", "Operator", "Supervisor"] as const;
+
+/** Per-employee worked days + hours, derived from punches (optionally one month). */
+async function attendanceTotals(month?: string) {
+  const params: unknown[] = [];
+  let monthFilter = "";
+  if (month) { params.push(month); monthFilter = `where p.work_month = $1`; }
+  const { rows } = await query(
+    `select e.id, e.code, e.name, e.active, e.first_seen,
+            coalesce(t.worked_days, 0) as worked_days,
+            coalesce(round(t.worked_hours::numeric, 2), 0) as worked_hours,
+            t.first_day, t.last_day
+     from attendance_employees e
+     left join (
+       select per_day.employee_id,
+              count(*) as worked_days,
+              sum(per_day.hours) as worked_hours,
+              min(per_day.work_date) as first_day,
+              max(per_day.work_date) as last_day
+       from (
+         select p.employee_id, p.work_date,
+                extract(epoch from (max(p.punched_at) - min(p.punched_at))) / 3600.0 as hours
+         from attendance_punches p
+         ${monthFilter}
+         group by p.employee_id, p.work_date
+       ) per_day
+       group by per_day.employee_id
+     ) t on t.employee_id = e.id
+     order by e.code is null, e.code, e.name`,
+    params,
+  );
+  return rows;
+}
+
+app.post("/api/attendance/preview", requireAuth, requireRole(...ATTENDANCE_ROLES), async (req, res) => {
+  const parsed = attendanceImportSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid attendance data", issues: parsed.error.issues });
+  const existing = (await query<ExistingEmployee>("select id, code, name, normalized_name from attendance_employees")).rows;
+  res.json(analyzeImport(parsed.data.rows, existing));
+});
+
+app.post("/api/attendance/import", requireAuth, requireRole(...ATTENDANCE_ROLES), async (req, res) => {
+  const parsed = attendanceImportSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Invalid attendance data", issues: parsed.error.issues });
+  const summary = await tx((client) => applyImport(client, parsed.data.rows));
+  await audit(req.user!, "ATTENDANCE_IMPORTED", "attendance", undefined, undefined, {
+    createdEmployees: summary.createdEmployees,
+    insertedPunches: summary.insertedPunches,
+    duplicatePunches: summary.duplicatePunches,
+    months: summary.months,
+  });
+  res.json(summary);
+});
+
+app.get("/api/attendance/employees", requireAuth, async (req, res) => {
+  const month = typeof req.query.month === "string" && /^\d{4}-\d{2}$/.test(req.query.month) ? req.query.month : undefined;
+  const totals = await attendanceTotals(month);
+  const monthsResult = await query<{ work_month: string }>(
+    "select distinct work_month from attendance_punches where work_month <> '' order by work_month desc",
+  );
+  res.json({ employees: totals, months: monthsResult.rows.map((r) => r.work_month), month: month ?? null });
 });
 
 app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
