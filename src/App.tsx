@@ -5740,7 +5740,7 @@ type MachineDistModal =
 
 type MachineDraftRow = { id: string | null; name: string; active: boolean; isNew: boolean; remove: boolean };
 
-function MachineDistributionPage({ orders, session, machines, onMachinesChanged, onOrderClick }: { orders: Order[]; session: Session; machines: MachineRecord[]; onMachinesChanged?: () => void; onOrderClick?: (orderId: string) => void }) {
+function MachineDistributionPage({ orders, session, machines, onMachinesChanged, onOrderClick, onDirtyChange }: { orders: Order[]; session: Session; machines: MachineRecord[]; onMachinesChanged?: () => void; onOrderClick?: (orderId: string) => void; onDirtyChange?: (dirty: boolean) => void }) {
   const [assignments, setAssignments] = useState<MachineAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -5976,6 +5976,9 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   }
 
   const machinesDirty = machinesModalOpen && (Boolean(machinesAddName.trim()) || machinesDraft.some((row) => (row.isNew && !row.remove) || (!row.isNew && row.remove)));
+  // Unsaved edits in any editor opened from the board (reported to the floating board window).
+  const boardDirty = machinesDirty || Boolean(addModal && selectedOrderId) || Boolean(editModal && moveTarget && moveTarget !== editModal.machine);
+  useEffect(() => { onDirtyChange?.(boardDirty); }, [boardDirty, onDirtyChange]);
 
   async function saveMachines(): Promise<boolean> {
     if (machinesSaving) return false;
@@ -9311,6 +9314,24 @@ function ZunionApp() {
     openView("editOrder", order?.id ?? key, order ? orderDetailsLabel(order) : undefined);
   }
 
+  // توزيع مكن opens the board in one floating window that survives tab switches;
+  // asking again brings the open window to the front.
+  const [distWindowOpen, setDistWindowOpen] = useState(false);
+  const [distFront, setDistFront] = useState(0);
+  const [distDirty, setDistDirty] = useState(false);
+  function openDistributionWindow() {
+    if (!canAccessView(session, "machineDist")) return;
+    if (distWindowOpen) setDistFront((n) => n + 1);
+    else setDistWindowOpen(true);
+  }
+  const workspaceBounds = useCallback(() => {
+    const content = document.querySelector("main.content")?.getBoundingClientRect();
+    if (!content) return null;
+    const topbar = document.querySelector("main.content > .topbar")?.getBoundingClientRect();
+    const top = Math.max(content.top, topbar ? topbar.bottom : content.top, 0) + 8;
+    return { x: content.left + 8, y: top, w: content.width - 16, h: Math.min(content.bottom, window.innerHeight) - top - 8 };
+  }, []);
+
   function openOrderFromSearch(order: Order) {
     openOrderDetails(order.id, order);
   }
@@ -9506,7 +9527,7 @@ function ZunionApp() {
       case "search":
         return <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "worker":
-        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); openView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} onDistribute={() => openView("machineDist")} />;
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); openView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} onDistribute={openDistributionWindow} />;
       case "machineDist":
         return <MachineDistributionPage orders={orders} session={session} machines={machines} onMachinesChanged={refreshMachines} onOrderClick={onOrderNumberClick} />;
       case "finish":
@@ -9612,6 +9633,25 @@ function ZunionApp() {
           </>}
         </section>
       </main>
+      {distWindowOpen && session && (
+        <DraggableDialog
+          dialogClassName="dist-window"
+          headClassName="dist-window-head"
+          ariaLabel="توزيع المكن"
+          title={<h2>توزيع المكن</h2>}
+          windowControls
+          minimizedLabel="توزيع المكن"
+          defaultSize={{ w: 1180, h: 720 }}
+          maximizeBounds={workspaceBounds}
+          frontSignal={distFront}
+          dirty={distDirty}
+          onClose={() => { setDistWindowOpen(false); setDistDirty(false); }}
+        >
+          <div className="dist-window-body">
+            <MachineDistributionPage orders={orders} session={session} machines={machines} onMachinesChanged={refreshMachines} onOrderClick={onOrderNumberClick} onDirtyChange={setDistDirty} />
+          </div>
+        </DraggableDialog>
+      )}
       <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={(next) => openView(next)} onOrderClick={onOrderNumberClick ? (key) => { setCustomerDrawer(null); onOrderNumberClick(key); } : undefined} />
       <OrderDetailsDrawer open={!!orderDrawerOrder} onClose={() => setOrderDrawerOrderNumber(null)} order={orderDrawerOrder} customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => { setOrderDrawerOrderNumber(null); setCustomerDrawer({ code, name }); }} />
       <ProductDrawer open={!!productDrawer} onClose={() => setProductDrawer(null)} product={productDrawer} orders={orders} setView={(next) => openView(next)} />
