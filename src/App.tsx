@@ -92,7 +92,7 @@ import { allPermissionKeys, roleDefaultPermissions, type PermissionKey } from ".
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "products" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "image";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "products" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "menu" | "image";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -2532,6 +2532,29 @@ function ActionCard({ title, onClick, icon: Icon }: { title: string; onClick: ()
         <CardIcon size={26} strokeWidth={2.5} />
       </span>
     </button>
+  );
+}
+
+/**
+ * The in-content menu for a sidebar section: a grid of clickable cards for the
+ * section's subpages. Opened when a parent section is clicked, mirroring the
+ * sidebar dropdown so users can navigate from either place.
+ */
+function SectionMenu({ section, onSelect, canAccess }: { section: SidebarItemConfig; onSelect: (view: View) => void; canAccess: (view: View) => boolean }) {
+  const children = (section.children ?? []).filter((child) => child.visible && canAccess(child.id as View));
+  return (
+    <section className="panel nav-menu-panel">
+      <div className="panel-head"><h2>{section.label}</h2></div>
+      {children.length === 0 ? (
+        <p className="muted">لا توجد صفحات متاحة في هذا القسم.</p>
+      ) : (
+        <div className="quick-grid nav-menu-grid">
+          {children.map((child, index) => (
+            <ActionCard key={`${child.id}-${index}`} title={child.label} icon={child.icon} onClick={() => onSelect(child.id as View)} />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -9232,11 +9255,12 @@ function SidebarItemButton({ item, active, onSelect }: { item: SidebarItemConfig
   );
 }
 
-function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDrawer }: {
+function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLogout, onCloseDrawer }: {
   items: SidebarItemConfig[];
   activeView: View;
   drawerOpen: boolean;
   onSelect: (view: View) => void;
+  onOpenSection?: (item: SidebarItemConfig) => void;
   onLogout: () => void;
   onCloseDrawer: () => void;
 }) {
@@ -9244,6 +9268,13 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
 
   const toggleSection = (id: string) => {
     setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  // Clicking the section label opens its in-content menu AND ensures the sidebar
+  // dropdown is expanded (the +/- button still toggles it independently).
+  const openSection = (item: SidebarItemConfig) => {
+    setOpenSections((prev) => ({ ...prev, [item.id]: true }));
+    onOpenSection?.(item);
   };
 
   const hasActiveChild = (item: SidebarItemConfig): boolean => {
@@ -9266,27 +9297,17 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
               const ToggleIcon = isOpen ? Minus : Plus;
               return (
                 <div key={item.id} className={`sidebar-section${isOpen ? " open" : ""}${isActive ? " has-active" : ""}`}>
-                  {item.splitParent ? (
-                    <div className={`sidebar-parent${isActive ? " active" : ""}`}>
-                      <button type="button" className="sidebar-parent-nav" onClick={() => onSelect(item.id as View)}>
-                        <span className="sidebar-parent-copy">
-                          <item.icon size={22} />
-                          <span>{item.label}</span>
-                        </span>
-                      </button>
-                      <button type="button" className="sidebar-toggle" aria-label={isOpen ? "طيّ القائمة الفرعية" : "فتح القائمة الفرعية"} onClick={() => toggleSection(item.id)}>
-                        <ToggleIcon size={18} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button type="button" className={`sidebar-parent${isActive ? " active" : ""}`} onClick={() => toggleSection(item.id)}>
+                  <div className={`sidebar-parent${isActive ? " active" : ""}`}>
+                    <button type="button" className="sidebar-parent-nav" onClick={() => openSection(item)}>
                       <span className="sidebar-parent-copy">
                         <item.icon size={22} />
                         <span>{item.label}</span>
                       </span>
-                      <span className="sidebar-toggle"><ToggleIcon size={18} /></span>
                     </button>
-                  )}
+                    <button type="button" className="sidebar-toggle" aria-label={isOpen ? "طيّ القائمة الفرعية" : "فتح القائمة الفرعية"} onClick={() => toggleSection(item.id)}>
+                      <ToggleIcon size={18} />
+                    </button>
+                  </div>
                   {isOpen && (
                     <div className="sidebar-submenu">
                       <div className="sidebar-submenu-inner">
@@ -9314,7 +9335,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "products", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "attendance", "alerts", "settings"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "products", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "attendance", "alerts", "settings", "menu"];
 
 type ShellTab = { id: string; view: View; recordId?: string; label: string };
 
@@ -9344,12 +9365,13 @@ const TAB_META: Record<View, { label: string; icon: LucideIcon }> = {
   attendance: { label: "الحضور والانصراف", icon: CalendarClock },
   alerts: { label: "تنبيهات التسليم", icon: Bell },
   settings: { label: "الإعدادات", icon: Settings },
+  menu: { label: "القائمة", icon: LayoutGrid },
   image: { label: "عرض الصورة", icon: Image },
 };
 
 // "image" is deliberately not in knownViews: its source lives only in memory, so a
 // reload with #image/... falls back to the dashboard instead of an empty viewer.
-const RECORD_VIEWS: View[] = ["editOrder", "draftEdit", "image"];
+const RECORD_VIEWS: View[] = ["editOrder", "draftEdit", "image", "menu"];
 
 function tabIdFor(view: View, recordId?: string) {
   return recordId ? `${view}:${recordId}` : view;
@@ -10085,6 +10107,13 @@ function ZunionApp() {
     setDrawerOpen(false);
   }
 
+  // Clicking a sidebar parent section opens its in-content card menu (keyed by the
+  // section id) instead of jumping to the first subpage.
+  function openSectionMenu(section: SidebarItemConfig) {
+    openView("menu", section.id, section.label);
+    setDrawerOpen(false);
+  }
+
   function logout() {
     if (useServerAuth) {
       fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
@@ -10147,6 +10176,11 @@ function ZunionApp() {
       }
       case "dashboard":
         return <Dashboard setView={(next) => openView(next)} canSeeFinancials={canManageFinancials(session.role)} />;
+      case "menu": {
+        const section = sidebarItems.find((item) => item.id === tab.recordId);
+        if (!section || !section.children?.length) return <ErrorPanel message="القائمة غير متاحة" />;
+        return <SectionMenu section={section} canAccess={(nextView) => canAccessView(session, nextView)} onSelect={(nextView) => selectSidebarView(nextView)} />;
+      }
       case "orders":
         return <OrdersPage orders={orders} setOrders={setOrders} session={session} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClickTracking} />;
       case "new":
@@ -10225,9 +10259,10 @@ function ZunionApp() {
     <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
       <Sidebar
         items={sidebarItems}
-        activeView={view === "editOrder" || view === "search" ? "orders" : view === "draftEdit" ? "drafts" : view}
+        activeView={view === "menu" ? ((activeTab?.recordId as View) ?? "dashboard") : view === "editOrder" || view === "search" ? "orders" : view === "draftEdit" ? "drafts" : view}
         drawerOpen={drawerOpen}
         onSelect={selectSidebarView}
+        onOpenSection={openSectionMenu}
         onLogout={logout}
         onCloseDrawer={() => setDrawerOpen(false)}
       />
