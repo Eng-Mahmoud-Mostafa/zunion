@@ -272,6 +272,7 @@ const recentCustomersKey = "zunion-local-recent-customers-v1";
 const pinnedItemsKey = "zunion-local-pinned-items-v1";
 const searchCacheKey = "zunion-local-search-cache-v1";
 const partiesKey = "zunion-local-parties-v1";
+const sidebarOpenKey = "zunion-sidebar-open-v1";
 const onFieldOptions = ["أحمد", "رضا", "سامح"];
 const machineOptions = ["تاجيما 2015", "تاجيما 2007", "الجلوبال", "swf", "تاجيما 2005", "فيا الي جوا", "فيا الي برا"];
 
@@ -9264,14 +9265,30 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLog
   onLogout: () => void;
   onCloseDrawer: () => void;
 }) {
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  // Remembered per-section expand/collapse state. An explicit value always wins
+  // over the "auto-open because a subpage is active" default, so a user can
+  // collapse a section even while one of its pages is open, and the choice sticks
+  // across navigation and refresh.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(sidebarOpenKey);
+      return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(sidebarOpenKey, JSON.stringify(openSections)); } catch { /* storage unavailable */ }
+  }, [openSections]);
 
-  const toggleSection = (id: string) => {
-    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  // Flip the *effective* open state (so a −/+ click always does the obvious thing,
+  // even when the section is only auto-open because a subpage is active).
+  const setSectionOpen = (id: string, open: boolean) => {
+    setOpenSections((prev) => ({ ...prev, [id]: open }));
   };
 
-  // Clicking the section label opens its in-content menu AND ensures the sidebar
-  // dropdown is expanded (the +/- button still toggles it independently).
+  // Clicking the section label opens its in-content menu AND expands the dropdown;
+  // the +/- button toggles it independently.
   const openSection = (item: SidebarItemConfig) => {
     setOpenSections((prev) => ({ ...prev, [item.id]: true }));
     onOpenSection?.(item);
@@ -9292,7 +9309,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLog
           {items.map((item) => {
             if (item.children && item.children.length > 0) {
               const childActive = hasActiveChild(item);
-              const isOpen = !!openSections[item.id] || (openSections[item.id] === undefined && (childActive || item.id === activeView));
+              const isOpen = openSections[item.id] ?? (childActive || item.id === activeView);
               const isActive = childActive || item.id === activeView;
               const ToggleIcon = isOpen ? Minus : Plus;
               return (
@@ -9304,22 +9321,21 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLog
                         <span>{item.label}</span>
                       </span>
                     </button>
-                    <button type="button" className="sidebar-toggle" aria-label={isOpen ? "طيّ القائمة الفرعية" : "فتح القائمة الفرعية"} onClick={() => toggleSection(item.id)}>
+                    <button type="button" className="sidebar-toggle" aria-expanded={isOpen} aria-label={isOpen ? "طيّ القائمة الفرعية" : "فتح القائمة الفرعية"} onClick={() => setSectionOpen(item.id, !isOpen)}>
                       <ToggleIcon size={18} />
                     </button>
                   </div>
-                  {isOpen && (
-                    <div className="sidebar-submenu">
+                  {/* Always rendered so expand/collapse animates both ways (CSS grid-rows). */}
+                  <div className="sidebar-submenu" aria-hidden={!isOpen}>
                       <div className="sidebar-submenu-inner">
                         {item.children.map((child, index) => (
-                          <button key={`${item.id}-${index}`} type="button" className={`sidebar-subitem${child.id === activeView ? " active" : ""}`} onClick={() => onSelect(child.id as View)}>
+                          <button key={`${item.id}-${index}`} type="button" tabIndex={isOpen ? 0 : -1} className={`sidebar-subitem${child.id === activeView ? " active" : ""}`} onClick={() => onSelect(child.id as View)}>
                             <child.icon size={18} />
                             <span>{child.label}</span>
                           </button>
                         ))}
                       </div>
                     </div>
-                  )}
                 </div>
               );
             }
