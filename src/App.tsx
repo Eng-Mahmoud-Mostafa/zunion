@@ -5710,7 +5710,9 @@ type SewingRow = {
   deliveryDate: string;
   addedBy: string;
   client: string;
+  party: string;
   type: string;
+  color: string;
   logo: string;
   quantity: number;
   sewingWorker: string;
@@ -5725,7 +5727,9 @@ function sewingRowFromRaw(row: Record<string, unknown>): SewingRow {
     deliveryDate: formatDisplayDate(row.delivery_date),
     addedBy: String(row.created_by ?? row.added_by ?? ""),
     client: orderDisplayClient(row as OrdersListRecord),
+    party: String(row.source_party ?? row.party ?? row.source_person ?? ""),
     type: String(row.type ?? row.product_name_snapshot ?? ""),
+    color: String(row.color ?? ""),
     logo: String(row.logo_place ?? row.logo_status ?? ""),
     quantity: Number(row.quantity ?? row.pieces_count ?? 0),
     sewingWorker: String(row.sewing_worker ?? ""),
@@ -5741,7 +5745,9 @@ function sewingRowFromOrder(order: Order): SewingRow {
     deliveryDate: formatDisplayDate(order.delivery_date),
     addedBy: order.created_by || "",
     client: order.client_name,
+    party: order.source_person || "",
     type: order.order_type || order.productName || "",
+    color: order.color || "",
     logo: order.logo_place || order.logo_status || "",
     quantity: Number(order.quantity || 0),
     sewingWorker: order.sewing_worker || "",
@@ -5756,7 +5762,9 @@ type PrintingRow = {
   deliveryDate: string;
   addedBy: string;
   client: string;
+  party: string;
   type: string;
+  color: string;
   logo: string;
   quantity: number;
   printingWorker: string;
@@ -5771,7 +5779,9 @@ function printingRowFromRaw(row: Record<string, unknown>): PrintingRow {
     deliveryDate: formatDisplayDate(row.delivery_date),
     addedBy: String(row.created_by ?? row.added_by ?? ""),
     client: orderDisplayClient(row as OrdersListRecord),
+    party: String(row.source_party ?? row.party ?? row.source_person ?? ""),
     type: String(row.type ?? row.product_name_snapshot ?? ""),
+    color: String(row.color ?? ""),
     logo: String(row.logo_place ?? row.logo_status ?? ""),
     quantity: Number(row.quantity ?? row.pieces_count ?? 0),
     printingWorker: String(row.printing_worker ?? ""),
@@ -5787,7 +5797,9 @@ function printingRowFromOrder(order: Order): PrintingRow {
     deliveryDate: formatDisplayDate(order.delivery_date),
     addedBy: order.created_by || "",
     client: order.client_name,
+    party: order.source_person || "",
     type: order.order_type || order.productName || "",
+    color: order.color || "",
     logo: order.logo_place || order.logo_status || "",
     quantity: Number(order.quantity || 0),
     printingWorker: order.printing_worker || "",
@@ -6963,10 +6975,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     if (sewingLoading && sewingRows.length === 0 && !sewingError) return <LoadingPanel />;
     if (sewingError && sewingRows.length === 0) return <ErrorPanel message={sewingError || "تعذر تحميل البيانات."} />;
 
-    const rows = sewingRows.map((row) => ({
-      ...row,
-      addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
-    }));
+    const ordersById = new Map(orders.map((order) => [order.id, order]));
+    const rows = sewingRows.map((row) => {
+      const shared = ordersById.get(row.id);
+      return {
+        ...row,
+        addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+        color: shared?.color ?? row.color,
+        party: shared?.source_person ?? row.party,
+      };
+    });
     const sewingWorkerNames = Array.from(new Set([
       ...workersRegistry.filter((worker) => worker.active).map((worker) => worker.name),
       ...orders.map((order) => order.sewing_worker || ""),
@@ -7016,7 +7034,9 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
+      { key: "party", label: "طرف", cls: "ws-hd", rowSpan: 2 },
       { key: "type", label: "النوع", cls: "ws-hd", rowSpan: 2 },
+      { key: "color", label: "اللون", cls: "ws-hd", rowSpan: 2 },
       { key: "logo", label: "اللوجو", cls: "ws-hd ws-hd-logo", rowSpan: 2 },
       { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
       { key: "sewingGroup", label: "خياطه", cls: "ws-hd ws-sewing-group", colSpan: 3 },
@@ -7040,14 +7060,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={10} />}
+              {rows.length === 0 && <EmptyRow colSpan={12} />}
               {rows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
                   <td>{row.client}</td>
+                  <td>{row.party || "—"}</td>
                   <td>{row.type}</td>
+                  <td>{row.color || "—"}</td>
                   <td className="ws-logo">{row.logo || "—"}</td>
                   <td className="ws-qty">{row.quantity || ""}</td>
                   <td className="ws-worker">
@@ -7108,10 +7130,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     if (printingLoading && printingRows.length === 0 && !printingError) return <LoadingPanel />;
     if (printingError && printingRows.length === 0) return <ErrorPanel message={printingError || "تعذر تحميل البيانات."} />;
 
-    const rows = printingRows.map((row) => ({
-      ...row,
-      addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
-    }));
+    const ordersById = new Map(orders.map((order) => [order.id, order]));
+    const rows = printingRows.map((row) => {
+      const shared = ordersById.get(row.id);
+      return {
+        ...row,
+        addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+        color: shared?.color ?? row.color,
+        party: shared?.source_person ?? row.party,
+      };
+    });
     const printingWorkerNames = Array.from(new Set([
       ...workersRegistry.filter((worker) => worker.active).map((worker) => worker.name),
       ...orders.map((order) => order.printing_worker || ""),
@@ -7161,7 +7189,9 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
+      { key: "party", label: "طرف", cls: "ws-hd", rowSpan: 2 },
       { key: "type", label: "النوع", cls: "ws-hd", rowSpan: 2 },
+      { key: "color", label: "اللون", cls: "ws-hd", rowSpan: 2 },
       { key: "logo", label: "اللوجو", cls: "ws-hd ws-hd-logo", rowSpan: 2 },
       { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
       { key: "printingGroup", label: "طباعه", cls: "ws-hd ws-printing-group", colSpan: 3 },
@@ -7185,14 +7215,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={10} />}
+              {rows.length === 0 && <EmptyRow colSpan={12} />}
               {rows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
                   <td>{row.client}</td>
+                  <td>{row.party || "—"}</td>
                   <td>{row.type}</td>
+                  <td>{row.color || "—"}</td>
                   <td className="ws-logo">{row.logo || "—"}</td>
                   <td className="ws-qty">{row.quantity || ""}</td>
                   <td className="ws-worker">
@@ -9132,8 +9164,10 @@ function ArchivePage({ customers, setOrders, session, setView, onCustomerClick, 
             <tr>
               <th>رقم الأوردر</th>
               <th>اسم العميل</th>
+              <th>طرف</th>
               <th>نوع الأوردر</th>
               <th>النوع</th>
+              <th>اللون</th>
               <th>العدد</th>
               <th>تاريخ الإنهاء</th>
               <th>الحالة</th>
@@ -9141,17 +9175,19 @@ function ArchivePage({ customers, setOrders, session, setView, onCustomerClick, 
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={8} className="ar-state">جارٍ تحميل الأوردرات المؤرشفة…</td></tr>}
-            {!loading && error && <tr><td colSpan={8} className="ar-state ar-state-error">{error}</td></tr>}
+            {loading && <tr><td colSpan={10} className="ar-state">جارٍ تحميل الأوردرات المؤرشفة…</td></tr>}
+            {!loading && error && <tr><td colSpan={10} className="ar-state ar-state-error">{error}</td></tr>}
             {!loading && !error && rows.length === 0 && (
-              <tr><td colSpan={8} className="ar-state">{hasFilters ? "لا توجد أوردرات مطابقة للفلاتر المحددة" : "لا توجد أوردرات مؤرشفة حتى الآن"}</td></tr>
+              <tr><td colSpan={10} className="ar-state">{hasFilters ? "لا توجد أوردرات مطابقة للفلاتر المحددة" : "لا توجد أوردرات مؤرشفة حتى الآن"}</td></tr>
             )}
             {!loading && !error && rows.map((order) => (
               <tr key={order.id}>
                 <td className="ar-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(order.id, order)}>{order.order_number}</button> : order.order_number}</td>
                 <td>{order.client_name}</td>
+                <td>{valueText(order.source_person)}</td>
                 <td>{orderDisplayType({ order_type: order.order_type } as OrdersListRecord)}</td>
                 <td>{orderDisplayType(order as unknown as OrdersListRecord)}</td>
+                <td>{valueText(order.color)}</td>
                 <td>{formatNumber(order.quantity)}</td>
                 <td>{formatDateArabic(order.completedAt || order.updated_at)}</td>
                 <td><span className={listBadgeClass(orderStatusLabel(order))}>{orderStatusLabel(order)}</span></td>
