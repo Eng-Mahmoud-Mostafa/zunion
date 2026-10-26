@@ -1132,62 +1132,100 @@ async function printOrderFromForm(order: Order, _knownOrders: Order[]) {
   await printOrderClean(order);
 }
 
+/** Format a date value as DD/MM/YYYY (no time), preserving a usable fallback. */
+function labelDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "—";
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    const dd = String(parsed.getDate()).padStart(2, "0");
+    const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${parsed.getFullYear()}`;
+  }
+  return normalizeDigitsToEnglish(raw);
+}
+
+/**
+ * Dedicated 10×10 cm order label: the order's saved fields plus its QR code, laid
+ * out RTL on a single 100mm × 100mm page with ~4mm margins. No logo. Long details
+ * shrink to fit; if they still cannot fit legibly the preview shows a warning.
+ */
 async function printOrderClean(order: Order) {
-  const attachments = (order.operationItems || [])
-    .flatMap((item) => {
-      const out: { src: string; label: string }[] = [];
-      if (item.workOrderImage) out.push({ src: item.workOrderImage, label: "أمر الشغل" });
-      if (item.logoImage) out.push({ src: item.logoImage, label: "أمر اللوجو" });
-      return out;
-    });
-  const imageRows = (await Promise.all(attachments.map(async (att) => ({ ...att, src: await printableImageSource(att.src) })))).filter((row) => row.src);
-  const popup = window.open("", "_blank", "width=1000,height=920");
-  const fields: Array<[string, string]> = [
-    ["رقم الأوردر", order.order_number || "—"],
-    ["تاريخ عمل الأوردر", orderPrintDate(order)],
-    ["الطرف", order.source_person || "—"],
-    ["اسم العميل", order.client_name || "—"],
-    ["كود العميل", order.client_code || "—"],
-    ["نوع الأوردر", order.order_type || "—"],
-    ["نوع المنتج", order.productName || "—"],
-    ["العدد", formatNumber(order.quantity)],
-    ["السعر", order.price ? formatNumber(order.price) : "—"],
-    ["الإجمالي", order.total ? formatNumber(order.total) : "—"],
-    ["الخامات", materialStatusLabel(order.materialsStatus)],
-    ["تاريخ التسليم", order.delivery_date ? formatDateArabic(order.delivery_date) : "—"],
-  ];
-  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>${escapeHtml(`طباعة الأوردر ${order.order_number}`)}</title>
+  const qr = await orderQrPng(order, 320).catch(() => "");
+  const popup = window.open("", "_blank", "width=520,height=620");
+  const esc = escapeHtml;
+  const field = (label: string, value: string, ltr = false) =>
+    `<div class="f"><b>${esc(label)}</b><span${ltr ? ' class="ltr"' : ""}>${esc(value || "—")}</span></div>`;
+  const html = `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8" /><title>${esc(`ليبل الأوردر ${order.order_number}`)}</title>
     <style>
-      @page{size:8.5in 11in;margin:0.25in}
+      @page{size:100mm 100mm;margin:4mm}
       *{box-sizing:border-box}
       html,body{margin:0;padding:0;background:#fff}
-      body{font-family:Tahoma,Arial,sans-serif;color:#111827;direction:rtl}
-      .print-summary{width:8in;max-width:8in;margin:0 auto;padding:0.2in;direction:rtl;text-align:right}
-      .ps-order-no{font-size:28px;font-weight:900;color:#111827;text-align:center;margin:0 0 0.3in;line-height:1.1}
-      .ps-order-no small{display:block;font-size:13px;font-weight:700;color:#6b7280;margin-bottom:2px}
-      .ps-order-no .num{direction:ltr;unicode-bidi:embed}
-      .ps-grid{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:0.15in 0.3in;margin-bottom:0.3in}
-      .ps-field{background:#f3f6fa;border:1px solid #e5e7eb;border-radius:8px;padding:0.14in 0.18in;break-inside:avoid;page-break-inside:avoid}
-      .ps-field small{display:block;font-size:12px;font-weight:700;color:#6b7280;margin-bottom:3px}
-      .ps-field b{font-size:15px;font-weight:800;color:#111827;overflow-wrap:anywhere;word-break:break-word}
-      .ps-details{background:#fff;border:1px solid #d1d5db;border-radius:8px;padding:0.16in;white-space:pre-wrap;font-size:15px;line-height:1.7;color:#111827;overflow-wrap:anywhere;word-break:break-word;min-height:0.8in}
-      .ps-details-label{font-size:13px;font-weight:800;color:#6b7280;margin-bottom:4px}
-      .ps-images{display:flex;flex-wrap:wrap;gap:0.18in;margin-top:0.25in}
-      .ps-img-field{width:2.4in;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:0.1in;text-align:center;break-inside:avoid;page-break-inside:avoid}
-      .ps-img-field small{display:block;font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px}
-      .ps-img-field img{max-width:100%;max-height:2.4in;border-radius:6px}
+      body{font-family:Tahoma,Arial,sans-serif;color:#000;direction:rtl}
+      .toolbar{padding:8px 10px;background:#f3f4f6;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+      .toolbar button{background:#ED1525;color:#fff;border:0;border-radius:7px;padding:8px 16px;font-weight:800;cursor:pointer}
+      .warn{display:none;color:#b42318;font-weight:800;font-size:12px}
+      .sheet{display:flex;justify-content:center;padding:10px;background:#e5e7eb}
+      /* The label is exactly the printable area: 100mm − 2×4mm = 92mm square. */
+      .label{width:92mm;height:92mm;overflow:hidden;background:#fff;color:#000;padding:0}
+      .hdr{margin-bottom:2mm}
+      .hdr-label{font-size:8pt;font-weight:800}
+      .hdr-num{font-size:17pt;font-weight:900;direction:ltr;unicode-bidi:embed;text-align:right;line-height:1.1}
+      .row{display:flex;gap:1.6mm;margin-bottom:1.6mm}
+      .f{flex:1;min-width:0;border:0.3mm solid #000;border-radius:1.4mm;padding:1mm 1.4mm}
+      .f b{display:block;font-size:7.5pt;font-weight:800;margin-bottom:0.4mm}
+      .f span{display:block;font-size:9.5pt;font-weight:700;overflow-wrap:anywhere;word-break:break-word}
+      .ltr{direction:ltr;unicode-bidi:embed}
+      .body{display:flex;gap:1.6mm;align-items:flex-start}
+      .details{flex:1;min-width:0;border:0.3mm solid #000;border-radius:1.4mm;padding:1.4mm;overflow:hidden}
+      .details b{display:block;font-size:8pt;font-weight:800;margin-bottom:0.8mm}
+      .details-text{font-size:9pt;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+      .qr{flex:0 0 30mm;text-align:center}
+      .qr img{width:28mm;height:28mm;background:#fff}
+      .qr small{display:block;font-size:6.5pt;font-weight:700;margin-top:0.6mm}
+      @media print{.toolbar,.sheet{background:#fff !important}.toolbar{display:none}.sheet{padding:0}}
     </style></head><body>
-    <div class="print-summary">
-      <div class="ps-order-no"><small>رقم الأوردر</small><div class="num">${escapeHtml(order.order_number)}</div></div>
-      <div class="ps-grid">
-        ${fields.map(([label, value]) => `<div class="ps-field"><small>${escapeHtml(label)}</small><b>${escapeHtml(value)}</b></div>`).join("")}
-      </div>
-      <div class="ps-details">
-        <div class="ps-details-label">التفاصيل</div>
-        ${escapeHtml(order.details || "—")}
-      </div>
-      ${imageRows.length ? `<div class="ps-images">${imageRows.map((img) => `<div class="ps-img-field"><small>${escapeHtml(img.label)}</small><img src="${escapeHtml(img.src)}" alt="${escapeHtml(img.label)}" /></div>`).join("")}</div>` : ""}
+    <div class="toolbar">
+      <button onclick="window.print()">طباعة الليبل</button>
+      <span class="warn" id="warn">⚠️ التفاصيل أطول من المساحة المتاحة وقد لا تظهر كاملة — اختصر النص أو قلّل التفاصيل.</span>
     </div>
+    <div class="sheet">
+      <div class="label" id="label">
+        <div class="hdr"><div class="hdr-label">رقم الأوردر</div><div class="hdr-num">${esc(order.order_number || "—")}</div></div>
+        <div class="row">
+          ${field("تاريخ عمل الأوردر", labelDate(order.created_at))}
+          ${field("تاريخ التسليم", labelDate(order.delivery_date))}
+        </div>
+        <div class="row">
+          ${field("اسم العميل", order.client_name)}
+          ${field("كود العميل", order.client_code, true)}
+          ${field("طرف", order.source_person)}
+        </div>
+        <div class="row">
+          ${field("نوع الأوردر", order.order_type)}
+          ${field("اللون", order.color || "")}
+          ${field("العدد", order.quantity ? formatNumber(order.quantity) : "")}
+        </div>
+        <div class="body">
+          <div class="details"><b>التفاصيل</b><div class="details-text" id="dtext">${esc(order.details || "—")}</div></div>
+          <div class="qr">${qr ? `<img src="${qr}" alt="QR" />` : `<div style="font-size:8pt">لا يوجد رمز</div>`}</div>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function(){
+        var label=document.getElementById('label');
+        var dtext=document.getElementById('dtext');
+        var warn=document.getElementById('warn');
+        function overflowing(){ return label.scrollHeight > label.clientHeight + 1; }
+        var size=9;
+        // Shrink details to fit; warn if it still overflows at the minimum legible size.
+        while(overflowing() && size>6.5){ size-=0.5; dtext.style.fontSize=size+'pt'; }
+        if(overflowing() && warn){ warn.style.display='inline'; }
+      })();
+    </script>
     </body></html>`;
   if (!popup) {
     window.print();
@@ -1196,7 +1234,6 @@ async function printOrderClean(order: Order) {
   popup.document.write(html);
   popup.document.close();
   popup.focus();
-  setTimeout(() => popup.print(), 350);
 }
 
 function orderPrintDate(order: Order) {
