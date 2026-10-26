@@ -237,11 +237,14 @@ function orderQrPage(row: Record<string, unknown>) {
       .ops{margin:0;padding-inline-start:20px;font-size:14px;line-height:2}
       .box{border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.9;white-space:pre-wrap;background:#fafbfc}
       .muted{font-size:14px;color:#374151;margin:0}
+      .open-sys{display:block;text-align:center;margin:0 0 16px;background:#ED1525;color:#fff;text-decoration:none;font-weight:800;font-size:15px;padding:12px 16px;border-radius:10px}
+      .open-sys:active{background:#c40f1d}
       .footer{margin-top:18px;text-align:center;font-size:11px;color:#9ca3af}
     </style></head><body>
     <div class="card">
       <h1 class="title">أوردر رقم ${safeHtml(row.order_number) || "—"}</h1>
       <p class="tip">بيانات الأوردر للاطلاع فقط</p>
+      <a class="open-sys" href="/#editOrder/${safeHtml(row.id)}">فتح في النظام</a>
       ${sections}
       <div class="footer">Zunion</div>
     </div>

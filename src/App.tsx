@@ -1057,17 +1057,17 @@ function appBaseUrl() {
 }
 
 /**
- * A stable, shareable link to an order's read-only details, built from the app's
- * production URL and the order's database id. Opening it requires the usual login
- * and permissions (the app gates every view), and it carries no personal data,
- * tokens, or edit authorization — the details tab opens view-only (edit mode is
- * only ever granted from متابعة أوردرات). The link never changes when the order is
- * edited, because it is keyed by the immutable database id.
+ * A stable, shareable link to an order's read-only details that opens WITHOUT a
+ * sign-in — the server-rendered public page at /api/orders/:id/qr — so scanning
+ * the label on a phone shows the order immediately. The link is keyed by the
+ * order's immutable database id (an unguessable UUID that acts as a capability
+ * token), carries no financial data, and the page itself links into the system
+ * for staff who are logged in. It never changes when the order is edited.
  */
 function orderQrUrl(order: Order) {
   const id = order.id || "";
   return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)
-    ? `${appBaseUrl()}/#editOrder/${encodeURIComponent(id)}`
+    ? `${appBaseUrl()}/api/orders/${encodeURIComponent(id)}/qr`
     : "";
 }
 
