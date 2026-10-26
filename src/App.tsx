@@ -92,7 +92,7 @@ import { allPermissionKeys, roleDefaultPermissions, type PermissionKey } from ".
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "image";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "products" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "image";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -583,6 +583,7 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   draftEdit: "orders.create",
   addCustomer: "customers.create",
   addProduct: "products.create",
+  products: "products.view",
   search: "orders.view",
   worker: "operation.view",
   machineDist: "operation.view",
@@ -2565,7 +2566,9 @@ const ordersListHeaders = [
   "تاريخ التسليم",
   "رقم الأوردر",
   "اسم العميل",
+  "طرف",
   "النوع",
+  "اللون",
   "اللوجو",
   "العدد",
   "حالة التشغيل",
@@ -2587,26 +2590,21 @@ const finishListHeaders = [
   "شغل جاهز",
 ] as const;
 
-/** متابعة أوردرات: the base list plus who last edited the order, how often, and a QR column. */
-const trackingListHeaders = [
-  ordersListHeaders[0],
-  "آخر تعديل بواسطة",
-  "عدد التعديلات",
-  ...ordersListHeaders.slice(1),
-  "QR Code",
-] as const;
+/**
+ * متابعة أوردرات now uses the same columns as the base list — the QR code and the
+ * modification info (آخر تعديل بواسطة / عدد التعديلات) moved into order details.
+ */
+const trackingListHeaders = ordersListHeaders;
 
 /**
  * Fixed column widths (px) per header set, so the one table that renders both the
  * header and the body sizes every column identically and each heading sits exactly
  * above its values. Index order matches the matching *Headers array.
  */
-const ordersListColWidths = [240, 130, 150, 150, 90, 90, 80, 130, 130, 110, 170];
+const ordersListColWidths = [220, 120, 140, 150, 110, 90, 90, 90, 80, 130, 130, 110, 170];
 const finishListColWidths = [240, 150, 130, 150, 90, 90, 80, 140, 130, 110];
-const trackingListColWidths = [240, 150, 110, 130, 150, 150, 90, 90, 80, 130, 130, 110, 170, 150];
 function colWidthsFor(headers: readonly string[]): number[] {
   if (headers === finishListHeaders) return finishListColWidths;
-  if (headers === trackingListHeaders) return trackingListColWidths;
   return ordersListColWidths;
 }
 
@@ -2712,6 +2710,75 @@ function OrderQrDialog({ order, onClose }: { order: Order; onClose: () => void }
   );
 }
 
+/**
+ * The QR-code and modification-history sections shown inside the order-details
+ * view (relocated out of the متابعة أوردرات table). Read-only; the QR links to the
+ * public no-sign-in order page, and the history reuses the recorded audit edits.
+ */
+function OrderDetailsExtras({ order }: { order: Order }) {
+  const qr = orderQrUrl(order);
+  const [history, setHistory] = useState<OrderHistory | null>(null);
+  const [histError, setHistError] = useState("");
+  useEffect(() => {
+    if (!order.id) return;
+    let active = true;
+    setHistory(null);
+    setHistError("");
+    backendJson<OrderHistory>(`/api/orders/${encodeURIComponent(order.id)}/history`)
+      .then((data) => { if (active) setHistory(data); })
+      .catch((error) => { if (active) setHistError(error instanceof Error ? error.message : "تعذر تحميل سجل التعديلات"); });
+    return () => { active = false; };
+  }, [order.id]);
+  const editCount = history ? history.edits.length : (order.edit_count ?? 0);
+  const lastEdit = history?.edits[0];
+  const lastEditor = lastEdit?.editor_name || order.last_editor_name || "—";
+  const lastEditAt = lastEdit?.created_at || order.last_edited_at || "";
+  return (
+    <div className="od-extras">
+      <section className="od-extra-section">
+        <h3 className="od-extra-title"><QrCode size={16} /> QR Code</h3>
+        <div className="od-qr-block">
+          {qr ? <QrImage text={qr} size={160} className="od-qr-img" /> : <p className="muted">يتوفر رمز QR بعد حفظ الأوردر.</p>}
+          {qr && (
+            <div className="od-qr-actions">
+              <button type="button" className="primary-btn compact" onClick={() => window.open(qr, "_blank", "noopener")}><Eye size={14} /> عرض</button>
+              <button type="button" className="primary-btn compact" onClick={() => void downloadOrderQr(order)}><Download size={14} /> تحميل</button>
+            </div>
+          )}
+          <p className="muted od-qr-hint">يفتح بيانات الأوردر للاطلاع فقط بدون تسجيل دخول، وبدون أسعار أو بيانات مالية.</p>
+        </div>
+      </section>
+      <section className="od-extra-section">
+        <h3 className="od-extra-title"><History size={16} /> سجل التعديلات</h3>
+        <div className="od-hist-summary">
+          <span>عدد مرات التعديل: <strong>{formatNumber(editCount)}</strong></span>
+          <span>آخر تعديل بواسطة: <strong>{lastEditor}</strong></span>
+          <span>تاريخ ووقت آخر تعديل: <strong>{lastEditAt ? formatDateTimeCairo(lastEditAt) : "—"}</strong></span>
+        </div>
+        {histError && <p className="tab-confirm-error">{histError}</p>}
+        {history && history.edits.length > 0 ? (
+          <ol className="od-hist-list">
+            {history.edits.map((edit) => (
+              <li key={edit.id}>
+                <div className="od-hist-meta"><strong>{edit.editor_name || "مستخدم غير معروف"}</strong><span>{formatDateTimeCairo(edit.created_at)}</span></div>
+                <ul>
+                  {edit.changes.map((change) => (
+                    <li key={change.field}><span className="od-hist-field">{change.label}:</span> <span className="od-hist-from">{historyValueText(change.field, change.from)}</span> ← <span className="od-hist-to">{historyValueText(change.field, change.to)}</span></li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ol>
+        ) : history ? (
+          <p className="muted">لا توجد تعديلات مسجلة على هذا الأوردر.</p>
+        ) : !histError ? (
+          <p className="muted"><Loader2 size={14} className="spin" /> جارٍ التحميل…</p>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function valueText(value: unknown, fallback = "—") {
   const text = normalizeDigitsToEnglish(value).trim();
   return text || fallback;
@@ -2737,6 +2804,14 @@ function orderDisplayType(order: OrdersListRecord) {
 
 function orderDisplayLogo(order: OrdersListRecord) {
   return valueText(order.logo_place || order.logo_status);
+}
+
+function orderDisplayParty(order: OrdersListRecord) {
+  return valueText(order.source_person || order.source_party || order.party);
+}
+
+function orderDisplayColor(order: OrdersListRecord) {
+  return valueText(order.color);
 }
 
 function orderDisplayQuantity(order: OrdersListRecord) {
@@ -3971,7 +4046,7 @@ function UserDrawer({ open, onClose, user, orders }: {
   );
 }
 
-function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, qrActions, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void; onHistoryClick?: () => void; qrActions?: { onView: () => void; onDownload: () => void }; highlight?: boolean }) {
+function OrdersListRow({ order, onCustomerClick, onOrderClick, highlight }: { order: OrdersListRecord; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void; highlight?: boolean }) {
   const operationStatus = orderOperationStatusText(order);
   const finishingStatus = orderFinishingStatusText(order);
   const readyStatus = orderReadyStatus(order);
@@ -3984,30 +4059,18 @@ function OrdersListRow({ order, onCustomerClick, onOrderClick, onHistoryClick, q
   return (
     <tr className={highlight ? "ws-row-highlight" : undefined} data-order-row-id={order.id}>
       <td className={isEmailValue(createdBy) ? "email-cell" : undefined}>{isEmailValue(createdBy) ? <EmailText email={createdBy} /> : createdBy}</td>
-      {onHistoryClick && (
-        <>
-          <td>{valueText(order.last_editor_name)}</td>
-          <td><button type="button" className="cd-client-link order-edit-count" onClick={onHistoryClick} title="عرض سجل التعديلات">{formatNumber(order.edit_count ?? 0)}</button></td>
-        </>
-      )}
       <td>{formatDateArabic(String(order.delivery_date || ""))}</td>
       <td className="orders-list-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(String(order.id || order.order_number))}>{orderDisplayNumber(order)}</button> : orderDisplayNumber(order)}{thumbSrc && <span className="orders-list-thumb"><AttachmentImage src={thumbSrc} alt="صورة الأوردر" /></span>}</td>
       <td>{handleClick ? <button type="button" className="cd-client-link" onClick={handleClick}>{clientName}</button> : clientName}</td>
+      <td>{orderDisplayParty(order)}</td>
       <td>{orderDisplayType(order)}</td>
+      <td>{orderDisplayColor(order)}</td>
       <td>{orderDisplayLogo(order)}</td>
       <td>{orderDisplayQuantity(order)}</td>
       <td><span className={listBadgeClass(operationStatus)}>{operationStatus}</span></td>
       <td><span className={listBadgeClass(finishingStatus)}>{finishingStatus}</span></td>
       <td><span className={listBadgeClass(readyStatus)}>{readyStatus}</span></td>
       <td>{valueText(order.client_message || order.message_text)}</td>
-      {qrActions && (
-        <td className="orders-list-qr-cell">
-          <div className="orders-list-qr-actions">
-            <button type="button" className="orders-qr-btn" onClick={qrActions.onDownload}><Download size={13} /> تحميل</button>
-            <button type="button" className="orders-qr-btn" onClick={qrActions.onView}><QrCode size={13} /> عرض</button>
-          </div>
-        </td>
-      )}
     </tr>
   );
 }
@@ -5133,6 +5196,8 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
         {draftNotice && <small className="field-success">{draftNotice}</small>}
       </div>
 
+      {isEdit && !editing && <OrderDetailsExtras order={form} />}
+
       {isEdit && (
         <div className="nf-actionbar nf-actionbar-edit">
           {editing ? (
@@ -5585,7 +5650,9 @@ type WorkerSpreadRow = {
   deliveryDate: string;
   addedBy: string;
   client: string;
+  party: string;
   type: string;
+  color: string;
   logo: string;
   quantity: number;
   machine: string;
@@ -5604,7 +5671,9 @@ function workerRowFromDb(row: DbOrder, machine = ""): WorkerSpreadRow {
     deliveryDate: formatDisplayDate(row.delivery_date),
     addedBy: String(row.created_by ?? ""),
     client: orderClientName(row),
+    party: orderParty(row) === "-" ? "" : orderParty(row),
     type: String(row.product_name_snapshot ?? row.order_type ?? row.service_type ?? ""),
+    color: String((row as Record<string, unknown>).color ?? ""),
     logo: String(row.logo_place ?? row.logo_status ?? ""),
     quantity: Number(orderPieces(row) || 0),
     machine: machine || String(row.machine_name ?? ""),
@@ -5622,7 +5691,9 @@ function workerRowFromOrder(order: Order): WorkerSpreadRow {
     deliveryDate: formatDisplayDate(order.delivery_date),
     addedBy: order.created_by || "",
     client: order.client_name,
+    party: order.source_person || "",
     type: order.order_type || order.productName || "",
+    color: order.color || "",
     logo: order.logo_place || order.logo_status || "",
     quantity: Number(order.quantity || 0),
     machine: order.machineName ?? "",
@@ -5731,7 +5802,9 @@ type FinishingRow = {
   deliveryDate: string;
   addedBy: string;
   client: string;
+  party: string;
   type: string;
+  color: string;
   logo: string;
   quantity: number;
   finishingWorker: string;
@@ -5749,7 +5822,9 @@ function finishingRowFromRaw(row: Record<string, unknown>): FinishingRow {
     deliveryDate: formatDisplayDate(row.delivery_date),
     addedBy: String(row.created_by ?? row.added_by ?? ""),
     client: orderDisplayClient(row as OrdersListRecord),
+    party: String(row.source_party ?? row.party ?? row.source_person ?? ""),
     type: String(row.type ?? row.product_name_snapshot ?? ""),
+    color: String(row.color ?? ""),
     logo: String(row.logo_place ?? row.logo_status ?? ""),
     quantity: Number(row.quantity ?? row.pieces_count ?? 0),
     finishingWorker: String(row.finishing_worker ?? ""),
@@ -6503,6 +6578,13 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [finishingError, setFinishingError] = useState("");
   const wsWrapRef = useRef<HTMLDivElement | null>(null);
   const canManageWorkers = ["Master", "Helper", "Operator", "Supervisor"].includes(session.role);
+  // Non-blocking success toast (e.g. after إنهاء in التشغيل); auto-dismisses.
+  const [toast, setToast] = useState<string>("");
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(""), 3500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
     const next = { ...record };
@@ -7171,10 +7253,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     if (finishingLoading && finishingRows.length === 0 && !finishingError) return <LoadingPanel />;
     if (finishingError && finishingRows.length === 0) return <ErrorPanel message={finishingError || "تعذر تحميل البيانات."} />;
 
-    const rows = finishingRows.map((row) => ({
-      ...row,
-      addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
-    }));
+    const ordersById = new Map(orders.map((order) => [order.id, order]));
+    const rows = finishingRows.map((row) => {
+      const shared = ordersById.get(row.id);
+      return {
+        ...row,
+        addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+        color: shared?.color ?? row.color,
+        party: shared?.source_person ?? row.party,
+      };
+    });
     const finishingWorkerNames = Array.from(new Set([
       ...workersRegistry.filter((worker) => worker.active).map((worker) => worker.name),
       ...orders.map((order) => order.finishing_worker || ""),
@@ -7226,7 +7314,9 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num" },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date" },
       { key: "client", label: "اسم العميل", cls: "ws-hd" },
+      { key: "party", label: "طرف", cls: "ws-hd" },
       { key: "type", label: "النوع", cls: "ws-hd" },
+      { key: "color", label: "اللون", cls: "ws-hd" },
       { key: "logo", label: "اللوجو", cls: "ws-hd ws-hd-logo" },
       { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty" },
       { key: "worker", label: "اسم العامل", cls: "ws-hd" },
@@ -7247,14 +7337,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={10} />}
+              {rows.length === 0 && <EmptyRow colSpan={12} />}
               {rows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td>{row.client}</td>
+                  <td>{row.party || "—"}</td>
                   <td>{row.type}</td>
+                  <td>{row.color || "—"}</td>
                   <td className="ws-logo">{row.logo || "—"}</td>
                   <td className="ws-qty">{row.quantity || ""}</td>
                   <td className="ws-worker">
@@ -7334,15 +7426,23 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       ? localRows.map(workerRowFromOrder)
       : dbRows.map((row) => workerRowFromDb(row));
 
-    const rows = baseRows.map((row) => ({
-      ...row,
-      addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
-      machine: machineOverrides[row.id] ?? row.machine,
-      worker: workerOverrides[row.id] ?? row.worker,
-      problem: problemOverrides[row.id] ?? row.problem,
-      started: statusOverrides[row.id]?.started ?? row.started,
-      finished: statusOverrides[row.id]?.finished ?? row.finished,
-    }));
+    // One consistent source: اللون/طرف come from the shared order record when it is
+    // loaded, so edits made in متابعة أوردرات show here too.
+    const ordersById = new Map(orders.map((order) => [order.id, order]));
+    const rows = baseRows.map((row) => {
+      const shared = ordersById.get(row.id);
+      return {
+        ...row,
+        addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+        color: shared?.color ?? row.color,
+        party: shared?.source_person ?? row.party,
+        machine: machineOverrides[row.id] ?? row.machine,
+        worker: workerOverrides[row.id] ?? row.worker,
+        problem: problemOverrides[row.id] ?? row.problem,
+        started: statusOverrides[row.id]?.started ?? row.started,
+        finished: statusOverrides[row.id]?.finished ?? row.finished,
+      };
+    });
     const workerNames = Array.from(new Set([
       ...workersRegistry.filter((worker) => worker.active).map((worker) => worker.name),
       ...orders.map((order) => order.worker_name || ""),
@@ -7453,7 +7553,13 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
         .then(() => {
           setStatusOverrides((current) => ({ ...current, [id]: { ...current[id], [field]: desired } }));
           setOrders((current) => current.map((order) => order.id === id ? applyBackendStatus(order, nextStatus) : order));
-          if (nextStatus === "WORKER_DONE") onFinished?.(id);
+          if (nextStatus === "WORKER_DONE") {
+            // The order moves to the finishing stage (applyBackendStatus), so it
+            // leaves this list and shows in التشطيب on its own. Stay on التشغيل and
+            // confirm with a non-blocking toast instead of navigating away.
+            onFinished?.(id);
+            setToast("تم إنهاء التشغيل وتحويل الأوردر إلى التشطيب بنجاح");
+          }
           setCellSaving((current) => withoutKey(current, key));
         })
         .catch((error) => {
@@ -7551,7 +7657,9 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
+      { key: "party", label: "طرف", cls: "ws-hd", rowSpan: 2 },
       { key: "type", label: "النوع", cls: "ws-hd", rowSpan: 2 },
+      { key: "color", label: "اللون", cls: "ws-hd", rowSpan: 2 },
       { key: "logo", label: "اللوجو", cls: "ws-hd ws-hd-logo", rowSpan: 2 },
       { key: "quantity", label: "العدد", cls: "ws-hd ws-hd-qty", rowSpan: 2 },
       { key: "machine", label: "المكنه المقترحه", cls: "ws-hd ws-hd-machine", rowSpan: 2 },
@@ -7580,14 +7688,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </tr>
             </thead>
             <tbody>
-              {visibleRows.length === 0 && <EmptyRow colSpan={12} />}
+              {visibleRows.length === 0 && <EmptyRow colSpan={14} />}
               {visibleRows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
                   <td>{row.client}</td>
+                  <td>{row.party || "—"}</td>
                   <td>{row.type}</td>
+                  <td>{row.color || "—"}</td>
                   <td className="ws-logo">{row.logo || "—"}</td>
                   <td className="ws-qty">{row.quantity || ""}</td>
                   <td className="ws-machine">
@@ -7598,21 +7708,16 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                     {cellFeedback(row.id, "machine")}
                   </td>
                   <td className="ws-worker">
-                    {workerEditId === row.id ? (
-                      <select
-                        autoFocus
-                        value={row.worker || ""}
-                        onChange={(event) => saveWorker(row.id, event.target.value)}
-                        onBlur={() => setWorkerEditId(null)}
-                      >
-                        <option value="">—</option>
-                        {workerNames.map((name) => <option key={name} value={name}>{name}</option>)}
-                      </select>
-                    ) : (
-                      <button type="button" className="ws-cell-edit" onClick={() => setWorkerEditId(row.id)}>
-                        {row.worker || "—"}
-                      </button>
-                    )}
+                    <select
+                      value={row.worker || ""}
+                      disabled={Boolean(cellSaving[`${row.id}:worker`])}
+                      onChange={(event) => saveWorker(row.id, event.target.value)}
+                    >
+                      <option value="">—</option>
+                      {/* Keep a saved worker visible even if they were later deactivated/removed. */}
+                      {row.worker && !workerNames.includes(row.worker) ? <option value={row.worker}>{row.worker}</option> : null}
+                      {workerNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
                     <button
                       type="button"
                       className="ws-staff-btn"
@@ -7644,7 +7749,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                     {cellFeedback(row.id, "problem")}
                   </td>
                   <td className="ws-cell-action">
-                    <button type="button" className="ws-cell-edit ws-hd-end" onClick={() => saveStatus(row.id, "WORKER_DONE", "finished")}>إنهاء</button>
+                    <button type="button" className="ws-cell-edit ws-hd-end" disabled={row.finished || Boolean(cellSaving[`${row.id}:finished`])} onClick={() => saveStatus(row.id, "WORKER_DONE", "finished")}>إنهاء</button>
                   </td>
                 </tr>
               ))}
@@ -7776,15 +7881,13 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           columns={colWidthsFor(queue === "finish" ? finishListHeaders : queue ? ordersListHeaders : trackingListHeaders)}
           rows={filtered.slice(0, rowLimit).map((order) => queue === "finish"
             ? <FinishOrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />
-            : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} onHistoryClick={queue ? undefined : () => setHistoryOrder(order)} qrActions={queue ? undefined : { onView: () => setQrOrder(order), onDownload: () => { void downloadOrderQr(order); } }} />)}
+            : <OrdersListRow key={order.id} order={order} highlight={highlightOrderId === order.id} onCustomerClick={onCustomerClick} onOrderClick={onOrderClick} />)}
           total={filtered.length}
           colSpan={queue === "finish" ? finishListHeaders.length : queue ? ordersListHeaders.length : trackingListHeaders.length}
           rowLimit={rowLimit}
           onLoadMore={() => setRowLimit((value) => value + 100)}
           empty={filtered.length === 0}
         />
-        {historyOrder && <OrderHistoryDialog order={historyOrder} onClose={() => setHistoryOrder(null)} />}
-        {qrOrder && <OrderQrDialog order={qrOrder} onClose={() => setQrOrder(null)} />}
       </div>
     );
   }
@@ -7793,6 +7896,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     <>
       {body}
       {workersDept && renderWorkersModal()}
+      {toast && <div className="ws-toast" role="status">{toast}</div>}
     </>
   );
 }
@@ -8798,6 +8902,122 @@ function ProductManagerPage({ products, setProducts, session }: { products: Prod
   );
 }
 
+/**
+ * المنتجات: list and manage products saved through إضافة منتج. Reuses the shared
+ * product data layer (setProducts → optimistic save + backend sync), so a new
+ * product appears here immediately and edits/deletes persist. Deleting a product
+ * never touches historical orders, which keep their own product snapshot.
+ */
+function ProductsListPage({ products, setProducts, session }: { products: Product[]; setProducts: React.Dispatch<React.SetStateAction<Product[]>>; session: Session }) {
+  const list = products.map(normalizeProduct);
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [imageActive, setImageActive] = useState(false);
+  const [imageStatus, setImageStatus] = useState("");
+  const [search, setSearch] = useState("");
+  // Match the server rules: PUT is Master/Supervisor, DELETE is Master only.
+  const canEdit = ["Master", "Supervisor"].includes(session.role);
+  const canDelete = session.role === "Master";
+
+  const filtered = search.trim()
+    ? list.filter((product) => `${product.name} ${product.details}`.toLowerCase().includes(search.trim().toLowerCase()))
+    : list;
+
+  async function setEditingImage(file?: File, source: "upload" | "clipboard" = "upload") {
+    if (!file || !editing) return;
+    if (!clipboardImageTypes.includes(file.type)) { setImageStatus("نوع الصورة غير مدعوم"); return; }
+    if (file.size > 10 * 1024 * 1024) { setImageStatus("حجم الملف أكبر من 10MB"); return; }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setEditing((current) => current ? normalizeProduct({ ...current, productImage: dataUrl, productImageName: file.name }) : current);
+      setImageStatus(source === "clipboard" ? "تم لصق الصورة" : "تم اختيار الصورة");
+    } catch {
+      setImageStatus("تعذرت معالجة الصورة");
+    }
+  }
+
+  function saveEdit() {
+    if (!editing) return;
+    const name = editing.name.trim();
+    if (!name) return;
+    const updated = normalizeProduct({ ...editing, name, details: editing.details.trim(), active: editing.status !== "inactive" });
+    setProducts((current) => current.map((product) => product.id === updated.id ? updated : product));
+    addAudit(session, "PRODUCT_UPDATED", "products", updated.id, undefined, { ...updated, productImage: "", logoImage: "" });
+    setEditing(null);
+  }
+
+  function remove(product: Product) {
+    if (!window.confirm("هل أنت متأكد من حذف هذا المنتج؟")) return;
+    setProducts((current) => current.filter((item) => item.id !== product.id));
+    addAudit(session, "PRODUCT_DELETED", "products", product.id);
+  }
+
+  return (
+    <div className="stack">
+      <section className="panel">
+        <div className="panel-head"><h2>المنتجات</h2><span className="muted">{formatNumber(list.length)} منتج</span></div>
+        <div className="products-toolbar">
+          <label className="settings-search"><Search size={18} /><input placeholder="ابحث عن منتج" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+        </div>
+        <div className="table-wrap accounts-table products-table">
+          <table>
+            <thead><tr><th>صورة المنتج</th><th>اسم المنتج</th><th>التفاصيل</th><th>الحالة</th><th>الإجراءات</th></tr></thead>
+            <tbody>
+              {filtered.length === 0 && <tr><td colSpan={5} className="muted" style={{ textAlign: "center" }}>لا توجد منتجات.</td></tr>}
+              {filtered.map((product) => (
+                <tr key={product.id}>
+                  <td>{product.productImage ? <img className="products-thumb" src={product.productImage} alt={product.name} /> : "—"}</td>
+                  <td className="products-name">{product.name}</td>
+                  <td>{product.details || "—"}</td>
+                  <td><span className={product.status === "inactive" ? "badge badge-gray" : "badge badge-green"}>{product.status === "inactive" ? "غير نشط" : "نشط"}</span></td>
+                  <td>
+                    <div className="settings-row-actions">
+                      {canEdit ? <button type="button" className="ghost-btn compact" onClick={() => { setEditing(normalizeProduct(product)); setImageActive(false); setImageStatus(""); }}><Pencil size={15} /> تعديل</button> : null}
+                      {canDelete ? <button type="button" className="primary-btn compact danger" onClick={() => remove(product)}><Trash2 size={15} /> حذف</button> : null}
+                      {!canEdit && !canDelete ? <span className="muted">—</span> : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {editing ? (
+        <DraggableDialog dialogClassName="party-modal product-edit-modal" headClassName="party-modal-head" closeClassName="party-modal-close" ariaLabel="تعديل المنتج" onClose={() => setEditing(null)} title={<h2>تعديل المنتج</h2>}>
+          <div className="product-edit-form" onPaste={(event) => {
+            if (!imageActive) return;
+            const item = Array.from(event.clipboardData.items).find((clip) => clip.type.startsWith("image/"));
+            const file = item?.getAsFile();
+            if (file) { event.preventDefault(); void setEditingImage(new File([file], safeClipboardFileName(file.type), { type: file.type }), "clipboard"); }
+          }}>
+            <label className="settings-field"><span>اسم المنتج</span><input value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} /></label>
+            <label className="settings-field"><span>التفاصيل</span><input value={editing.details} onChange={(event) => setEditing({ ...editing, details: event.target.value })} /></label>
+            <label className="settings-field"><span>الحالة</span><select value={editing.status || "active"} onChange={(event) => setEditing({ ...editing, status: event.target.value as Product["status"] })}><option value="active">نشط</option><option value="inactive">غير نشط</option></select></label>
+            <div className="product-image-field">
+              <ImageInputWithClipboard
+                label="صورة المنتج"
+                value={editing.productImage || ""}
+                fileName={editing.productImageName}
+                active={imageActive}
+                status={imageStatus}
+                pasteLabel="لصق الصورة"
+                onActivate={() => setImageActive(true)}
+                onPaste={async () => { try { await setEditingImage(await readClipboardImageFile(), "clipboard"); } catch (error) { setImageStatus(error instanceof Error ? error.message : "تعذر لصق الصورة"); } }}
+                onRemove={() => setEditing((current) => current ? normalizeProduct({ ...current, productImage: "", productImageName: "" }) : current)}
+                onDropFile={(file) => void setEditingImage(file, "upload")}
+              />
+            </div>
+            <div className="nf-actionbar">
+              <button type="button" className="primary-btn" onClick={saveEdit}><Save size={16} /> حفظ التعديلات</button>
+              <button type="button" className="ghost-btn" onClick={() => setEditing(null)}><X size={16} /> إلغاء</button>
+            </div>
+          </div>
+        </DraggableDialog>
+      ) : null}
+    </div>
+  );
+}
+
 const archiveTypeOptions = ["تطريز", "طباعه", "خياطه"];
 
 type ArchiveFilters = {
@@ -9058,7 +9278,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "attendance", "alerts", "settings"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "products", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "attendance", "alerts", "settings"];
 
 type ShellTab = { id: string; view: View; recordId?: string; label: string };
 
@@ -9071,6 +9291,7 @@ const TAB_META: Record<View, { label: string; icon: LucideIcon }> = {
   draftEdit: { label: "استكمال مسودة", icon: Clock },
   addCustomer: { label: "إضافة عميل", icon: UserPlus },
   addProduct: { label: "إضافة منتج", icon: PackagePlus },
+  products: { label: "المنتجات", icon: ShoppingBag },
   search: { label: "بحث", icon: Search },
   worker: { label: "تشغيل تطريز", icon: Cog },
   machineDist: { label: "توزيع المكن", icon: LayoutGrid },
@@ -9767,6 +9988,7 @@ function ZunionApp() {
           { id: "drafts", label: "حفظ مؤقت", visible: true, icon: Clock },
           { id: "addCustomer", label: "إضافة عميل", visible: true, icon: UserPlus },
           { id: "addProduct", label: "إضافة منتج", visible: true, icon: PackagePlus },
+          { id: "products", label: "المنتجات", visible: true, icon: ShoppingBag },
           { id: "orders", label: "متابعة أوردرات", visible: true, icon: ClipboardList },
         ],
       },
@@ -9909,10 +10131,12 @@ function ZunionApp() {
         return <AddCustomerPage customers={customers} setCustomers={setCustomers} session={session} parties={parties} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} tabId={tab.id} onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
       case "addProduct":
         return <ProductManagerPage products={products} setProducts={setProducts} session={session} />;
+      case "products":
+        return <ProductsListPage products={products} setProducts={setProducts} session={session} />;
       case "search":
         return <SearchPage orders={orders} setOrders={setOrders} session={session} goToOrderId={searchGoOrderId} onGoToOrderHandled={() => setSearchGoOrderId(null)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "worker":
-        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => { setFinishGoOrderId(id); openView("finish"); }} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} onDistribute={openDistributionWindow} />;
+        return <OrdersPage orders={orders} setOrders={setOrders} session={session} queue="worker" machines={machines} goToOrderId={workerGoOrderId} onGoToOrderHandled={() => setWorkerGoOrderId(null)} onFinished={(id) => setFinishGoOrderId(id)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} onDistribute={openDistributionWindow} />;
       case "machineDist":
         return <MachineDistributionPage orders={orders} session={session} machines={machines} onMachinesChanged={refreshMachines} onOrderClick={onOrderNumberClick} />;
       case "finish":
