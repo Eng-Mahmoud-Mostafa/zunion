@@ -9444,6 +9444,169 @@ input[type="number"] {
 
 @media (max-width:768px){.settings-nav{grid-template-columns:1fr}.settings-stat-grid{grid-template-columns:1fr}}
 
+/* ================================================================
+   Settings inner layout (users, roles, permissions, parties,
+   departments, machines, financial, security). The redesign shipped
+   the shell but not these component styles, so every control is
+   given an explicit layout here. Scoped to .settings-page.
+   ================================================================ */
+.settings-page .settings-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.settings-page .settings-card-head h2 { margin: 0 0 2px; font-size: 18px; font-weight: 900; color: #08243d; }
+.settings-page .settings-card-head h3 { margin: 0; }
+.settings-page .settings-card-head .muted { margin: 0; font-size: 13px; }
+
+.settings-page .settings-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.settings-page .settings-toolbar select { height: 42px; padding: 0 12px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; font-weight: 700; }
+.settings-page .settings-search-wide { max-width: none; flex: 1 1 260px; position: relative; }
+.settings-page .settings-search input { border: 0; outline: none; width: 100%; font: inherit; background: transparent; }
+.settings-page .settings-search-clear { background: transparent !important; border: 0 !important; color: #6b7280 !important; padding: 2px !important; display: inline-flex; }
+.settings-page .settings-search-clear svg { color: #6b7280 !important; stroke: #6b7280 !important; }
+
+/* Tables */
+.settings-page .settings-table table,
+.settings-page .settings-overrides-table { width: 100%; border-collapse: collapse; }
+.settings-page .settings-table th, .settings-page .settings-table td,
+.settings-page .settings-overrides-table th, .settings-page .settings-overrides-table td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: right; vertical-align: middle; font-size: 14px; }
+.settings-page .settings-table thead th,
+.settings-page .settings-overrides-table thead th { background: #f8fafc; font-weight: 800; color: #08243d; white-space: nowrap; }
+.settings-page .settings-user-cell { display: flex; flex-direction: column; gap: 2px; }
+.settings-page .settings-user-name { font-weight: 800; color: #08243d; }
+.settings-page .settings-user-username { font-size: 12px; color: #6b7280; direction: ltr; text-align: right; }
+
+/* Action button groups — the main overlap fix */
+.settings-page .settings-row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-start; }
+.settings-page .settings-inline { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Key/value + overview stats */
+.settings-page .settings-kv { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 4px 0 12px; }
+.settings-page .settings-kv > div { display: flex; flex-direction: column; gap: 2px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; }
+.settings-page .settings-kv .muted { font-size: 12px; }
+.settings-page .settings-stat { display: flex; align-items: center; gap: 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; }
+.settings-page .settings-stat > div { display: flex; flex-direction: column; }
+.settings-page .settings-stat strong { font-size: 22px; font-weight: 900; color: #08243d; line-height: 1.1; }
+.settings-page .settings-stat .muted { font-size: 12px; }
+.settings-page .settings-stat-icon { display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; flex: 0 0 42px; background: #eef2f7; color: #334155; }
+.settings-page .settings-stat-icon svg { color: inherit !important; stroke: currentColor !important; }
+.settings-page .settings-stat-icon.blue { background: #e5edff; color: #1e40af; }
+.settings-page .settings-stat-icon.green { background: #dcfce7; color: #166534; }
+.settings-page .settings-stat-icon.gray { background: #eef2f7; color: #475569; }
+.settings-page .settings-stat-icon.violet { background: #ede9fe; color: #6d28d9; }
+.settings-page .settings-stat-icon.amber { background: #fef3c7; color: #92400e; }
+
+/* Alerts */
+.settings-page .settings-alert { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 10px; font-weight: 700; font-size: 14px; margin-bottom: 14px; border: 1px solid; }
+.settings-page .settings-alert.error { background: #fef2f2; border-color: #fecaca; color: #b42318; }
+.settings-page .settings-alert.info { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+.settings-page .settings-alert svg { color: currentColor !important; stroke: currentColor !important; }
+
+/* Forms (inside modals / windows) */
+.settings-page .settings-form-grid,
+.settings-floating-window .settings-form-grid,
+.settings-modal .settings-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.settings-field { display: flex; flex-direction: column; gap: 6px; }
+.settings-field > span { font-size: 13px; font-weight: 800; color: #08243d; }
+.settings-field input, .settings-field select { height: 42px; padding: 0 12px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; font: inherit; width: 100%; }
+.settings-field-error { color: #b42318; font-size: 12px; font-weight: 700; }
+.settings-checkbox-row { display: flex; align-items: center; gap: 10px; font-weight: 700; grid-column: 1 / -1; }
+.settings-checkbox-row input { width: 18px; height: 18px; }
+
+/* Save bars / editor heads / group heads */
+.settings-page .settings-save-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid #eef0f3; padding-top: 14px; margin-top: 16px; }
+.settings-page .settings-editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.settings-page .settings-editor-head h3 { margin: 0 0 2px; font-size: 16px; font-weight: 900; color: #08243d; }
+.settings-page .settings-group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #eef0f3; }
+.settings-page .settings-subtitle { margin: 18px 0 10px; font-size: 15px; font-weight: 900; color: #08243d; }
+.settings-page .settings-hint { font-size: 12px; color: #6b7280; }
+
+/* Roles two-column layout */
+.settings-page .settings-role-layout { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 18px; align-items: start; }
+.settings-page .settings-role-list { display: flex; flex-direction: column; gap: 10px; }
+.settings-page .settings-role-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: right; padding: 12px 14px; border: 1px solid #e5e7eb !important; border-radius: 12px; background: #fff !important; color: #08243d !important; cursor: pointer; }
+.settings-page .settings-role-item * { color: inherit !important; }
+.settings-page .settings-role-item strong { display: block; font-size: 15px; font-weight: 800; }
+.settings-page .settings-role-item .muted { display: block; font-size: 12px; color: #6b7280 !important; }
+.settings-page .settings-role-item.active { border-color: #ED1525 !important; background: #fff5f5 !important; }
+.settings-page .settings-role-editor { min-width: 0; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
+
+/* Permission groups (role editor) */
+.settings-page .settings-permission-groups { display: flex; flex-direction: column; gap: 14px; }
+.settings-page .settings-permission-group { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; }
+.settings-page .settings-permission-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid #f3f4f6; }
+.settings-page .settings-permission-row:first-of-type { border-top: 0; }
+.settings-page .settings-permission-row input { width: 18px; height: 18px; flex: 0 0 auto; }
+.settings-page .settings-permission-label { font-weight: 700; color: #08243d; flex: 1 1 auto; }
+
+/* Combo dropdown (user picker) — must stay white, not the global red button */
+.settings-page .settings-combo { position: relative; }
+.settings-page .settings-combo-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 42px; padding: 0 12px; border: 1px solid #e5e7eb !important; border-radius: 10px; background: #fff !important; color: #08243d !important; cursor: pointer; }
+.settings-page .settings-combo-trigger * { color: #08243d !important; }
+.settings-page .settings-combo-trigger svg { color: #6b7280 !important; stroke: #6b7280 !important; }
+.settings-page .settings-combo-trigger .placeholder { color: #9ca3af !important; }
+.settings-page .settings-combo-panel { position: absolute; top: calc(100% + 4px); inset-inline: 0; z-index: 50; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.14); padding: 8px; max-height: 320px; overflow: auto; }
+.settings-page .settings-combo-search { display: flex; align-items: center; gap: 8px; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0 10px; height: 38px; margin-bottom: 8px; }
+.settings-page .settings-combo-search input { border: 0; outline: none; width: 100%; font: inherit; background: transparent; }
+.settings-page .settings-combo-list { display: flex; flex-direction: column; gap: 4px; }
+.settings-page .settings-combo-option { display: flex; align-items: center; gap: 8px; width: 100%; text-align: right; padding: 8px 10px; border: 0 !important; border-radius: 8px; background: #fff !important; color: #08243d !important; cursor: pointer; }
+.settings-page .settings-combo-option * { color: #08243d !important; }
+.settings-page .settings-combo-option:hover { background: #f3f6fa !important; }
+.settings-page .settings-combo-option.active { background: #fff5f5 !important; }
+.settings-page .settings-combo-option-name { font-weight: 800; flex: 1 1 auto; }
+.settings-page .settings-combo-empty { padding: 10px; text-align: center; }
+
+/* Permission overrides (per-user) */
+.settings-page .settings-overrides-head { align-items: flex-start; }
+.settings-page .settings-overrides-user { display: flex; flex-direction: column; gap: 10px; min-width: 280px; }
+.settings-page .settings-overrides-user-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; background: #f8fafc; }
+.settings-page .settings-overrides-user-card strong { font-weight: 800; color: #08243d; }
+.settings-page .settings-overrides-user-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.settings-page .settings-overrides-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.settings-page .settings-overrides-toolbar-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.settings-page .settings-overrides-table-wrap { overflow: auto; border: 1px solid #e5e7eb; border-radius: 12px; }
+.settings-page .settings-overrides-table thead th { position: sticky; top: 0; }
+.settings-page .settings-overrides-group-row th { background: #f3f6fa; padding: 8px 12px; }
+.settings-page .settings-overrides-group-toggle { display: inline-flex; align-items: center; gap: 8px; background: transparent !important; border: 0 !important; color: #08243d !important; font-weight: 800; cursor: pointer; padding: 0 !important; }
+.settings-page .settings-overrides-group-toggle * { color: #08243d !important; }
+.settings-page .settings-overrides-group-caret svg { color: #6b7280 !important; stroke: #6b7280 !important; }
+.settings-page .settings-overrides-group-count { font-size: 12px; color: #6b7280 !important; font-weight: 700; }
+.settings-page .settings-overrides-group-hint { display: block; font-size: 12px; color: #6b7280; font-weight: 600; margin-top: 2px; }
+.settings-page .settings-overrides-permission { text-align: right; }
+.settings-page .settings-overrides-permission-name { display: block; font-weight: 700; color: #08243d; }
+.settings-page .settings-overrides-permission-key { display: block; font-size: 11px; color: #9ca3af; direction: ltr; text-align: right; }
+.settings-page .settings-overrides-select { height: 38px; padding: 0 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; font: inherit; font-weight: 700; }
+.settings-page .settings-overrides-select.is-allow { border-color: #16a34a; color: #166534; }
+.settings-page .settings-overrides-select.is-deny { border-color: #dc2626; color: #b42318; }
+.settings-page .settings-overrides-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
+.settings-page .settings-overrides-state.is-allowed { color: #166534; }
+.settings-page .settings-overrides-state.is-denied { color: #b42318; }
+.settings-page .settings-overrides-actionbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-top: 1px solid #eef0f3; padding-top: 14px; margin-top: 14px; }
+.settings-page .settings-overrides-status { display: flex; flex-direction: column; gap: 2px; }
+.settings-page .settings-overrides-flag { font-weight: 800; }
+.settings-page .settings-overrides-flag.is-dirty { color: #b45309; }
+.settings-page .settings-overrides-flag.is-clean { color: #166534; }
+
+/* Mini cards (departments / machines / financial) */
+.settings-page .settings-grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 14px; }
+.settings-page .settings-mini-card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; background: #fff; }
+.settings-page .settings-mini-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.settings-page .settings-mini-head strong { font-weight: 800; color: #08243d; }
+
+/* Empty / loading */
+.settings-page .settings-empty, .settings-page .settings-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 32px 16px; text-align: center; color: #6b7280; }
+
+/* ConfirmDialog (blocking modal) box */
+.settings-modal-backdrop { position: fixed; inset: 0; background: rgba(8,15,30,.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.settings-modal:not(.settings-floating-window) { background: #fff; border-radius: 14px; width: min(460px, calc(100vw - 32px)); box-shadow: 0 20px 50px rgba(0,0,0,.28); padding: 18px; }
+.settings-modal:not(.settings-floating-window) .settings-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.settings-modal:not(.settings-floating-window) .settings-modal-head h3 { margin: 0; font-size: 17px; font-weight: 900; color: #08243d; }
+.settings-modal:not(.settings-floating-window) .settings-modal-foot { display: flex; justify-content: flex-start; gap: 8px; margin-top: 16px; }
+.settings-confirm-text { font-size: 14px; line-height: 1.7; color: #334155; }
+
+@media (max-width: 900px){
+  .settings-page .settings-role-layout { grid-template-columns: 1fr; }
+  .settings-page .settings-form-grid, .settings-floating-window .settings-form-grid, .settings-modal .settings-form-grid { grid-template-columns: 1fr; }
+  .settings-page .settings-kv { grid-template-columns: 1fr; }
+}
+
 .drafts-panel .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .drafts-table td, .drafts-table th { text-align: right; vertical-align: middle; }
 .drafts-table .primary-btn { white-space: nowrap; }

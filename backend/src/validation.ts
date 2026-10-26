@@ -210,7 +210,9 @@ export const finishingSchema = z.object({
 export const customerSchema = z.object({
   name: z.string().min(1),
   code: z.string().optional().default(""),
-  phone: z.string().min(1),
+  // Optional to match the add-customer form, which only requires a name; an
+  // empty phone is stored as "" (the column is NOT NULL, not non-empty).
+  phone: z.string().optional().default(""),
   email: z.string().trim().toLowerCase().email().or(z.literal("")).optional().default(""),
   address: z.string().trim().optional().default(""),
   source_party: z.string().optional().default("").refine((name) => !isOtherParty(name), otherPartyMessage),
