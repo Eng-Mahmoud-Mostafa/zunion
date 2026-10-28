@@ -4328,7 +4328,9 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
 }
 
 function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, canManageParties = false, onAddProduct, onCreateParty, onUpdateParty, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly: readOnlyProp = false, canEdit = false, onViewImage, onPrint, closeSaveMode = "save", onDirtyChange, registerActions }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; canManageParties?: boolean; onAddProduct?: () => void; onCreateParty?: (name: string) => Promise<void> | void; onUpdateParty?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; canEdit?: boolean; onViewImage?: (src: string, title: string) => void; onPrint?: (order: Order) => void; tabId?: string; closeSaveMode?: "draft" | "save"; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
-  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: activePartyNames(parties)[0] ?? "", delivery_date: "", created_at: new Date().toISOString() });
+  // A brand-new order starts with no party selected ("اختر طرف"); the user must
+  // pick one. Existing/draft orders keep their saved party (via initial).
+  const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: "", delivery_date: "", created_at: new Date().toISOString() });
   // A saved order opens read-only; "تعديل الأوردر" unlocks it and "إلغاء" restores the saved values.
   const isSavedOrder = !!initial && !startAsDraft;
   const [editing, setEditing] = useState(false);
@@ -4736,6 +4738,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
     const nextErrors: Record<string, string> = {};
     const normalizedOperationItems = operationItems.map((item) => ({ ...item, method: item.method.trim() }));
     const methods = normalizedOperationItems.map((item) => item.method).filter(Boolean);
+    if (!form.source_person.trim()) nextErrors.source_person = "يجب اختيار الطرف";
     if (!form.client_name.trim()) nextErrors.client_name = "اسم العميل مطلوب";
     if (Number(form.quantity || 0) < 1) nextErrors.quantity = "العدد يجب أن يكون 1 على الأقل";
     if (Number(form.price || 0) < 0) nextErrors.price = "السعر لا يمكن أن يكون بالسالب";
@@ -4862,12 +4865,33 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
     setSaveError("");
     setDraftNotice("");
     try {
+      // Draft (with its attachments) is fully saved to the backend before we clear.
       const saved = await onSaveDraft?.(order);
-      if (saved && saved.order_number) {
+      if (!initial) {
+        // Brand-new order page: clear the form for a completely new order and stay
+        // here. The saved draft keeps its own copy (incl. uploaded attachments); a
+        // fresh id + empty order_number means the next save is a new order, never an
+        // overwrite, and the order number is generated on save as usual.
+        setForm({
+          ...emptyOrder,
+          id: createId(),
+          source_person: "",
+          delivery_date: "",
+          created_at: new Date().toISOString(),
+          operationItems: [{ method: "", logoImage: "", workOrderImage: "" }],
+          items: [],
+        });
+        baselineRef.current = null;
+        setErrors({});
+        // Drop the previous order's attachment previews from the DOM-backed inputs.
+        const previews = document.querySelectorAll(".image-clipboard-field .upload-preview, .image-clipboard-field img");
+        previews.forEach((el) => el.remove());
+      } else if (saved && saved.order_number) {
+        // Editing an existing draft: keep editing it, with its original number.
         setForm((current) => calculate({ ...current, id: saved.id, order_number: saved.order_number, updated_at: new Date().toISOString() }));
+        baselineRef.current = null;
       }
-      baselineRef.current = null;
-      setDraftNotice("تم حفظ الأوردر كمسودة بنجاح");
+      setDraftNotice("تم حفظ الأوردر مؤقتًا بنجاح");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "تعذر حفظ المسودة. حاول مرة أخرى.");
       setSaving(false);
@@ -5035,8 +5059,9 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
                 <input value={form.order_number} readOnly placeholder="يُولَّد عند الحفظ" title={form.order_number} />
               </label>
                <label className={`nf-field${errors.source_person ? " nf-field-invalid" : ""}`}>
-                 <span>طرف</span>
+                 <span>طرف<em className="nf-required">*</em></span>
                  <PartySelect
+                   placeholder="اختر طرف"
                    value={form.source_person}
                    onChange={(name) => {
                      setForm((current) => {
