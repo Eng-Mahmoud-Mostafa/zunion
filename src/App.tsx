@@ -14,6 +14,7 @@ import {
   CalendarClock,
   CheckCircle,
   ChevronDown,
+  ChevronLeft,
   CircleDollarSign,
   ClipboardList,
   Clock,
@@ -2803,6 +2804,146 @@ function OrderDetailsExtras({ order }: { order: Order }) {
   );
 }
 
+/**
+ * Redesigned read-only order-details view: header + prominent order number, a
+ * compact info grid with the QR code beside it, then التفاصيل, طريقة التشغيل, and
+ * the أمر الشغل / أمر اللوجو attachment panels, with سجل التعديلات in a collapsible
+ * section. Shown in place of the form while viewing a saved order; editing still
+ * uses the form via the تعديل button.
+ */
+function OrderDetailsReadView({ order, canEdit, onEdit, onPrint, onViewImage }: {
+  order: Order;
+  canEdit: boolean;
+  onEdit: () => void;
+  onPrint?: () => void;
+  onViewImage?: (src: string, title: string) => void;
+}) {
+  const qr = orderQrUrl(order);
+  const [history, setHistory] = useState<OrderHistory | null>(null);
+  const [histError, setHistError] = useState("");
+  const [histOpen, setHistOpen] = useState(false);
+  useEffect(() => {
+    if (!order.id) return;
+    let active = true;
+    setHistory(null);
+    setHistError("");
+    backendJson<OrderHistory>(`/api/orders/${encodeURIComponent(order.id)}/history`)
+      .then((data) => { if (active) setHistory(data); })
+      .catch((error) => { if (active) setHistError(error instanceof Error ? error.message : "تعذر تحميل سجل التعديلات"); });
+    return () => { active = false; };
+  }, [order.id]);
+
+  const items = order.operationItems || [];
+  const workImages = items.filter((i) => i.workOrderImage).map((i) => ({ src: i.workOrderImage, name: i.workOrderFileName || "أمر الشغل", method: i.method }));
+  const logoImages = items.filter((i) => i.logoImage).map((i) => ({ src: i.logoImage, name: i.logoFileName || "أمر اللوجو", method: i.method }));
+  const methods = items.map((i) => i.method.trim()).filter(Boolean);
+  const editCount = history ? history.edits.length : (order.edit_count ?? 0);
+  const lastEdit = history?.edits[0];
+
+  const info: Array<[string, string]> = [
+    ["تاريخ عمل الأوردر", labelDate(order.created_at)],
+    ["تاريخ التسليم", labelDate(order.delivery_date)],
+    ["اسم العميل", valueText(order.client_name)],
+    ["طرف", valueText(order.source_person)],
+    ["أُضيف بواسطة", valueText(order.creator_name || order.created_by)],
+    ["نوع المنتج", valueText(order.productName || order.order_type)],
+    ["اللون", valueText(order.color)],
+    ["اللوجو", valueText(order.logo_place || order.logo_status)],
+    ["العدد", order.quantity ? formatNumber(order.quantity) : "—"],
+  ];
+
+  const attachPanel = (title: string, images: Array<{ src: string; name: string; method: string }>, labelPrefix: string) => (
+    <section className="odv-attach-panel">
+      <h3 className="odv-section-title">{title}</h3>
+      {images.length ? (
+        <div className="odv-attach-grid">
+          {images.map((img, i) => (
+            <div className="odv-attach-card" key={i}>
+              <AttachmentImage src={img.src} alt={img.name} className="odv-attach-img" onOpen={onViewImage ? () => onViewImage(img.src, `${labelPrefix}${img.method ? ` · ${img.method}` : ""}`) : undefined} />
+              {img.method ? <span className="odv-attach-method">{img.method}</span> : null}
+              <a href={img.src} download={img.name} className="odv-attach-dl"><Download size={13} /> تحميل</a>
+            </div>
+          ))}
+        </div>
+      ) : <p className="muted odv-empty">لا يوجد مرفق</p>}
+    </section>
+  );
+
+  return (
+    <div className="odv">
+      <div className="odv-header">
+        <div className="odv-header-copy">
+          <h2 className="odv-title">تفاصيل الأوردر</h2>
+          <div className="odv-number" dir="ltr">{order.order_number || "—"}</div>
+        </div>
+        <div className="odv-actions">
+          {canEdit ? <button type="button" className="primary-btn nf-btn" onClick={onEdit}><Pencil size={16} /> تعديل الأوردر</button> : null}
+          {onPrint ? <button type="button" className="primary-btn nf-btn" onClick={onPrint}><Printer size={16} /> طباعة</button> : null}
+        </div>
+      </div>
+
+      <div className="odv-infowrap">
+        <div className="odv-info">
+          {info.map(([label, value]) => (
+            <div className="odv-field" key={label}><span className="odv-label">{label}</span><span className="odv-value">{value}</span></div>
+          ))}
+        </div>
+        <div className="odv-qr">
+          {qr ? <QrImage text={qr} size={150} className="odv-qr-img" /> : <p className="muted">—</p>}
+          {qr ? (
+            <div className="odv-qr-actions">
+              <button type="button" className="primary-btn compact" onClick={() => window.open(qr, "_blank", "noopener")}><Eye size={14} /> عرض</button>
+              <button type="button" className="primary-btn compact" onClick={() => void downloadOrderQr(order)}><Download size={14} /> تحميل</button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <section className="odv-section">
+        <h3 className="odv-section-title">التفاصيل</h3>
+        <div className="odv-details-text">{order.details ? order.details : <span className="muted">—</span>}</div>
+      </section>
+
+      <section className="odv-section">
+        <h3 className="odv-section-title">طريقة التشغيل</h3>
+        {methods.length ? <ol className="odv-methods">{methods.map((m, i) => <li key={i}>{m}</li>)}</ol> : <p className="muted">—</p>}
+      </section>
+
+      <div className="odv-attachments">
+        {attachPanel("أمر الشغل", workImages, "أمر الشغل")}
+        {attachPanel("أمر اللوجو", logoImages, "أمر اللوجو")}
+      </div>
+
+      <section className="odv-section odv-history">
+        <button type="button" className="odv-history-toggle" onClick={() => setHistOpen((o) => !o)} aria-expanded={histOpen}>
+          <span>سجل التعديلات ({formatNumber(editCount)})</span>
+          {histOpen ? <ChevronDown size={18} /> : <ChevronLeft size={18} />}
+        </button>
+        {histOpen ? (
+          <div className="odv-history-body">
+            {lastEdit ? <p className="muted">آخر تعديل بواسطة <strong>{lastEdit.editor_name || "—"}</strong> · {formatDateTimeCairo(lastEdit.created_at)}</p> : null}
+            {histError ? <p className="tab-confirm-error">{histError}</p> : null}
+            {history && history.edits.length > 0 ? (
+              <ol className="od-hist-list">
+                {history.edits.map((edit) => (
+                  <li key={edit.id}>
+                    <div className="od-hist-meta"><strong>{edit.editor_name || "مستخدم غير معروف"}</strong><span>{formatDateTimeCairo(edit.created_at)}</span></div>
+                    <ul>
+                      {edit.changes.map((change) => (
+                        <li key={change.field}><span className="od-hist-field">{change.label}:</span> <span className="od-hist-from">{historyValueText(change.field, change.from)}</span> ← <span className="od-hist-to">{historyValueText(change.field, change.to)}</span></li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ol>
+            ) : history ? <p className="muted">لا توجد تعديلات مسجلة.</p> : !histError ? <p className="muted">جارٍ التحميل…</p> : null}
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function valueText(value: unknown, fallback = "—") {
   const text = normalizeDigitsToEnglish(value).trim();
   return text || fallback;
@@ -2908,7 +3049,8 @@ function orderDashboardStatus(order: DbOrder) {
 
 function orderReadyStatus(order: OrdersListRecord) {
   const text = String(order.delivery_status || order.order_status || order.workStage || order.work_stage || order.status || "").trim();
-  return ["جاهز", "جاهز للإرسال", "تم التسليم", "completed", "READY", "DELIVERED", "CUSTOMER_MESSAGED"].includes(text) ? "جاهز" : "غير جاهز";
+  // A finished/completed order reads as "تم الانتهاء" in متابعة أوردرات.
+  return ["جاهز", "جاهز للإرسال", "تم التسليم", "completed", "READY", "DELIVERED", "CUSTOMER_MESSAGED"].includes(text) ? "تم الانتهاء" : "غير جاهز";
 }
 
 function listBadgeClass(value: string) {
@@ -5032,6 +5174,20 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
 
   const isEdit = !!initial && !startAsDraft;
 
+  // Viewing a saved order shows the redesigned read-only details layout; the form
+  // is used only when actively editing (via تعديل) or creating/resuming a draft.
+  if (isEdit && !editing) {
+    return (
+      <OrderDetailsReadView
+        order={computed}
+        canEdit={canEdit && !readOnlyProp}
+        onEdit={startEditing}
+        onPrint={onPrint ? () => onPrint(computed) : undefined}
+        onViewImage={onViewImage}
+      />
+    );
+  }
+
   return (
     <>
     <form ref={formRef} className={`order-form order-form-modern${readOnly ? " nf-readonly" : ""}`} onSubmit={submit} onPaste={handleClipboardPaste} onKeyDown={handleFormKeyDown}>
@@ -5245,7 +5401,6 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
         {draftNotice && <small className="field-success">{draftNotice}</small>}
       </div>
 
-      {isEdit && !editing && <OrderDetailsExtras order={form} />}
 
       {isEdit && (
         <div className="nf-actionbar nf-actionbar-edit">
@@ -5891,7 +6046,7 @@ function finishingRowFromRaw(row: Record<string, unknown>): FinishingRow {
     finishingWorker: String(row.finishing_worker ?? ""),
     problem: valueText(row.finishing_notes ?? row.production_notes ?? row.quality_notes, ""),
     done: finishingRaw === "done" || finishingRaw === "FINISH_DONE" || normalizedFinishingStatus(finishingRaw) === "تم" || statusRaw === "FINISH_DONE",
-    ready: orderReadyStatus(row as OrdersListRecord) === "جاهز",
+    ready: orderReadyStatus(row as OrdersListRecord) !== "غير جاهز",
   };
 }
 
@@ -7375,6 +7530,13 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           if (patch.work_stage !== undefined) update.workStage = patch.work_stage;
           if (patch.status !== undefined) update.order_status = patch.status === "READY" ? "جاهز" : patch.status as unknown as OrderStatus;
           setOrders((current) => current.map((order) => order.id === id ? { ...order, ...update } : order));
+          // Finishing complete: drop it from the active التشطيب queue and confirm
+          // with a non-blocking toast. The order stays in متابعة أوردرات (now shown
+          // as "تم الانتهاء") with all its data; the user stays on this page.
+          if (patch.work_stage === "completed") {
+            setFinishingRows((current) => current.filter((row) => row.id !== id));
+            setToast("تم الانتهاء من الأوردر بنجاح");
+          }
           setCellSaving((current) => withoutKey(current, key));
         })
         .catch((error) => {
@@ -8264,73 +8426,139 @@ function ImportExport({ orders, setOrders, session }: { orders: Order[]; setOrde
   );
 }
 
-function CustomerAccounts({ orders, customers: savedCustomers, session, setOrders, parties = [] }: { orders: Order[]; customers: Customer[]; session: Session; setOrders: React.Dispatch<React.SetStateAction<Order[]>>; parties?: Party[] }) {
+function CustomerAccounts({ orders, customers: savedCustomers, session, parties = [], onCustomerClick, onOrderClick }: { orders: Order[]; customers: Customer[]; session: Session; setOrders?: React.Dispatch<React.SetStateAction<Order[]>>; parties?: Party[]; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void }) {
   const [search, setSearch] = useState("");
   const [partyFilter, setPartyFilter] = useState("");
   const [debtorOnly, setDebtorOnly] = useState(false);
+  const [orderNo, setOrderNo] = useState("");
   const canPrintCustomers = hasPermission(session, "customers.print");
 
   const partyOptions = useMemo(() => {
     const sources = new Set<string>();
-    for (const party of parties) { if (party.name) sources.add(party.name); }
+    for (const party of parties) { if (party.active !== false && party.name) sources.add(party.name); }
     for (const c of savedCustomers) { if (c.source_person) sources.add(c.source_person); }
     for (const o of orders) { if (o.source_person) sources.add(o.source_person); }
     return Array.from(sources);
   }, [orders, savedCustomers, parties]);
 
-  const customers = useMemo(() => {
+  // One grouped record per customer, with their orders, phone, and outstanding
+  // balance (المديونية) = old balance + Σ remaining — the existing financial rule.
+  const allCustomers = useMemo(() => {
     const grouped = new Map<string, { name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }>();
     for (const customer of savedCustomers) {
       grouped.set(customer.client_code || customer.phone || customer.client_name, { name: customer.client_name, code: customer.client_code, phone: customer.phone, email: customer.email || "", address: customer.address || "", source: customer.source_person, old: customer.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: customer.old_balance, orders: [] });
     }
     for (const order of orders) {
+      if (order.draft) continue;
       const key = order.client_code || order.phone || order.client_name;
       const current = grouped.get(key) ?? { name: order.client_name, code: order.client_code, phone: order.phone, email: "", address: "", source: order.source_person, old: order.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: 0, orders: [] };
       current.totalOrders += 1;
       current.paid += order.paid;
       current.remaining += order.remaining;
-      current.net = current.old + current.remaining;
+      current.net = Math.round((current.old + current.remaining) * 100) / 100;
+      if (!current.source && order.source_person) current.source = order.source_person;
       current.orders.push(order);
       grouped.set(key, current);
     }
-    return Array.from(grouped.values()).filter((customer) => {
-      if (partyFilter && customer.source !== partyFilter) return false;
-      if (debtorOnly && customer.net <= 0) return false;
-      return `${customer.name} ${customer.code} ${customer.phone} ${customer.email} ${customer.address}`.toLowerCase().includes(search.toLowerCase());
+    return Array.from(grouped.values());
+  }, [orders, savedCustomers]);
+
+  // رقم أوردر: locate the order (leading zeros preserved), then its customer key.
+  const orderLookup = useMemo(() => {
+    const q = orderNo.trim();
+    if (!q) return null;
+    const strip = (s: string) => s.replace(/^0+/, "");
+    const match = orders.find((o) => {
+      const num = String(o.order_number ?? "").trim();
+      return num === q || (strip(num) !== "" && strip(num) === strip(q));
     });
-  }, [orders, savedCustomers, search, partyFilter, debtorOnly]);
+    if (!match) return { found: false, key: "", order: null as Order | null };
+    return { found: true, key: match.client_code || match.phone || match.client_name, order: match };
+  }, [orderNo, orders]);
+
+  const needle = search.trim().toLowerCase();
+  const customers = useMemo(() => allCustomers.filter((customer) => {
+    if (partyFilter && customer.source !== partyFilter) return false;
+    if (debtorOnly && customer.net <= 0) return false;
+    if (orderLookup) {
+      if (!orderLookup.found) return false;
+      const key = customer.code || customer.phone || customer.name;
+      if (key !== orderLookup.key) return false;
+    }
+    if (!needle) return true;
+    const orderNums = customer.orders.map((o) => String(o.order_number ?? "")).join(" ");
+    return `${customer.name} ${customer.code} ${customer.phone} ${customer.email} ${customer.address} ${orderNums}`.toLowerCase().includes(needle);
+  }), [allCustomers, partyFilter, debtorOnly, orderLookup, needle]);
 
   function printAllCustomers() {
-    printDocument("طباعة كل العملاء", printableTable(["اسم العميل", "الكود", "الهاتف", "البريد الإلكتروني", "العنوان", "الطرف", "إجمالي الأوردرات", "المتبقي"], customers.map((customer) => [customer.name, customer.code, customer.phone, customer.email, customer.address, customer.source, customer.totalOrders, customer.remaining])), session, "landscape");
+    printDocument("طباعة كل العملاء", printableTable(["اسم العميل", "الكود", "الطرف", "الهاتف", "المديونية"], customers.map((customer) => [customer.name, customer.code, customer.source, customer.phone, customer.net])), session, "landscape");
   }
 
+  function clearFilters() {
+    setSearch(""); setPartyFilter(""); setDebtorOnly(false); setOrderNo("");
+  }
+
+  const hasFilters = Boolean(search || partyFilter || debtorOnly || orderNo);
+
   if (session.role !== "Master" && session.role !== "Helper") {
-    return <section className="panel"><h2>حسابات العملاء</h2><p className="muted">لا توجد صلاحية لعرض الحسابات المالية.</p></section>;
+    return <section className="panel"><h2>العملاء</h2><p className="muted">لا توجد صلاحية لعرض بيانات العملاء المالية.</p></section>;
   }
 
   return (
-    <section className="panel">
+    <section className="panel customers-filter-page">
       <div className="panel-head">
-        <h2>حسابات العملاء</h2>
-        <div className="inline-actions">
-          {canPrintCustomers && <button className="ghost-btn compact" type="button" onClick={printAllCustomers}>طباعة الكل</button>}
+        <h2>العملاء</h2>
+        {canPrintCustomers && <button className="ghost-btn compact" type="button" onClick={printAllCustomers}>طباعة الكل</button>}
+      </div>
+      <div className="customers-filter-bar">
+        <label className="cf-control">
+          <span>طرف</span>
           <select value={partyFilter} onChange={(e) => setPartyFilter(e.target.value)}>
             <option value="">الكل</option>
             {partyOptions.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-          <button className="ghost-btn compact" type="button" onClick={() => setDebtorOnly((v) => !v)}>مدان</button>
-          <input placeholder="بحث باسم العميل / الكود / الهاتف / البريد / العنوان" value={search} onChange={(event) => setSearch(event.target.value)} />
+        </label>
+        <label className="cf-control cf-search">
+          <span>بحث</span>
+          <input placeholder="اسم / كود / هاتف / رقم أوردر" value={search} onChange={(event) => setSearch(event.target.value)} />
+        </label>
+        <div className="cf-control">
+          <span>مدينين</span>
+          <button type="button" className={`cf-debtor-btn${debtorOnly ? " active" : ""}`} aria-pressed={debtorOnly} onClick={() => setDebtorOnly((v) => !v)}>
+            {debtorOnly ? "✓ مدينين فقط" : "مدينين"}
+          </button>
         </div>
+        <label className="cf-control">
+          <span>رقم أوردر</span>
+          <input placeholder="رقم الأوردر" value={orderNo} onChange={(event) => setOrderNo(normalizeDigitsToEnglish(event.target.value))} />
+        </label>
+        {hasFilters && <button type="button" className="ghost-btn compact cf-clear" onClick={clearFilters}>مسح الفلاتر</button>}
       </div>
-      <div className="table-wrap accounts-table">
+      {orderNo.trim() && orderLookup && !orderLookup.found && (
+        <p className="cf-note tab-confirm-error">لا يوجد أوردر بهذا الرقم.</p>
+      )}
+      <div className="table-wrap accounts-table customers-filter-table">
         <table>
-          <thead><tr>{["الطرف", "اسم العميل", "الكود"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <thead><tr>{["اسم العميل", "كود العميل", "طرف", "رقم الهاتف", "المديونية", "الإجراءات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
           <tbody>
+            {customers.length === 0 && (
+              <tr><td colSpan={6} className="muted" style={{ textAlign: "center" }}>{hasFilters ? "لا يوجد عملاء مطابقون للفلاتر." : "لا يوجد عملاء."}</td></tr>
+            )}
             {customers.map((customer) => (
               <tr key={customer.code || customer.phone || customer.name}>
-                <td>{customer.source || "-"}</td>
-                <td>{customer.name}</td>
-                <td>{customer.code}</td>
+                <td>{onCustomerClick ? <button type="button" className="cd-client-link" onClick={() => onCustomerClick(customer.code, customer.name)}>{customer.name}</button> : customer.name}</td>
+                <td>{customer.code || "—"}</td>
+                <td>{customer.source || "—"}</td>
+                <td dir="ltr" style={{ textAlign: "right" }}>{customer.phone || "—"}</td>
+                <td className={customer.net > 0 ? "cf-debt" : undefined}>{formatMoney(customer.net)}</td>
+                <td>
+                  <div className="settings-row-actions">
+                    {onCustomerClick && <button type="button" className="ghost-btn compact" onClick={() => onCustomerClick(customer.code, customer.name)}>فتح</button>}
+                    {orderLookup?.found && onOrderClick && (customer.code || customer.phone || customer.name) === orderLookup.key && (
+                      <button type="button" className="primary-btn compact" onClick={() => orderLookup.order && onOrderClick(orderLookup.order.id)}>فتح الأوردر {orderLookup.order?.order_number}</button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -10218,6 +10446,11 @@ function ZunionApp() {
       case "dashboard":
         return <Dashboard setView={(next) => openView(next)} canSeeFinancials={canManageFinancials(session.role)} />;
       case "menu": {
+        // العملاء opens the customer search/filter page directly; its subpages stay
+        // reachable from the sidebar dropdown. Other sections show a card menu.
+        if (tab.recordId === "customers") {
+          return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
+        }
         const section = sidebarItems.find((item) => item.id === tab.recordId);
         if (!section || !section.children?.length) return <ErrorPanel message="القائمة غير متاحة" />;
         return <SectionMenu section={section} canAccess={(nextView) => canAccessView(session, nextView)} onSelect={(nextView) => selectSidebarView(nextView)} />;
@@ -10259,7 +10492,7 @@ function ZunionApp() {
       case "archive":
         return <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "customers":
-        return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} />;
+        return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "customerAccounts":
         return <CustomerAccountsPage orders={orders} customers={customers} session={session} onOrderClick={onOrderNumberClick} />;
       case "finance":
