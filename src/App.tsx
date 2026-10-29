@@ -2840,17 +2840,25 @@ function OrderDetailsReadView({ order, canEdit, onEdit, onPrint, onViewImage }: 
   const editCount = history ? history.edits.length : (order.edit_count ?? 0);
   const lastEdit = history?.edits[0];
 
-  const info: Array<[string, string]> = [
-    ["تاريخ عمل الأوردر", labelDate(order.created_at)],
-    ["تاريخ التسليم", labelDate(order.delivery_date)],
+  // Grouped exactly as requested: customer row, product row, then dates row.
+  const customerRow: Array<[string, string]> = [
+    ["أُضيف بواسطة", valueText(order.creator_name || order.created_by)],
     ["اسم العميل", valueText(order.client_name)],
     ["طرف", valueText(order.source_person)],
-    ["أُضيف بواسطة", valueText(order.creator_name || order.created_by)],
+  ];
+  const productRow: Array<[string, string]> = [
     ["نوع المنتج", valueText(order.productName || order.order_type)],
     ["اللون", valueText(order.color)],
     ["اللوجو", valueText(order.logo_place || order.logo_status)],
     ["العدد", order.quantity ? formatNumber(order.quantity) : "—"],
   ];
+  const datesRow: Array<[string, string]> = [
+    ["تاريخ عمل الأوردر", labelDate(order.created_at)],
+    ["تاريخ التسليم", labelDate(order.delivery_date)],
+  ];
+  const renderField = ([label, value]: [string, string]) => (
+    <div className="odv-field" key={label}><span className="odv-label">{label}</span><span className="odv-value">{value}</span></div>
+  );
 
   const attachPanel = (title: string, images: Array<{ src: string; name: string; method: string }>, labelPrefix: string) => (
     <section className="odv-attach-panel">
@@ -2884,9 +2892,9 @@ function OrderDetailsReadView({ order, canEdit, onEdit, onPrint, onViewImage }: 
 
       <div className="odv-infowrap">
         <div className="odv-info">
-          {info.map(([label, value]) => (
-            <div className="odv-field" key={label}><span className="odv-label">{label}</span><span className="odv-value">{value}</span></div>
-          ))}
+          <div className="odv-info-row odv-info-3">{customerRow.map(renderField)}</div>
+          <div className="odv-info-row odv-info-4">{productRow.map(renderField)}</div>
+          <div className="odv-info-row odv-info-2">{datesRow.map(renderField)}</div>
         </div>
         <div className="odv-qr">
           {qr ? <QrImage text={qr} size={150} className="odv-qr-img" /> : <p className="muted">—</p>}
