@@ -103,6 +103,16 @@ function randomKey() {
   return globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2);
 }
 
+/** Existing payment methods (stored into the transaction description). */
+const PAYMENT_METHODS: Array<[string, string]> = [
+  ["cash", "كاش"],
+  ["bank_transfer", "تحويل بنكي"],
+  ["instapay", "انستا باي"],
+  ["wallet", "محفظة"],
+  ["deferred", "آجل"],
+  ["other", "أخرى"],
+];
+
 async function backendJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     credentials: "include",
@@ -150,6 +160,15 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
   const [draft, setDraft] = useState<Record<string, DraftFields>>({});
   const [paymentAmount, setPaymentAmount] = useState("");
   const [charge, setCharge] = useState<ChargeDraft>({ orderId: "", logo: "", quantity: "", price: "" });
+  // إضافة دفعة: customer search + compact payment form (modal).
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [payOpen, setPayOpen] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [payDate, setPayDate] = useState(localToday());
+  const [payMethod, setPayMethod] = useState(PAYMENT_METHODS[0][0]);
+  const [payNotes, setPayNotes] = useState("");
+  const [paySaving, setPaySaving] = useState(false);
+  const [payError, setPayError] = useState("");
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.id === customerId) ?? null,
@@ -311,6 +330,53 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
     setCharge({ orderId: "", logo: "", quantity: "", price: "" });
     setNotice(null);
     setSearchTick((tick) => tick + 1);
+  }
+
+  function openPaymentForm() {
+    if (!selectedCustomer) return;
+    setPayAmount("");
+    setPayDate(localToday());
+    setPayMethod(PAYMENT_METHODS[0][0]);
+    setPayNotes("");
+    setPayError("");
+    setPayOpen(true);
+  }
+
+  async function savePayment() {
+    if (paySaving) return; // guard double-click / concurrent submit
+    if (!selectedCustomer) { setPayError("يجب اختيار العميل أولاً."); return; }
+    const amount = round2(Number(normalizeDigitsToEnglish(payAmount)));
+    if (!Number.isFinite(amount) || amount <= 0) { setPayError("أدخل مبلغًا صحيحًا أكبر من صفر."); return; }
+    const methodLabel = PAYMENT_METHODS.find(([value]) => value === payMethod)?.[1] || "";
+    const description = [methodLabel ? `طريقة الدفع: ${methodLabel}` : "", payNotes.trim()].filter(Boolean).join(" — ");
+    setPaySaving(true);
+    setPayError("");
+    try {
+      await backendJson("/api/customer-accounts/transactions", {
+        method: "POST",
+        body: JSON.stringify({
+          account_id: selectedCustomer.id,
+          customer_id: selectedCustomer.id,
+          txn_date: payDate || localToday(),
+          entry_type: "payment",
+          order_id: null,
+          description,
+          logo: "",
+          quantity: 0,
+          price: 0,
+          debit: 0,
+          credit: amount,
+          client_key: `ca-${selectedCustomer.id}-${Date.now()}-p-${randomKey()}`,
+        }),
+      });
+      setPayOpen(false);
+      setNotice({ text: "تم تسجيل الدفعة بنجاح.", ok: true });
+      setSearchTick((tick) => tick + 1); // reload statement + recompute balance
+    } catch (err) {
+      setPayError(err instanceof Error ? err.message : "تعذر حفظ الدفعة. حاول مرة أخرى.");
+    } finally {
+      setPaySaving(false);
+    }
   }
 
   function resetFilters() {
@@ -509,12 +575,25 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
   return (
     <div className="stack ca-screen">
       <div className="ca-customer-row">
+        <label className="ca-customer-search">
+          <Search size={16} />
+          <input value={normalizeDigitsToEnglish(customerSearch)} onChange={(event) => setCustomerSearch(event.target.value)} placeholder="ابحث عن عميل بالاسم أو الكود" />
+        </label>
         <label className="ca-customer-button">العميل حساب
           <select value={customerId} onChange={(event) => changeCustomer(event.target.value)}>
             <option value="">الكل / جميع العملاء</option>
-            {sortedCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
+            {sortedCustomers
+              .filter((customer) => {
+                const needle = customerSearch.trim().toLowerCase();
+                if (!needle) return true;
+                return `${customer.client_name} ${customer.client_code}`.toLowerCase().includes(needle);
+              })
+              .map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
           </select>
         </label>
+        {selectedCustomer && (
+          <button type="button" className="ca-btn ca-btn-add-payment" onClick={openPaymentForm}>+ إضافة دفعة</button>
+        )}
       </div>
 
 {loading && <p className="muted">جاري تحميل الكشف...</p>}
@@ -652,6 +731,29 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
         </div>
         {canEdit && <datalist id="ca-logo-options">{logoOptions.map((value) => <option key={value} value={value} />)}</datalist>}
         </>
+      )}
+
+      {payOpen && selectedCustomer && (
+        <div className="ca-pay-overlay" role="dialog" aria-modal="true" aria-label="إضافة دفعة" onClick={() => !paySaving && setPayOpen(false)}>
+          <div className="ca-pay-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="ca-pay-head">
+              <h3>إضافة دفعة</h3>
+              <button type="button" className="ca-pay-close" aria-label="إغلاق" onClick={() => !paySaving && setPayOpen(false)}>✕</button>
+            </div>
+            <div className="ca-pay-body">
+              <label className="ca-pay-field"><span>اسم العميل</span><input value={`${selectedCustomer.client_name}${selectedCustomer.client_code ? ` (${selectedCustomer.client_code})` : ""}`} readOnly /></label>
+              <label className="ca-pay-field"><span>المبلغ المدفوع<em>*</em></span><input inputMode="decimal" value={normalizeDigitsToEnglish(payAmount)} onChange={(event) => setPayAmount(normalizeDigitsToEnglish(event.target.value))} placeholder="0" autoFocus /></label>
+              <label className="ca-pay-field"><span>تاريخ الدفع</span><input type="date" value={normalizeDigitsToEnglish(payDate)} onChange={(event) => setPayDate(normalizeDigitsToEnglish(event.target.value))} /></label>
+              <label className="ca-pay-field"><span>طريقة الدفع</span><select value={payMethod} onChange={(event) => setPayMethod(event.target.value)}>{PAYMENT_METHODS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label className="ca-pay-field ca-pay-notes"><span>ملاحظات</span><input value={payNotes} onChange={(event) => setPayNotes(event.target.value)} placeholder="اختياري" /></label>
+              {payError && <p className="field-error ca-error">{payError}</p>}
+            </div>
+            <div className="ca-pay-foot">
+              <button type="button" className="ca-btn ca-btn-search" disabled={paySaving} onClick={() => void savePayment()}>{paySaving ? "جارٍ الحفظ..." : "حفظ الدفعة"}</button>
+              <button type="button" className="ca-btn ca-btn-print" disabled={paySaving} onClick={() => setPayOpen(false)}>إلغاء</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
