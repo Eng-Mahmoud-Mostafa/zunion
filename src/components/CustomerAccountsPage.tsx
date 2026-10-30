@@ -7,6 +7,7 @@ type AccountCustomer = {
   client_name: string;
   client_code: string;
   phone: string;
+  source_person?: string;
 };
 
 type AccountOrder = {
@@ -18,6 +19,7 @@ type AccountOrder = {
   phone?: string;
   logo_place?: string;
   logo_status?: string;
+  color?: string;
   quantity?: number;
   price?: number;
 };
@@ -213,6 +215,28 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
     () => [...customers].sort((a, b) => a.client_name.localeCompare(b.client_name, "ar")),
     [customers],
   );
+
+  // اللون per order, read live from the current orders so edits show without stale
+  // values. Keyed by both order id and order number so ledger rows resolve either way.
+  const orderColor = useMemo(() => {
+    const byId = new Map<string, string>();
+    const byNumber = new Map<string, string>();
+    for (const order of orders) {
+      const color = String(order.color ?? "").trim();
+      if (!color) continue;
+      if (order.id) byId.set(order.id, color);
+      if (order.order_number) byNumber.set(String(order.order_number), color);
+    }
+    return { byId, byNumber };
+  }, [orders]);
+  const colorForRow = (row: AccountTransaction) => {
+    // Only charges (or payments explicitly linked to an order) carry a color.
+    if (!row.order_id && !(row.order_number && row.entry_type === "charge")) return "—";
+    const byId = row.order_id ? orderColor.byId.get(row.order_id) : undefined;
+    const byNum = row.order_number ? orderColor.byNumber.get(String(row.order_number)) : undefined;
+    return byId || byNum || "—";
+  };
+  const colorForOrderId = (orderId: string) => (orderId ? orderColor.byId.get(orderId) || "—" : "—");
 
   const chargedOrderIds = useMemo(() => {
     // Any charge row represents the order, whether it was posted by hand or
@@ -538,10 +562,10 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
         <h2>كشف حساب ${printableCell(selectedCustomer?.client_name ?? "جميع العملاء")}</h2>
         <div class="st-meta">${printableCell(selectedCustomer?.client_code ? `كود العميل: ${selectedCustomer.client_code}` : "")}${selectedCustomer?.phone ? ` - التليفون: ${selectedCustomer.phone}` : ""}${from || to ? `<br>الفترة: ${printableCell(from ? formatDateArabic(from + "T00:00:00") : "البداية")} إلى ${printableCell(to ? formatDateArabic(to + "T00:00:00") : "الآن")}` : ""}</div>
         <table>
-          <thead><tr><th>التاريخ</th><th>رقم الأوردر</th><th>البيان</th><th>اللوجو</th><th>العدد</th><th>السعر</th><th>مدين</th><th>دائن</th><th>رصيد نهائي</th></tr></thead>
+          <thead><tr><th>التاريخ</th><th>رقم الأوردر</th><th>البيان</th><th>اللون</th><th>اللوجو</th><th>العدد</th><th>السعر</th><th>مدين</th><th>دائن</th><th>رصيد نهائي</th></tr></thead>
           <tbody>
-            ${rows.map((row) => `<tr><td>${printableCell(accountDay(row))}</td><td>${printableCell(row.order_number || "—")}</td><td>${printableCell(row.description || "—")}</td><td>${printableCell(row.logo || "—")}</td><td class="num">${printableCell(row.entry_type === "charge" ? row.quantity : "—")}</td><td class="num">${printableCell(row.entry_type === "charge" ? row.price : "—")}</td><td class="num">${accountMoney(row.debit)}</td><td class="num">${accountMoney(row.credit)}</td><td class="num">${accountMoney(row.balance)}</td></tr>`).join("")}
-            <tr class="totals"><td colspan="6">الإجمالي</td><td class="num">${accountMoney(totalDebit)}</td><td class="num">${accountMoney(totalCredit)}</td><td class="num">${accountMoney(balanceRow)}</td></tr>
+            ${rows.map((row) => `<tr><td>${printableCell(accountDay(row))}</td><td>${printableCell(row.order_number || "—")}</td><td>${printableCell(row.description || "—")}</td><td>${printableCell(colorForRow(row))}</td><td>${printableCell(row.logo || "—")}</td><td class="num">${printableCell(row.entry_type === "charge" ? row.quantity : "—")}</td><td class="num">${printableCell(row.entry_type === "charge" ? row.price : "—")}</td><td class="num">${accountMoney(row.debit)}</td><td class="num">${accountMoney(row.credit)}</td><td class="num">${accountMoney(row.balance)}</td></tr>`).join("")}
+            <tr class="totals"><td colspan="7">الإجمالي</td><td class="num">${accountMoney(totalDebit)}</td><td class="num">${accountMoney(totalCredit)}</td><td class="num">${accountMoney(balanceRow)}</td></tr>
           </tbody>
         </table>
       </div>`;
@@ -566,8 +590,9 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
   // With a single customer selected the layout is exactly as before. "الكل"
   // needs an extra column so each row can be attributed to its customer.
   const showCustomer = !selectedCustomer;
-  const colCount = showCustomer ? 11 : 10;
-  const baseWidths = ["11.59%", "11.59%", "11.59%", "13.04%", "11.59%", "6.52%", "6.52%", "8.33%", "8.33%", "10.87%"];
+  const colCount = showCustomer ? 12 : 11;
+  // Columns: كتب بواسطة, تاريخ التسليم, رقم الأوردر, النوع, اللون, اللوجو, العدد, السعر, مدين, دائن, رصيد.
+  const baseWidths = ["11%", "11%", "11%", "9%", "7%", "9%", "6.5%", "6.5%", "8.5%", "9%", "11.5%"];
   const colWidths = showCustomer
     ? ["14%", ...baseWidths.map((w) => `${(Number.parseFloat(w) * 0.86).toFixed(2)}%`)]
     : baseWidths;
@@ -586,9 +611,9 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
               .filter((customer) => {
                 const needle = customerSearch.trim().toLowerCase();
                 if (!needle) return true;
-                return `${customer.client_name} ${customer.client_code}`.toLowerCase().includes(needle);
+                return `${customer.client_name} ${customer.client_code} ${customer.source_person ?? ""}`.toLowerCase().includes(needle);
               })
-              .map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}</option>)}
+              .map((customer) => <option key={customer.id} value={customer.id}>{customer.client_name}{customer.client_code ? ` (${customer.client_code})` : ""}{customer.source_person ? ` — ${customer.source_person}` : ""}</option>)}
           </select>
         </label>
         {selectedCustomer && (
@@ -634,6 +659,7 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
                 <th>تاريخ التسليم</th>
                 <th>رقم الأوردر</th>
                 <th>النوع</th>
+                <th>اللون</th>
                 <th>اللوجو</th>
                 <th>العدد</th>
                 <th>السعر</th>
@@ -658,6 +684,7 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
                   <td className="grp-gray">{accountDay(row)}</td>
                   <td className="grp-gray">{row.order_id && row.order_number && onOrderClick ? <button type="button" className="cd-client-link ss-order-link" onClick={() => onOrderClick(row.order_id!)}>{row.order_number}</button> : row.order_number || "—"}</td>
                   <td className={"ss-type" + (row.entry_type === "payment" ? " ss-pay-type" : "")}>{row.entry_type === "payment" ? "دفعة" : "شغل"}</td>
+                  <td>{colorForRow(row)}</td>
                   <td>{row.logo || "—"}</td>
                   {editable && row.entry_type === "charge" ? (
                     <>
@@ -684,6 +711,7 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
                 <tr className="ss-total">
                   <td className="grp-gray" colSpan={showCustomer ? 5 : 4}>الإجمالي</td>
                   <td />
+                  <td />
                   <td className="ss-num">{formatNumberLocal(totalQuantity)}</td>
                   <td />
                   <td className="ss-num">{accountMoney(totalDebit)}</td>
@@ -703,6 +731,7 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
                     </select>
                   </td>
                   <td className="ss-type">شغل</td>
+                  <td className="grp-gray">{colorForOrderId(charge.orderId)}</td>
                   <td><input className="ss-cell-input" value={normalizeDigitsToEnglish(charge.logo)} onChange={(event) => setCharge((prev) => ({ ...prev, logo: normalizeDigitsToEnglish(event.target.value) }))} placeholder="اللوجو" list="ca-logo-options" /></td>
                   <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={normalizeDigitsToEnglish(charge.quantity)} onChange={(event) => setCharge((prev) => ({ ...prev, quantity: normalizeDigitsToEnglish(event.target.value) }))} placeholder="0" aria-label="العدد الجديد" /></td>
                   <td className="ss-num"><input className="ss-cell-input" inputMode="decimal" value={normalizeDigitsToEnglish(charge.price)} onChange={(event) => setCharge((prev) => ({ ...prev, price: normalizeDigitsToEnglish(event.target.value) }))} placeholder="0" aria-label="السعر الجديد" /></td>
@@ -718,6 +747,7 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
                   <td className="ss-pay-date">{formatDateArabic(`${today}T00:00:00`)}</td>
                   <td className="grp-gray">—</td>
                   <td className="ss-pay-type">دفعة</td>
+                  <td className="grp-gray">—</td>
                   <td className="grp-gray">—</td>
                   <td className="grp-gray">—</td>
                   <td className="grp-gray">—</td>
@@ -741,7 +771,7 @@ export default function CustomerAccountsPage({ customers, orders, session, onOrd
               <button type="button" className="ca-pay-close" aria-label="إغلاق" onClick={() => !paySaving && setPayOpen(false)}>✕</button>
             </div>
             <div className="ca-pay-body">
-              <label className="ca-pay-field"><span>اسم العميل</span><input value={`${selectedCustomer.client_name}${selectedCustomer.client_code ? ` (${selectedCustomer.client_code})` : ""}`} readOnly /></label>
+              <label className="ca-pay-field"><span>اسم العميل</span><input value={`${selectedCustomer.client_name}${selectedCustomer.client_code ? ` (${selectedCustomer.client_code})` : ""}${selectedCustomer.source_person ? ` — ${selectedCustomer.source_person}` : ""}`} readOnly /></label>
               <label className="ca-pay-field"><span>المبلغ المدفوع<em>*</em></span><input inputMode="decimal" value={normalizeDigitsToEnglish(payAmount)} onChange={(event) => setPayAmount(normalizeDigitsToEnglish(event.target.value))} placeholder="0" autoFocus /></label>
               <label className="ca-pay-field"><span>تاريخ الدفع</span><input type="date" value={normalizeDigitsToEnglish(payDate)} onChange={(event) => setPayDate(normalizeDigitsToEnglish(event.target.value))} /></label>
               <label className="ca-pay-field"><span>طريقة الدفع</span><select value={payMethod} onChange={(event) => setPayMethod(event.target.value)}>{PAYMENT_METHODS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
