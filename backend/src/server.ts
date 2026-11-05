@@ -948,12 +948,118 @@ app.post("/api/users", requireAppPermission("users.create", "ليس لديك ص�
   }
 });
 
+/**
+ * The admin user routes are guarded by requireAppPermission (session cookie), which does NOT
+ * populate req.user (only requireAuth does). Self-protection therefore compares the session's
+ * username/email with the target account instead of reading req.user.id.
+ */
+function isCurrentAccount(req: express.Request, profile: { username?: string | null; email?: string | null }) {
+  const session = loadAppSessionCookie(req);
+  if (!session) return false;
+  const sessionUser = (session.username || "").trim().toLowerCase();
+  const sessionEmail = (session.email || "").trim().toLowerCase();
+  const targetUser = (profile.username || "").trim().toLowerCase();
+  const targetEmail = (profile.email || "").trim().toLowerCase();
+  return Boolean((sessionUser && targetUser === sessionUser) || (sessionEmail && targetEmail === sessionEmail));
+}
+
+async function loadTargetUser(id: string) {
+  if (!id || id === "undefined" || id === "null") throw guardedError("معرّف المستخدم غير صالح", 400);
+  const profile = await loadProfileById(id);
+  if (!profile) throw guardedError("تعذر العثور على حساب المستخدم", 404);
+  return profile;
+}
+
+const LOCAL_USER_COLUMNS: Record<string, string> = {
+  username: "$",
+  full_name: "$",
+  role: "$::user_role",
+  is_active: "$",
+  must_change_password: "$",
+  permission_overrides: "$::jsonb",
+};
+
+/**
+ * Applies a change to the account in every store that holds it. Supabase users_profile is tried
+ * first; the local users table is the fallback (and mirror), matching how login and the user list
+ * already read accounts. Accounts are matched by id for their own store and by username for the other.
+ */
+async function updateUserRecord(profile: { id?: string; username?: string | null; source?: string }, body: Record<string, unknown>) {
+  const username = (profile.username || "").trim().toLowerCase();
+  let touched = false;
+  let supabaseError: unknown = null;
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      const filter = profile.source === "supabase" && profile.id ? `id=eq.${encodeURIComponent(profile.id)}` : `username=eq.${encodeURIComponent(username)}`;
+      const rows = await supabaseRest<unknown[]>(`users_profile?${filter}`, { method: "PATCH", body: JSON.stringify(body) });
+      if (Array.isArray(rows) && rows.length) touched = true;
+    } catch (error) {
+      if (!isSupabaseUnreachable(error)) throw error;
+      supabaseError = error;
+      console.warn("update user: Supabase unreachable; using local users table.", error instanceof Error ? error.message : error);
+    }
+  }
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  for (const [key, value] of Object.entries(body)) {
+    const template = LOCAL_USER_COLUMNS[key];
+    if (!template) continue;
+    values.push(key === "permission_overrides" ? JSON.stringify(value) : value);
+    sets.push(`${key} = ${template.replace("$", `$${values.length}`)}`);
+  }
+  if (sets.length) {
+    try {
+      values.push(profile.id ?? null, username);
+      const { rowCount } = await query(
+        `update users set ${sets.join(", ")} where id::text = $${values.length - 1} or lower(username) = $${values.length}`,
+        values,
+      );
+      if ((rowCount ?? 0) > 0) touched = true;
+    } catch (error) {
+      if (!touched) throw error;
+      console.warn("update user: local mirror update failed", error instanceof Error ? error.message : error);
+    }
+  }
+  if (!touched) throw supabaseError ?? guardedError("تعذر العثور على حساب المستخدم", 404);
+}
+
+/** Deletes the account from every store. Business rows keep their data (FKs are ON DELETE SET NULL). */
+async function deleteUserRecord(profile: { id?: string; username?: string | null; source?: string }) {
+  const username = (profile.username || "").trim().toLowerCase();
+  let touched = false;
+  let supabaseError: unknown = null;
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      const filter = profile.source === "supabase" && profile.id ? `id=eq.${encodeURIComponent(profile.id)}` : `username=eq.${encodeURIComponent(username)}`;
+      const rows = await supabaseRest<unknown[]>(`users_profile?${filter}`, { method: "DELETE" });
+      if (Array.isArray(rows) && rows.length) touched = true;
+    } catch (error) {
+      if (!isSupabaseUnreachable(error)) throw error;
+      supabaseError = error;
+      console.warn("delete user: Supabase unreachable; using local users table.", error instanceof Error ? error.message : error);
+    }
+  }
+  try {
+    const { rowCount } = await query(`delete from users where id::text = $1 or lower(username) = $2`, [profile.id ?? null, username]);
+    if ((rowCount ?? 0) > 0) touched = true;
+  } catch (error) {
+    if (!touched) throw error;
+    console.warn("delete user: local mirror delete failed", error instanceof Error ? error.message : error);
+  }
+  if (!touched) throw supabaseError ?? guardedError("تعذر العثور على حساب المستخدم", 404);
+}
+
+function actingUsername(req: express.Request) {
+  return loadAppSessionCookie(req)?.username ?? null;
+}
+
 app.patch("/api/users/:id", requireAppPermission("users.edit"), async (req, res) => {
   const id = param(req.params.id);
   const parsed = userAdminSchema.omit({ password: true }).partial().safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "بيانات المستخدم غير صحيحة", issues: parsed.error.issues });
+  if (!parsed.success) return res.status(400).json({ message: "بيانات المستخدم غير صحيحة" });
   try {
-    if (id === req.user!.id) throw guardedError("لا يمكنك تعديل حسابك الحالي", 403);
+    const target = await loadTargetUser(id);
+    if (isCurrentAccount(req, target)) throw guardedError("لا يمكنك تعديل حسابك الحالي", 403);
     await assertMasterNotOrphaned(
       id,
       parsed.data.roleId,
@@ -970,11 +1076,11 @@ app.patch("/api/users/:id", requireAppPermission("users.edit"), async (req, res)
     if (parsed.data.status) body.is_active = parsed.data.status === "active";
     if (typeof parsed.data.mustChangePassword === "boolean") body.must_change_password = parsed.data.mustChangePassword;
     if (parsed.data.permissionOverrides) body.permission_overrides = parsed.data.permissionOverrides;
-    const rows = await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
-    await audit(null, parsed.data.roleId ? "USER_ROLE_CHANGED" : "USER_UPDATED", "users_profile", id, undefined, body);
-    return res.json({ user: rows });
+    await updateUserRecord(target, body);
+    await audit(null, parsed.data.roleId ? "USER_ROLE_CHANGED" : "USER_UPDATED", "users_profile", id, undefined, { ...body, by: actingUsername(req) }).catch(() => undefined);
+    return res.json({ ok: true });
   } catch (error) {
-    return sendRouteError(res, error, "تعذر تحديث المستخدم");
+    return sendUserRouteError(res, error, "تعذر تحديث المستخدم");
   }
 });
 
@@ -1050,28 +1156,37 @@ app.patch("/api/users/:id/status", requireAppPermission("users.deactivate"), asy
   const parsed = z.object({ status: z.enum(["active", "inactive"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "حالة المستخدم غير صحيحة" });
   try {
-    if (id === req.user!.id) throw guardedError("لا يمكنك إيقاف حسابك الحالي", 403);
+    const target = await loadTargetUser(id);
+    if (isCurrentAccount(req, target)) throw guardedError("لا يمكنك إيقاف حسابك الحالي", 403);
     await assertMasterNotOrphaned(id, undefined, parsed.data.status === "active");
-    await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ is_active: parsed.data.status === "active" }) });
-    await audit(null, parsed.data.status === "active" ? "USER_ACTIVATED" : "USER_DEACTIVATED", "users_profile", id, undefined, parsed.data);
+    await updateUserRecord(target, { is_active: parsed.data.status === "active" });
+    await audit(null, parsed.data.status === "active" ? "USER_ACTIVATED" : "USER_DEACTIVATED", "users_profile", id, undefined, { ...parsed.data, by: actingUsername(req) }).catch(() => undefined);
     return res.json({ ok: true });
   } catch (error) {
-    return sendRouteError(res, error, "تعذر تغيير حالة المستخدم");
+    return sendUserRouteError(res, error, "تعذر تغيير حالة المستخدم");
   }
 });
+
+/** Route errors for the user admin API: intentional guard messages pass through, internals never leak. */
+function sendUserRouteError(res: express.Response, error: unknown, fallbackMessage: string) {
+  const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 0;
+  if (status && status < 500) return res.status(status).json({ message: error instanceof Error ? error.message : fallbackMessage });
+  console.error("user admin route failed", error instanceof Error ? error.message : String(error));
+  return res.status(status || 500).json({ message: fallbackMessage });
+}
 
 app.delete("/api/users/:id", requireAppPermission("users.delete"), async (req, res) => {
   const id = param(req.params.id);
   try {
-    if (id === req.user!.id) throw guardedError("لا يمكنك حذف حسابك الحالي", 403);
+    const target = await loadTargetUser(id);
+    if (isCurrentAccount(req, target)) throw guardedError("لا يمكنك حذف حسابك الحالي", 403);
+    // Fail closed: never delete the last active Master.
     await assertMasterNotOrphaned(id, undefined, false);
-    await supabaseRest(`users_profile?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
-    await audit(null, "USER_DELETED", "users_profile", id);
+    await deleteUserRecord(target);
+    await audit(null, "USER_DELETED", "users_profile", id, { username: target.username, role: target.role }, { by: actingUsername(req) }).catch(() => undefined);
     return res.json({ ok: true });
   } catch (error) {
-    const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 409;
-    const message = error instanceof Error && error.message ? error.message : "تعذر حذف المستخدم";
-    return res.status(status).json({ message, details: error instanceof Error ? error.message : String(error) });
+    return sendUserRouteError(res, error, "تعذر حذف المستخدم، يرجى المحاولة مرة أخرى");
   }
 });
 

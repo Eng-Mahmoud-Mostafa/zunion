@@ -975,9 +975,24 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
     }
   };
 
+  // Re-reads the account list from the server so the table never drifts from the database.
+  const refreshUsers = async () => {
+    if (!remote || !isMaster) return;
+    try {
+      const payload = await settingsRequest<{ users: ServerUserRow[] }>("/api/users");
+      persistUsers(payload.users.map(userFromServer));
+    } catch {
+      /* keep the locally updated list; the next page load re-syncs */
+    }
+  };
+
   const applyUserStatus = async () => {
-    if (confirm?.kind !== "status") return;
+    if (confirm?.kind !== "status" || busy) return;
     const target = confirm.payload;
+    if (!target?.id) {
+      setConfirm(null);
+      return showNotice("error", "تعذر تحديد المستخدم المطلوب، يرجى المحاولة مرة أخرى");
+    }
     const nextStatus = target.status === "active" ? "inactive" : "active";
     if (target.username === username) return showNotice("error", "لا يمكنك إيقاف حسابك الحالي");
     if (target.role === "Master" && target.status === "active" && activeMasterCount(users) <= 1) return showNotice("error", "لا يمكن إيقاف آخر حساب Master فعال");
@@ -988,6 +1003,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
       onAudit(nextStatus === "active" ? "USER_ACTIVATED" : "USER_DEACTIVATED", "users", target.id, { status: target.status }, { status: nextStatus });
       showNotice("success", nextStatus === "active" ? "تم تفعيل المستخدم" : "تم إيقاف المستخدم");
       setConfirm(null);
+      void refreshUsers();
     } catch (error: unknown) {
       showNotice("error", error instanceof Error ? error.message : "تعذر تغيير حالة المستخدم");
     } finally {
@@ -996,8 +1012,13 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
   };
 
   const removeUser = async () => {
-    if (confirm?.kind !== "deleteUser") return;
+    // `busy` blocks a second request while one is in flight (double-click on the confirm button).
+    if (confirm?.kind !== "deleteUser" || busy) return;
     const target = confirm.payload;
+    if (!target?.id) {
+      setConfirm(null);
+      return showNotice("error", "تعذر تحديد المستخدم المطلوب حذفه، يرجى المحاولة مرة أخرى");
+    }
     if (target.username === username) return showNotice("error", "لا يمكنك حذف حسابك الحالي");
     if (target.role === "Master" && target.status === "active" && activeMasterCount(users) <= 1) return showNotice("error", "لا يمكن حذف آخر حساب Master فعال");
     setBusy("user:delete");
@@ -1007,8 +1028,10 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
       onAudit("USER_DELETED", "users", target.id, { username: target.username }, undefined);
       showNotice("success", "تم حذف المستخدم");
       setConfirm(null);
+      void refreshUsers();
     } catch (error: unknown) {
-      showNotice("error", error instanceof Error ? error.message : "تعذر حذف المستخدم");
+      showNotice("error", error instanceof Error && error.message ? error.message : "تعذر حذف المستخدم، يرجى المحاولة مرة أخرى");
+      setConfirm(null);
     } finally {
       setBusy(null);
     }
