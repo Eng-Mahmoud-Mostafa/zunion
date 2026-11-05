@@ -2252,32 +2252,33 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
 
   async function forgotPassword(event: React.FormEvent) {
     event.preventDefault();
+    // The recovery identifier is the username; the code goes to the admin mailbox, never to the user.
     const email = resetEmail.trim().toLowerCase();
-    if (!email) return setMessage("اكتب البريد الإلكتروني أولا.");
+    if (!email) return setMessage("اكتب اسم المستخدم أولا.");
     if (useServerAuth || !isLocalHost) {
       try {
-        setMessage("جار إرسال كود التحقق...");
+        setMessage("جار إرسال كود التحقق إلى بريد المسؤول...");
         const response = await fetch("/api/auth/forgot-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ username: email }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(apiErrorMessage(payload, "تعذر إرسال كود التحقق حالياً"));
         setResetStep("code");
         setResetCodeInput("");
-        setMessage(payload.devCode ? `كود التحقق التجريبي: ${payload.devCode}` : "إذا كان البريد مسجلاً في النظام، سيصلك كود تحقق صالح لمدة 10 دقائق.");
+        setMessage(payload.devCode ? `كود التحقق التجريبي: ${payload.devCode}` : "تم إرسال كود التحقق إلى بريد المسؤول. اطلب الكود من المسؤول وأدخله هنا. الكود صالح لمدة 10 دقائق.");
         return;
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "تعذر إرسال كود التحقق حالياً");
         return;
       }
     }
-    const localUsername = localUsernameByEmail(email);
+    const localUsername = getLocalUser(email) ? email : localUsernameByEmail(email);
     if (!localUsername) {
       setResetStep("code");
       setResetCodeInput("");
-      setMessage("إذا كان البريد مسجلاً في النظام، سيصلك كود تحقق صالح لمدة 10 دقائق.");
+      setMessage("تم إرسال كود التحقق إلى بريد المسؤول. اطلب الكود من المسؤول وأدخله هنا. الكود صالح لمدة 10 دقائق.");
       return;
     }
     const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -2291,14 +2292,14 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     event.preventDefault();
     const email = resetEmail.trim().toLowerCase();
     const code = resetCodeInput.trim();
-    if (!email || !code) return setMessage("اكتب البريد الإلكتروني وكود التحقق.");
+    if (!email || !code) return setMessage("اكتب كود التحقق.");
     if (useServerAuth || !isLocalHost) {
       try {
         setMessage("جار التحقق من الكود...");
         const response = await fetch("/api/auth/verify-reset-code", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, code }),
+          body: JSON.stringify({ username: email, code }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(apiErrorMessage(payload, "كود التحقق غير صحيح أو انتهت صلاحيته."));
@@ -2329,7 +2330,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         const response = await fetch("/api/auth/reset-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, code, newPassword }),
+          body: JSON.stringify({ username: email, code, newPassword }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(apiErrorMessage(payload, "تعذر تغيير كلمة المرور. حاول مرة أخرى"));
@@ -2342,8 +2343,8 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     }
     const stored = loadResetCode();
     if (!stored || stored.email !== email || stored.code !== code || Date.now() > stored.expiresAt) return setMessage("كود التحقق غير صالح أو انتهت صلاحيته. أعد طلب الكود.");
-    const localUsername = localUsernameByEmail(email);
-    if (!localUsername) return setMessage("البريد غير مسجل في النظام.");
+    const localUsername = getLocalUser(email) ? email : localUsernameByEmail(email);
+    if (!localUsername) return setMessage("اسم المستخدم غير مسجل في النظام.");
     saveLocalPassword(localUsername, newPassword);
     localStorage.removeItem(resetCodeKey);
     addAudit(null, "PASSWORD_RESET", "auth", undefined, undefined, { email });
@@ -2364,9 +2365,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     return (
       <LoginShell compact onSubmit={forgotPassword}>
           <h1 className="zl-step-title">استعادة كلمة المرور</h1>
-          <p className="zl-step-sub">اكتب بريدك الإلكتروني وسيتم إرسال كود تحقق مكون من 6 أرقام، صالح لمدة 10 دقائق.</p>
-          <label className="zl-plain-label">البريد الإلكتروني</label>
-          <input value={resetEmail} className="zl-plain-input" onChange={(event) => setResetEmail(event.target.value)} type="email" autoComplete="email" placeholder="example@email.com" />
+          <p className="zl-step-sub">اكتب اسم المستخدم فقط. سيتم إرسال كود تحقق مكوّن من 6 أرقام إلى بريد المسؤول (وليس إلى بريدك)، ثم تدخل الكود في الخطوة التالية. الكود صالح لمدة 10 دقائق.</p>
+          <label className="zl-plain-label">اسم المستخدم</label>
+          <input value={resetEmail} className="zl-plain-input" onChange={(event) => setResetEmail(event.target.value)} type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="اسم المستخدم" />
           {message && <div className={`zl-notice${/^(تم |إذا كان|كود التحقق|جار)/.test(message) ? " zl-notice-info" : ""}`} role="alert">{message}</div>}
           <button className="zl-btn" type="submit">إرسال كود التحقق</button>
           <button className="zl-btn-ghost" type="button" onClick={() => { setResetStep(null); setResetEmail(""); setMessage(""); }}>العودة لتسجيل الدخول</button>
@@ -2378,7 +2379,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     return (
       <LoginShell compact onSubmit={submitResetCode}>
           <h1 className="zl-step-title">كود التحقق</h1>
-          <p className="zl-step-sub">أدخل كود التحقق المكون من 6 أرقام الذي تم إرساله للبريد: <strong>{resetEmail}</strong></p>
+          <p className="zl-step-sub">تم إرسال كود التحقق إلى بريد المسؤول. اطلب الكود من المسؤول ثم أدخل الكود المكوّن من 6 أرقام هنا للمستخدم: <strong>{resetEmail}</strong></p>
           <label className="zl-plain-label">كود التحقق</label>
           <input value={resetCodeInput} className="zl-plain-input" onChange={(event) => setResetCodeInput(event.target.value)} inputMode="numeric" maxLength={6} autoComplete="one-time-code" />
           {message && <div className={`zl-notice${/^(تم |إذا كان|كود التحقق|جار)/.test(message) ? " zl-notice-info" : ""}`} role="alert">{message}</div>}

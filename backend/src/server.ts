@@ -637,10 +637,89 @@ app.post("/api/auth/change-password", requireAuth, async (req, res) => {
   }
 });
 
+/** Recovery requests identify the account by username (`email` is still accepted for older clients). */
+const recoveryBase = z.object({
+  username: z.string().min(1).max(100).optional(),
+  email: z.string().min(1).max(254).optional(),
+});
+function recoveryIdentifier(data: { username?: string; email?: string }) {
+  return (data.username ?? data.email ?? "").trim().toLowerCase();
+}
+
+const ADMIN_EMAIL_KEY = "admin_recovery_email";
+
+async function ensureAppSettingsTable() {
+  await query(`create table if not exists app_settings (
+    key text primary key,
+    value text not null,
+    updated_at timestamptz not null default now(),
+    updated_by text
+  )`);
+}
+
+/**
+ * Where password-recovery codes are delivered: the address a Master saved in Settings,
+ * falling back to the PASSWORD_CHANGE_EMAIL environment value.
+ */
+async function getAdminRecoveryEmail(): Promise<{ email: string; source: "settings" | "default"; updatedAt?: string; updatedBy?: string | null }> {
+  try {
+    const { rows } = await query<{ value: string; updated_at: string; updated_by: string | null }>(
+      "select value, updated_at, updated_by from app_settings where key = $1 limit 1",
+      [ADMIN_EMAIL_KEY],
+    );
+    if (rows[0]?.value) return { email: rows[0].value, source: "settings", updatedAt: rows[0].updated_at, updatedBy: rows[0].updated_by };
+  } catch (error) {
+    console.warn("admin recovery email lookup failed; using default.", error instanceof Error ? error.message : error);
+  }
+  return { email: config.resend.passwordChangeEmail, source: "default" };
+}
+
+function requireMasterSession(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const session = loadAppSessionCookie(req);
+  if (!session) return res.status(401).json({ message: "يجب تسجيل الدخول أولا." });
+  // Deliberately role-based (not a delegable permission): only a Master may read or change this.
+  if (session.role !== "Master") return res.status(403).json({ message: "هذا الإعداد متاح لحساب Master فقط" });
+  return next();
+}
+
+app.get("/api/settings/admin-email", requireMasterSession, async (_req, res) => {
+  const current = await getAdminRecoveryEmail();
+  return res.json({ email: current.email, source: current.source, updatedAt: current.updatedAt ?? null, updatedBy: current.updatedBy ?? null });
+});
+
+app.put("/api/settings/admin-email", requireMasterSession, async (req, res) => {
+  const session = loadAppSessionCookie(req)!;
+  const parsed = z.object({ email: z.string().trim().toLowerCase().email().max(254), currentPassword: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "اكتب بريدًا إلكترونيًا صحيحًا وكلمة مرورك الحالية" });
+  const actor = (session.username || "").trim().toLowerCase();
+  if (rateLimited(`admin-email:${actor}`, resetAttemptRate, 10)) {
+    return res.status(429).json({ message: "محاولات كثيرة. حاول مرة أخرى لاحقاً" });
+  }
+  try {
+    // Recovery codes grant account takeover, so re-confirm the acting Master's own password.
+    const profile = await loadProfile(actor);
+    if (!profile || profile.is_active === false || !passwordValid(profile, parsed.data.currentPassword)) {
+      return res.status(401).json({ message: "كلمة المرور الحالية غير صحيحة" });
+    }
+    const before = await getAdminRecoveryEmail();
+    await ensureAppSettingsTable();
+    await query(
+      `insert into app_settings (key, value, updated_at, updated_by) values ($1, $2, now(), $3)
+       on conflict (key) do update set value = excluded.value, updated_at = now(), updated_by = excluded.updated_by`,
+      [ADMIN_EMAIL_KEY, parsed.data.email, actor],
+    );
+    await audit(null, "ADMIN_RECOVERY_EMAIL_CHANGED", "app_settings", undefined, { email: before.email }, { email: parsed.data.email, by: actor }).catch(() => undefined);
+    return res.json({ ok: true, email: parsed.data.email });
+  } catch (error) {
+    console.error("admin recovery email update failed", error instanceof Error ? error.message : String(error));
+    return res.status(500).json({ message: "تعذر حفظ البريد، يرجى المحاولة مرة أخرى" });
+  }
+});
+
 app.post("/api/auth/forgot-password", async (req, res) => {
-  const parsed = z.object({ email: z.string().min(1) }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "البريد الإلكتروني مطلوب." });
-  const email = parsed.data.email.trim().toLowerCase();
+  const parsed = recoveryBase.safeParse(req.body);
+  if (!parsed.success || !recoveryIdentifier(parsed.data)) return res.status(400).json({ error: "اسم المستخدم مطلوب." });
+  const email = recoveryIdentifier(parsed.data);
   if (rateLimited(email, passwordCodeRate, 5)) {
     return res.status(429).json({ error: "تم إرسال عدد كبير من الطلبات. حاول مرة أخرى لاحقاً" });
   }
@@ -668,7 +747,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       [username, codeHash],
     );
   }
-  const sendTo = email.endsWith("@zunion.local") ? config.resend.passwordChangeEmail : email;
+  const sendTo = (await getAdminRecoveryEmail()).email;
   try {
     await sendVerificationEmail(sendTo, code, "كود استعادة كلمة مرور Zunion");
   } catch (error) {
@@ -680,9 +759,9 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 });
 
 app.post("/api/auth/verify-reset-code", async (req, res) => {
-  const parsed = z.object({ email: z.string().min(1), code: z.string().min(4) }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "البريد الإلكتروني وكود التحقق مطلوبان." });
-  const email = parsed.data.email.trim().toLowerCase();
+  const parsed = recoveryBase.extend({ code: z.string().min(4) }).safeParse(req.body);
+  if (!parsed.success || !recoveryIdentifier(parsed.data)) return res.status(400).json({ error: "اسم المستخدم وكود التحقق مطلوبان." });
+  const email = recoveryIdentifier(parsed.data);
   if (rateLimited(email, resetAttemptRate, 10)) {
     return res.status(429).json({ error: "محاولات كثيرة. حاول مرة أخرى لاحقاً" });
   }
@@ -706,7 +785,7 @@ app.post("/api/auth/verify-reset-code", async (req, res) => {
   }
 
   const { rows } = await query<{ id: string }>(
-    `select id from password_reset_codes where username=$1 and code_hash=$2 and used_at is null and expires_at > now() order by o.created_at desc limit 1`,
+    `select id from password_reset_codes where username=$1 and code_hash=$2 and used_at is null and expires_at > now() order by created_at desc limit 1`,
     [username, codeHash],
   );
   if (!rows[0]) return res.status(401).json({ error: "كود التحقق غير صحيح أو انتهت صلاحيته." });
@@ -714,9 +793,10 @@ app.post("/api/auth/verify-reset-code", async (req, res) => {
 });
 
 app.post("/api/auth/reset-password", async (req, res) => {
-  const parsed = z.object({ email: z.string().min(1), code: z.string().min(4), newPassword: z.string().min(4) }).safeParse(req.body);
+  const parsed = recoveryBase.extend({ code: z.string().min(4), newPassword: z.string().min(4) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "كل الحقول مطلوبة وكلمة المرور الجديدة يجب ألا تقل عن 4 أحرف." });
-  const email = parsed.data.email.trim().toLowerCase();
+  const email = recoveryIdentifier(parsed.data);
+  if (!email) return res.status(400).json({ error: "اسم المستخدم مطلوب." });
   if (rateLimited(email, resetAttemptRate, 10)) {
     return res.status(429).json({ error: "محاولات كثيرة. حاول مرة أخرى لاحقاً" });
   }
@@ -744,7 +824,7 @@ app.post("/api/auth/reset-password", async (req, res) => {
       const code = await client.query<{ id: string }>(
         `select id from password_reset_codes
          where username=$1 and code_hash=$2 and used_at is null and expires_at > now()
-         order by o.created_at desc limit 1 for update`,
+         order by created_at desc limit 1 for update`,
         [username, codeHash],
       );
       if (!code.rows[0]) return false;
@@ -1310,7 +1390,7 @@ app.get("/api/orders", requireAuth, async (req, res) => {
   const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
   const { rows } = await queryWithEditSummary((withEdits) =>
     `select o.*, coalesce(u.full_name, u.username) as creator_name${withEdits ? `, ${ORDER_EDIT_SUMMARY_SELECT}` : ""}
-     from orders o left join users u on u.id=o.created_by ${withEdits ? ORDER_EDIT_SUMMARY_JOIN : ""} ${sqlWhere} order by o.created_at desc`, params);
+     from orders o left join users u on u.id=o.created_by ${withEdits ? ORDER_EDIT_SUMMARY_JOIN : ""} ${sqlWhere} order by created_at desc`, params);
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
@@ -2431,7 +2511,7 @@ app.get("/api/search/orders", requireAuth, async (req, res) => {
   const search = String(req.query.q ?? "");
   const params = search ? [`%${search}%`] : [];
   const where = search ? "where o.order_number ilike $1 or o.customer_name_snapshot ilike $1 or o.customer_code_snapshot ilike $1 or o.phone_snapshot ilike $1 or o.source_party ilike $1 or i.product_name ilike $1" : "";
-  const { rows } = await query(`select distinct o.* from orders o left join order_items i on i.order_id=o.id ${where} order by o.created_at desc`, params);
+  const { rows } = await query(`select distinct o.* from orders o left join order_items i on i.order_id=o.id ${where} order by created_at desc`, params);
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
@@ -2455,7 +2535,7 @@ app.get("/api/search", requireAuth, async (req, res) => {
   const userSearch = "(u.full_name ilike $1 or u.username ilike $1 or u.email ilike $1 or cast(u.role as text) ilike $1)";
 
   const [orders, customers, products, users, orderCount, customerCount, productCount, userCount] = await Promise.all([
-    query(`select distinct o.* from orders o left join order_items i on i.order_id=o.id ${orderWhere} order by o.created_at desc limit ${limit}`, orderParams),
+    query(`select distinct o.* from orders o left join order_items i on i.order_id=o.id ${orderWhere} order by created_at desc limit ${limit}`, orderParams),
     query(`select c.*, count(o.id)::int as total_orders from customers c left join orders o on o.customer_id=c.id where ${customerSearch} group by c.id order by c.updated_at desc limit ${limit}`, [pattern]),
     query(`select * from products p where ${productSearch} order by p.updated_at desc limit ${limit}`, [pattern]),
     query(`select u.id, u.username, u.full_name, u.email, u.role::text as role, u.is_active, u.last_login_at, u.created_at from users u where ${userSearch} order by u.updated_at desc limit ${limit}`, [pattern]),

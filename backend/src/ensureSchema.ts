@@ -539,6 +539,16 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncOrderStatusEnum(log);
   await syncOrdersTriggers(log);
   await syncPhotosTable(log);
+  await guarded(
+    () => query(`create table if not exists app_settings (
+      key text primary key,
+      value text not null,
+      updated_at timestamptz not null default now(),
+      updated_by text
+    )`),
+    log,
+    "app_settings table",
+  );
   await syncOrderEditsTable(log);
   await syncAttendanceTables(log);
   await syncWorkersTable(log);

@@ -27,6 +27,7 @@ import {
   WalletCards,
   Wrench,
   X,
+  Mail,
 } from "lucide-react";
 import { DraggableDialog } from "./DraggableDialog";
 import { PartyManagerPanel } from "./PartyManager";
@@ -85,7 +86,7 @@ export type SettingsParty = {
   active: boolean;
 };
 
-type SectionId = "overview" | "users" | "roles" | "overrides" | "departments" | "resources" | "parties" | "finance" | "security";
+type SectionId = "overview" | "users" | "roles" | "overrides" | "departments" | "resources" | "parties" | "finance" | "security" | "adminMail";
 
 /** Minimal structural shapes the host app passes down for browser-only mode. */
 type LocalWorkerInput = { id: string; name: string; active: boolean; department: string; card_id?: string | null; phone?: string | null };
@@ -207,6 +208,7 @@ const SECTIONS: Array<{ id: SectionId; label: string; description: string; icon:
   { id: "parties", label: "إدارة الأطراف", description: "قائمة الأطراف المركزية المستخدمة في كل الشاشات", icon: Wrench },
   { id: "finance", label: "الإعدادات المالية", description: "طرق الدفع والفترات الشهرية المفتوحة", icon: WalletCards },
   { id: "security", label: "الأمان", description: "كلمة المرور، الحسابات النشطة، وسجل الأمان", icon: Lock },
+  { id: "adminMail", label: "بريد المسؤول", description: "البريد الذي تصل إليه أكواد استعادة كلمة المرور", icon: Mail },
 ];
 
 const WORKER_DEPARTMENT_LABELS: Record<string, string> = {
@@ -591,6 +593,11 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
 
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
+  // Admin recovery mailbox (Master-only; the server enforces the same rule).
+  const [adminMail, setAdminMail] = useState<{ email: string; source: string; loaded: boolean; loading: boolean; error: string }>({ email: "", source: "", loaded: false, loading: false, error: "" });
+  const [adminMailForm, setAdminMailForm] = useState({ email: "", password: "" });
+  const [adminMailError, setAdminMailError] = useState("");
+
   const [workers, setWorkers] = useState<WorkerRow[] | null>(null);
   const [machines, setMachines] = useState<MachineRow[] | null>(null);
   const [periods, setPeriods] = useState<PeriodRow[] | null>(null);
@@ -837,6 +844,37 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
     if (section === "finance") void loadResource("periods");
     if (section === "security") void loadResource("audit");
   }, [section, loadResource]);
+
+  useEffect(() => {
+    if (section !== "adminMail" || !remote || !isMaster || adminMail.loaded || adminMail.loading) return;
+    setAdminMail((current) => ({ ...current, loading: true, error: "" }));
+    settingsRequest<{ email: string; source: string }>("/api/settings/admin-email")
+      .then((payload) => {
+        setAdminMail({ email: payload.email, source: payload.source, loaded: true, loading: false, error: "" });
+        setAdminMailForm((current) => ({ ...current, email: payload.email }));
+      })
+      .catch((error: unknown) => setAdminMail((current) => ({ ...current, loading: false, error: error instanceof Error ? error.message : "تعذر تحميل البريد" })));
+  }, [section, remote, isMaster, adminMail.loaded, adminMail.loading]);
+
+  const saveAdminMail = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    const email = adminMailForm.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setAdminMailError("اكتب بريدًا إلكترونيًا صحيحًا");
+    if (!adminMailForm.password) return setAdminMailError("اكتب كلمة مرورك الحالية للتأكيد");
+    setBusy("adminmail");
+    setAdminMailError("");
+    try {
+      await settingsRequest("/api/settings/admin-email", { method: "PUT", body: JSON.stringify({ email, currentPassword: adminMailForm.password }) });
+      setAdminMail({ email, source: "settings", loaded: true, loading: false, error: "" });
+      setAdminMailForm({ email, password: "" });
+      showNotice("success", "تم تحديث بريد المسؤول بنجاح");
+    } catch (error: unknown) {
+      setAdminMailError(error instanceof Error && error.message ? error.message : "تعذر حفظ البريد، يرجى المحاولة مرة أخرى");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const goToSection = useCallback(
     (next: SectionId) => {
@@ -1209,6 +1247,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
       if (id === "parties") return (parties || []).filter((item) => item.name.toLowerCase().includes(needle)).length;
       if (id === "finance") return PAYMENT_METHODS.filter((item) => item.label.toLowerCase().includes(needle)).length;
       if (id === "security") return (auditRows || []).filter((item) => `${AUDIT_ACTION_LABELS[item.action] || item.action} ${item.entity_type || ""}`.toLowerCase().includes(needle)).length;
+      if (id === "adminMail") return "بريد المسؤول استعادة كلمة المرور الأمان".includes(needle) ? 1 : 0;
       if (id === "overview") return users.filter((item) => `${item.username} ${item.fullName} ${item.role}`.toLowerCase().includes(needle)).length + roles.filter((item) => `${item.name} ${item.description}`.toLowerCase().includes(needle)).length;
       return 0;
     },
@@ -2116,6 +2155,55 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
     </>
   );
 
+  const renderAdminMail = () => (
+    <section className="settings-card">
+      <div className="settings-card-head">
+        <div>
+          <h2>بريد المسؤول</h2>
+          <p className="muted">عند نسيان كلمة المرور يُرسل كود التحقق إلى هذا البريد، ثم يدخل المستخدم الكود في صفحة الدخول. هذا الإعداد متاح لحساب Master فقط.</p>
+        </div>
+      </div>
+      {!remote ? (
+        <p className="muted">هذا الإعداد يعمل عند الاتصال بالخادم فقط.</p>
+      ) : (
+        <form className="settings-form-grid" onSubmit={saveAdminMail} noValidate>
+          <div className="settings-kv">
+            <div>
+              <span className="muted">البريد الحالي</span>
+              <strong dir="ltr">{adminMail.loading ? "جار التحميل..." : adminMail.email || "—"}</strong>
+            </div>
+          </div>
+          {adminMail.error ? (
+            <div className="settings-alert error">
+              <CircleAlert size={18} />
+              <span>{adminMail.error}</span>
+            </div>
+          ) : null}
+          <label>
+            البريد الجديد
+            <input type="email" dir="ltr" autoComplete="off" value={adminMailForm.email} onChange={(event) => setAdminMailForm((current) => ({ ...current, email: event.target.value }))} placeholder="admin@example.com" />
+          </label>
+          <label>
+            كلمة مرورك الحالية (للتأكيد)
+            <input type="password" autoComplete="current-password" value={adminMailForm.password} onChange={(event) => setAdminMailForm((current) => ({ ...current, password: event.target.value }))} />
+          </label>
+          {adminMailError ? (
+            <div className="settings-alert error">
+              <CircleAlert size={18} />
+              <span>{adminMailError}</span>
+            </div>
+          ) : null}
+          <div>
+            <button type="submit" className="primary-btn" disabled={busy !== null || adminMail.loading}>
+              {busy === "adminmail" ? <Loader2 size={18} className="spin" /> : null}
+              حفظ البريد
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+
   const renderSection = (id: SectionId): ReactNode => {
     if (id === "overview") return renderOverview();
     if (id === "users") return renderUsers();
@@ -2125,6 +2213,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
     if (id === "resources") return renderResources();
     if (id === "parties") return renderParties();
     if (id === "finance") return renderFinance();
+    if (id === "adminMail") return renderAdminMail();
     return renderSecurity();
   };
 
