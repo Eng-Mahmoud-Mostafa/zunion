@@ -9671,186 +9671,12 @@ function encodeTabHash(tab: { view: View; recordId?: string }) {
   return tab.recordId ? `#${tab.view}/${encodeURIComponent(tab.recordId)}` : `#${tab.view}`;
 }
 
-type TabSectionConfig = { id: string; label: string; icon: LucideIcon; views: View[] };
-
-function TabBar({ tabs, activeId, dirtyMap, sections, onActivate, onClose, onOpen }: {
-  tabs: ShellTab[];
-  activeId: string;
-  dirtyMap: Record<string, boolean>;
-  sections: TabSectionConfig[];
-  onActivate: (id: string) => void;
-  onClose: (id: string) => void;
-  onOpen: (view: View) => void;
-}) {
-  const [openSection, setOpenSection] = useState<string | null>(null);
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
-
-  useEffect(() => {
-    if (!openSection) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Element | null;
-      if (target && target.closest("[data-tab-menu],[data-tab-anchor]")) return;
-      setOpenSection(null);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenSection(null);
-    };
-    const dismiss = () => setOpenSection(null);
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", dismiss);
-    window.addEventListener("scroll", dismiss, true);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", dismiss);
-      window.removeEventListener("scroll", dismiss, true);
-    };
-  }, [openSection]);
-
-  const viewToSection = useMemo(() => {
-    const map = new Map<View, TabSectionConfig>();
-    for (const section of sections) {
-      for (const view of section.views) {
-        if (!map.has(view)) map.set(view, section);
-      }
-    }
-    return map;
-  }, [sections]);
-
-  const tabsBySection = useMemo(() => {
-    const map = new Map<string, ShellTab[]>();
-    for (const tab of tabs) {
-      const section = viewToSection.get(tab.view);
-      if (!section) continue;
-      const list = map.get(section.id);
-      if (list) list.push(tab);
-      else map.set(section.id, [tab]);
-    }
-    return map;
-  }, [tabs, viewToSection]);
-
-  const orderedItems = useMemo(() => {
-    const items: Array<{ kind: "section"; section: TabSectionConfig } | { kind: "tab"; tab: ShellTab }> = [];
-    const seen = new Set<string>();
-    for (const tab of tabs) {
-      const section = viewToSection.get(tab.view);
-      if (!section) {
-        items.push({ kind: "tab", tab });
-        continue;
-      }
-      if (seen.has(section.id)) continue;
-      seen.add(section.id);
-      items.push({ kind: "section", section });
-    }
-    return items;
-  }, [tabs, viewToSection]);
-
-  const openMenu = (sectionId: string, anchor: HTMLElement) => {
-    const rect = anchor.getBoundingClientRect();
-    setMenuPos({ top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) });
-    setOpenSection(sectionId);
-  };
-
-  const renderMenu = (section: TabSectionConfig) => {
-    const openTabs = tabsBySection.get(section.id) ?? [];
-    return (
-      <div className="tab-section-menu" data-tab-menu role="menu" style={{ position: "fixed", top: menuPos?.top ?? 0, right: menuPos?.right ?? 0 }}>
-        {section.views.map((view) => {
-          const meta = TAB_META[view];
-          const openTab = openTabs.find((item) => item.view === view);
-          const active = !!openTab && openTab.id === activeId;
-          const dirty = !!openTab && !!dirtyMap[openTab.id];
-          const Icon = meta.icon;
-          return (
-            <div key={view} className={`tab-menu-row${active ? " active" : ""}`} role="none">
-              <button
-                type="button"
-                role="menuitem"
-                className="tab-menu-main"
-                onClick={() => {
-                  setOpenSection(null);
-                  if (openTab) onActivate(openTab.id);
-                  else onOpen(view);
-                }}
-              >
-                <Icon size={16} />
-                <span className="tab-menu-label">{meta.label}</span>
-                {openTab && <span className="tab-menu-dot" aria-label="مفتوحة" title="مفتوحة" />}
-                {dirty && <span className="tab-menu-dirty" aria-label="تغييرات غير محفوظة" title="تغييرات غير محفوظة" />}
-              </button>
-              {openTab && (
-                <button type="button" className="tab-menu-close" aria-label={`إغلاق ${meta.label}`} title="إغلاق" onClick={() => onClose(openTab.id)}>
-                  <X size={13} />
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  return (
-    <div className="tabbar" role="tablist" aria-label="الصفحات المفتوحة">
-      <div className="tabbar-scroll">
-        {orderedItems.map((entry) => {
-          if (entry.kind === "tab") {
-            const tab = entry.tab;
-            const Icon = TAB_META[tab.view].icon;
-            const active = tab.id === activeId;
-            const dirty = !!dirtyMap[tab.id];
-            return (
-              <div key={tab.id} className={`tab${active ? " active" : ""}${dirty ? " tab-dirty" : ""}`} role="tab" aria-selected={active}>
-                <button type="button" className="tab-main" title={tab.label} onClick={() => onActivate(tab.id)}>
-                  <Icon size={15} />
-                  <span className="tab-label">{tab.label}</span>
-                  {dirty && <span className="tab-dot" aria-label="توجد تغييرات غير محفوظة" />}
-                </button>
-                <button type="button" className="tab-close" aria-label={`إغلاق ${tab.label}`} title="إغلاق" onClick={() => onClose(tab.id)}>
-                  <X size={14} />
-                </button>
-              </div>
-            );
-          }
-          const section = entry.section;
-          const isOpen = openSection === section.id;
-          const containsActive = (tabsBySection.get(section.id) ?? []).some((item) => item.id === activeId);
-          const Icon = section.icon;
-          return (
-            <div key={`section:${section.id}`} className="tab-section">
-              <button
-                type="button"
-                data-tab-anchor
-                className={`tab tab-section-btn${containsActive ? " contains-active" : ""}${isOpen ? " open" : ""}`}
-                aria-haspopup="menu"
-                aria-expanded={isOpen}
-                title={section.label}
-                onClick={(event) => {
-                  if (isOpen) setOpenSection(null);
-                  else openMenu(section.id, event.currentTarget);
-                }}
-              >
-                <Icon size={15} />
-                <span className="tab-label">{section.label}</span>
-                <ChevronDown size={14} className="tab-section-caret" />
-              </button>
-              {isOpen && menuPos && renderMenu(section)}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function ZunionApp() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
   const [sessionReady, setSessionReady] = useState(!useServerAuth);
   const [tabs, setTabs] = useState<ShellTab[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
   const [dirtyMap, setDirtyMap] = useState<Record<string, boolean>>({});
-  const [pendingCloseId, setPendingCloseId] = useState<string | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const [closeError, setCloseError] = useState("");
   const tabControllers = useRef(new Map<string, { saveForClose: () => Promise<boolean> }>());
@@ -9932,26 +9758,82 @@ function ZunionApp() {
     };
   }, []);
 
-  function syncTabHash(tab: { view: View; recordId?: string }) {
+  // Navigation model: the sidebar is the only navigator and exactly one page is
+  // mounted at a time. "push" adds a browser-history entry (so Back/Forward work),
+  // "history" means the URL already changed (Back/Forward/manual hash edit), and
+  // "replace" rewrites the current entry (redirects, initial load).
+  const navMode = useRef<"push" | "history" | "replace">("push");
+  const [pendingNav, setPendingNav] = useState<ShellTab | null>(null);
+
+  function syncTabHash(tab: { view: View; recordId?: string }, mode: "push" | "replace") {
+    const hash = encodeTabHash(tab);
+    if (window.location.hash === hash) return;
     try {
-      window.history.replaceState(null, "", encodeTabHash(tab));
+      if (mode === "push") window.history.pushState(null, "", hash);
+      else window.history.replaceState(null, "", hash);
     } catch {
-      window.location.hash = encodeTabHash(tab);
+      window.location.hash = hash;
     }
   }
 
-  function activateTabObject(tab: ShellTab) {
-    if (tab.id !== activeTabId) scrollPositions.current[activeTabId] = window.scrollY;
+  // Drops all per-page state of the page being left.
+  function disposeTab(id: string) {
+    tabControllers.current.delete(id);
+    if (id.startsWith("image:")) {
+      const key = id.slice("image:".length);
+      setImageTabs((current) => {
+        if (!(key in current)) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      for (const [src, value] of imageKeys.current) if (value === key) imageKeys.current.delete(src);
+    }
+    setDirtyMap((map) => {
+      if (!(id in map)) return map;
+      const next = { ...map };
+      delete next[id];
+      return next;
+    });
+  }
+
+  // Replaces the single mounted page with `tab`.
+  function showTab(tab: ShellTab, mode: "push" | "replace" | "history") {
+    if (activeTabId && activeTabId !== tab.id) disposeTab(activeTabId);
+    setTabs([tab]);
     setActiveTabId(tab.id);
-    syncTabHash(tab);
-    requestAnimationFrame(() => window.scrollTo(0, scrollPositions.current[tab.id] || 0));
+    if (mode !== "history") syncTabHash(tab, mode);
+    window.scrollTo(0, 0);
   }
 
   function openView(nextView: View, recordId?: string, label?: string) {
+    const mode = navMode.current;
+    navMode.current = "push";
     const tab = makeShellTab(nextView, recordId, label ?? (nextView === "editOrder" && recordId ? `أوردر ${recordId}` : undefined));
-    setTabs((prev) => (prev.some((item) => item.id === tab.id) ? prev : [...prev, tab]));
     if (nextView === "new") setCreatedOrder(null);
-    activateTabObject(tab);
+    if (tab.id === activeTabId) {
+      // Same page: keep it (and its form state) mounted; just realign the URL.
+      if (mode !== "history") syncTabHash(tab, "replace");
+      return;
+    }
+    if (activeTabId && dirtyMap[activeTabId]) {
+      // Unsaved changes: ask before leaving. After Back/Forward the URL has already
+      // moved, so put it back on the page that stays open.
+      if (mode === "history") {
+        const current = tabs.find((item) => item.id === activeTabId);
+        if (current) syncTabHash(current, "replace");
+      }
+      setPendingNav(tab);
+      setCloseError("");
+      return;
+    }
+    showTab(tab, mode);
+  }
+
+  // A form's "cancel": leave to its parent list (guarded like any other navigation).
+  function requestCloseTab(id: string) {
+    const parent: View = id.startsWith("draftEdit") ? "drafts" : "orders";
+    openView(canAccessView(session, parent) ? parent : firstAllowedView(session));
   }
 
   // Image viewer tabs keep their source in memory only (pasted images are data
@@ -9971,70 +9853,13 @@ function ZunionApp() {
     openView("image", key, title);
   }
 
-  function activateTab(id: string) {
-    const tab = tabs.find((item) => item.id === id);
-    if (tab && tab.id !== activeTabId) activateTabObject(tab);
-  }
-
-  function removeTab(id: string) {
-    tabControllers.current.delete(id);
-    if (id.startsWith("image:")) {
-      const key = id.slice("image:".length);
-      setImageTabs((current) => {
-        if (!(key in current)) return current;
-        const next = { ...current };
-        delete next[key];
-        return next;
-      });
-      for (const [src, value] of imageKeys.current) if (value === key) imageKeys.current.delete(src);
-    }
-    setDirtyMap((map) => {
-      if (!(id in map)) return map;
-      const next = { ...map };
-      delete next[id];
-      return next;
-    });
-    delete scrollPositions.current[id];
-    setTabs((prev) => {
-      const index = prev.findIndex((item) => item.id === id);
-      if (index === -1) return prev;
-      const next = prev.filter((item) => item.id !== id);
-      if (id === activeTabId) {
-        const target = next[index] ?? next[index - 1] ?? null;
-        if (target) activateTabObject(target);
-        else {
-          setActiveTabId("");
-          try {
-            window.history.replaceState(null, "", "#dashboard");
-          } catch {
-            window.location.hash = "#dashboard";
-          }
-        }
-      }
-      return next;
-    });
-  }
-
-  function closeTab(id: string) {
-    if (dirtyMap[id]) {
-      setPendingCloseId(id);
-      setCloseError("");
-    } else {
-      removeTab(id);
-    }
-  }
-
-  function requestCloseTab(id: string) {
-    closeTab(id);
-  }
-
-  async function confirmSaveClose() {
-    if (!pendingCloseId) return;
-    const id = pendingCloseId;
-    const controller = tabControllers.current.get(id);
+  async function confirmSaveLeave() {
+    if (!pendingNav || !activeTabId) return;
+    const target = pendingNav;
+    const controller = tabControllers.current.get(activeTabId);
     if (!controller) {
-      setPendingCloseId(null);
-      removeTab(id);
+      setPendingNav(null);
+      showTab(target, "push");
       return;
     }
     setCloseBusy(true);
@@ -10042,8 +9867,8 @@ function ZunionApp() {
     try {
       const ok = await controller.saveForClose();
       if (ok) {
-        setPendingCloseId(null);
-        removeTab(id);
+        setPendingNav(null);
+        showTab(target, "push");
       } else {
         setCloseError("تعذّر حفظ التغييرات. حاول مرة أخرى.");
       }
@@ -10054,11 +9879,11 @@ function ZunionApp() {
     }
   }
 
-  function discardClose() {
-    if (!pendingCloseId) return;
-    const id = pendingCloseId;
-    setPendingCloseId(null);
-    removeTab(id);
+  function discardLeave() {
+    if (!pendingNav) return;
+    const target = pendingNav;
+    setPendingNav(null);
+    showTab(target, "push");
   }
 
   const openViewRef = useRef(openView);
@@ -10069,9 +9894,11 @@ function ZunionApp() {
   useEffect(() => {
     const onHash = () => {
       const parsed = parseHash();
-      // Order links resolve to the order's id so a hash with an order number never opens a duplicate tab.
+      navMode.current = "history";
+      // Order links resolve to the order's id so a hash with an order number never opens a duplicate page.
       if (parsed.view === "editOrder" && parsed.recordId) openOrderDetailsRef.current(parsed.recordId);
       else openViewRef.current(parsed.view, parsed.recordId);
+      navMode.current = "push";
     };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
@@ -10083,7 +9910,7 @@ function ZunionApp() {
       setActiveTabId("");
       setDirtyMap({});
       tabControllers.current.clear();
-      setPendingCloseId(null);
+      setPendingNav(null);
       return;
     }
     setTabs((prev) => {
@@ -10106,7 +9933,10 @@ function ZunionApp() {
 
   useEffect(() => {
     if (!session) return;
-    if (!canAccessView(session, view)) openView(firstAllowedView(session));
+    if (!canAccessView(session, view)) {
+      navMode.current = "replace";
+      openView(firstAllowedView(session));
+    }
   }, [session, view]);
 
   useEffect(() => {
@@ -10361,24 +10191,6 @@ function ZunionApp() {
       );
   }, [session]);
 
-  const tabSections = useMemo<TabSectionConfig[]>(() => {
-    return sidebarItems
-      .filter((item) => !!(item.children && item.children.length))
-      .map((item) => {
-        const seen = new Set<View>();
-        const views: View[] = [];
-        for (const child of item.children ?? []) {
-          const childView = child.id as View;
-          if (seen.has(childView)) continue;
-          if (!canAccessView(session, childView)) continue;
-          seen.add(childView);
-          views.push(childView);
-        }
-        return { id: String(item.id), label: item.label, icon: item.icon, views };
-      })
-      .filter((section) => section.views.length > 0);
-  }, [sidebarItems, session]);
-
   function selectSidebarView(nextView: View) {
     openView(nextView);
     setDrawerOpen(false);
@@ -10558,7 +10370,6 @@ function ZunionApp() {
           <button type="button" className="topbar-bell" aria-label="التنبيهات" onClick={() => selectSidebarView("alerts")}><Bell size={20} /><span className="topbar-notification-dot" /></button>
           <div className="topbar-brand" dir="ltr">zunion system control</div>
         </header>
-        <TabBar tabs={tabs} activeId={activeTabId} dirtyMap={dirtyMap} sections={tabSections} onActivate={activateTab} onClose={closeTab} onOpen={(nextView) => openView(nextView)} />
         <section className="page">
           {!routeAllowed && <ErrorPanel message="غير مصرح لك بالدخول إلى هذه الصفحة" />}
           {routeAllowed && <>
@@ -10620,16 +10431,16 @@ function ZunionApp() {
       <OrderDetailsDrawer open={!!orderDrawerOrder} onClose={() => setOrderDrawerOrderNumber(null)} order={orderDrawerOrder} customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => { setOrderDrawerOrderNumber(null); setCustomerDrawer({ code, name }); }} />
       <ProductDrawer open={!!productDrawer} onClose={() => setProductDrawer(null)} product={productDrawer} orders={orders} setView={(next) => openView(next)} />
       <UserDrawer open={!!userDrawer} onClose={() => setUserDrawer(null)} user={userDrawer} orders={orders} />
-      {pendingCloseId && (
-        <div className="tab-confirm-overlay" role="presentation" onClick={() => { if (!closeBusy) setPendingCloseId(null); }}>
+      {pendingNav && (
+        <div className="tab-confirm-overlay" role="presentation" onClick={() => { if (!closeBusy) setPendingNav(null); }}>
           <div className="tab-confirm" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
             <h3>توجد تغييرات غير محفوظة</h3>
-            <p className="muted">هل تريد حفظ التغييرات قبل إغلاق الصفحة؟</p>
+            <p className="muted">هل تريد حفظ التغييرات قبل مغادرة هذه الصفحة؟</p>
             {closeError && <p className="tab-confirm-error">{closeError}</p>}
             <div className="tab-confirm-actions">
-              <button type="button" className="primary-btn" onClick={() => void confirmSaveClose()} disabled={closeBusy}>{closeBusy ? "جارٍ الحفظ..." : "حفظ"}</button>
-              <button type="button" className="ghost-btn" onClick={discardClose} disabled={closeBusy}>تجاهل التغييرات</button>
-              <button type="button" className="ghost-btn" onClick={() => setPendingCloseId(null)} disabled={closeBusy}>إلغاء</button>
+              <button type="button" className="primary-btn" onClick={() => void confirmSaveLeave()} disabled={closeBusy}>{closeBusy ? "جارٍ الحفظ..." : "حفظ ومتابعة"}</button>
+              <button type="button" className="ghost-btn" onClick={discardLeave} disabled={closeBusy}>تجاهل التغييرات</button>
+              <button type="button" className="ghost-btn" onClick={() => setPendingNav(null)} disabled={closeBusy}>البقاء في الصفحة</button>
             </div>
           </div>
         </div>
