@@ -9903,3 +9903,154 @@ input[type="number"] {
 .dd-minimized-bar { position: fixed; bottom: 12px; inset-inline-start: 12px; z-index: 89000; display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: none; border-radius: 8px; background: #ED1525; color: #fff; font: inherit; font-weight: 800; box-shadow: 0 8px 24px rgba(0,0,0,.25); cursor: pointer; }
 
 .gs-panel { z-index: 90000 !important; }
+
+/* ==========================================================================
+   Global layout safety — shared controls (loaded last on purpose).
+   Root causes fixed here:
+   - buttons had a fixed height (34px / 31px) and were display:block, so icon + label
+     (or a wrapped label) overflowed vertically and looked shifted/cut;
+   - th/td were forced white-space:nowrap, so headings overflowed fixed-width columns.
+   ========================================================================== */
+.primary-btn,
+.ghost-btn,
+.success-btn,
+.actions button,
+.pagination button,
+.settings-row-actions button,
+td button.compact,
+button.compact {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: auto;
+  min-height: 34px;
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.primary-btn.compact,
+.ghost-btn.compact,
+.success-btn.compact,
+td button.compact,
+button.compact {
+  min-height: 31px;
+  height: auto;
+}
+.primary-btn svg,
+.ghost-btn svg,
+.success-btn svg,
+.actions button svg,
+button.compact svg {
+  flex: 0 0 auto;
+  display: block;
+}
+/* A label that cannot fit on one line wraps instead of being cut off. */
+.primary-btn.wrap,
+.ghost-btn.wrap { white-space: normal; }
+
+/* Badges / pills: never wrap, never detach, always vertically centred. */
+.badge,
+[class*="badge-"],
+.pill,
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  line-height: 1.4;
+  white-space: nowrap;
+  vertical-align: middle;
+  max-width: 100%;
+}
+.badge { position: static; }
+
+/* Action cells: buttons stay inside the cell and wrap to a new line instead of overlapping. */
+td .settings-row-actions,
+td .actions,
+td .row-actions,
+td .drafts-row-actions,
+td .inline-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Table headings wrap inside their column instead of spilling over the neighbouring cell. */
+th {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+/* Fixed-layout tables give every column a hard width: cells must wrap to fit it. */
+.ws-table th, .ws-table td,
+.md-table th, .md-table td,
+.orders-list-table th, .orders-list-table td,
+.ss-table th, .ss-table td,
+.party-manager-table th, .party-manager-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.md-head { font-size: clamp(15px, 1.9vw, 25px); line-height: 1.3; }
+
+/* Flex children may shrink below their content so long Arabic/English strings wrap, not overflow. */
+.panel-head > *,
+.settings-card-head > *,
+.modal-head > *,
+.toolbar > *,
+.filters > * { min-width: 0; }
+.panel h1, .panel h2, .panel h3, .modal h2, .modal h3 { overflow-wrap: anywhere; }
+
+/* Mixed Arabic/English values (ids, usernames, emails, order numbers) keep their own direction. */
+.data-value,
+.numeric-value,
+.settings-user-username,
+.account-email,
+.email-text { unicode-bidi: isolate; }
+
+/* Form rows adapt to the card's own width (the 2-column order layout makes cards narrow on
+   mid-size screens); fields wrap to a new row instead of being squeezed to ~60px. */
+.nf-row-order { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
+.nf-row-products { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+
+/* Order card: judge the layout by the card's own width, not the viewport. */
+.nf-card-order { container-type: inline-size; container-name: nfcard; }
+.nf-card-order .nf-row-products { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)) !important; }
+.nf-card-order .nf-field-materials-inrow { grid-column: 1 / -1; }
+@container nfcard (min-width: 760px) {
+  .nf-card-order .nf-row-products { grid-template-columns: 1fr 1.5fr 0.6fr 0.7fr 0.7fr 2.5fr !important; }
+  .nf-card-order .nf-field-materials-inrow { grid-column: auto; }
+}
+
+/* Icon-only buttons: no side padding, icon centred inside the box. */
+.sidebar-toggle,
+.hamburger-btn,
+.topbar-bell,
+.sidebar-close {
+  padding: 0 !important;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+}
+.sidebar .sidebar-toggle,
+.sidebar .sidebar-close { padding: 0 !important; }
+.sidebar .sidebar-toggle { display: inline-flex !important; align-items: center !important; justify-content: center !important; }
+
+/* Identifiers and dates stay on one line even inside wrapping fixed-layout tables. */
+.ws-table td[class*="-num"], .ws-table td[class*="-date"],
+.orders-list-table td[class*="-num"], .orders-list-table td[class*="-date"],
+.orders-list-table td.orders-list-num {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  unicode-bidi: isolate;
+}
+.orders-list-table td { padding-top: 3px; padding-bottom: 3px; }
+.orders-list-table td button { line-height: 1.25; }

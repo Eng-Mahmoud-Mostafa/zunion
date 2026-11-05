@@ -6967,6 +6967,30 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     body = renderWorkerSpread();
   }
 
+  // Hooks must run on every render: keep these above the conditional returns below.
+  const baseOrders = useMemo(() => {
+    const nonDrafts = orders.filter((order) => !order.draft);
+    if (queue === "finish") return nonDrafts.filter((order) => order.workStage === "finishing" || (order.workStage === "operation" && order.operation_status === "تم"));
+    return roleOrders(session.role, nonDrafts);
+  }, [orders, queue, session.role]);
+
+  const filtered = useMemo(() => {
+    // Optional date range (tracking only): both ends inclusive, either end may be empty.
+    const ranged = queue || (!rangeFrom && !rangeTo) ? baseOrders : baseOrders.filter((order) => {
+      const day = rangeField === "created" ? cairoDateKey(order.created_at) : dateOnly(order.delivery_date);
+      if (!day) return false;
+      if (rangeFrom && day < rangeFrom) return false;
+      if (rangeTo && day > rangeTo) return false;
+      return true;
+    });
+    if (dateSort === "none") return ranged;
+    return [...ranged].sort((a, b) => {
+      const first = new Date(a.delivery_date || "").getTime() || 0;
+      const second = new Date(b.delivery_date || "").getTime() || 0;
+      return dateSort === "asc" ? first - second : second - first;
+    });
+  }, [baseOrders, dateSort, queue, rangeField, rangeFrom, rangeTo]);
+
   if (queue && remoteOps && remoteOps.orders.length > 0 && orders.length === 0) {
     if (remoteLoading) return <LoadingPanel />;
     if (remoteError || !remoteOps) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
@@ -6996,29 +7020,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       </div>
     );
   }
-
-  const baseOrders = useMemo(() => {
-    const nonDrafts = orders.filter((order) => !order.draft);
-    if (queue === "finish") return nonDrafts.filter((order) => order.workStage === "finishing" || (order.workStage === "operation" && order.operation_status === "تم"));
-    return roleOrders(session.role, nonDrafts);
-  }, [orders, queue, session.role]);
-
-  const filtered = useMemo(() => {
-    // Optional date range (tracking only): both ends inclusive, either end may be empty.
-    const ranged = queue || (!rangeFrom && !rangeTo) ? baseOrders : baseOrders.filter((order) => {
-      const day = rangeField === "created" ? cairoDateKey(order.created_at) : dateOnly(order.delivery_date);
-      if (!day) return false;
-      if (rangeFrom && day < rangeFrom) return false;
-      if (rangeTo && day > rangeTo) return false;
-      return true;
-    });
-    if (dateSort === "none") return ranged;
-    return [...ranged].sort((a, b) => {
-      const first = new Date(a.delivery_date || "").getTime() || 0;
-      const second = new Date(b.delivery_date || "").getTime() || 0;
-      return dateSort === "asc" ? first - second : second - first;
-    });
-  }, [baseOrders, dateSort, queue, rangeField, rangeFrom, rangeTo]);
 
   function save(order: Order) {
     const previous = orders.find((item) => item.id === order.id);
