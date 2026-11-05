@@ -22,7 +22,7 @@ export const config = {
     apiKey: resendApiKey,
     from: process.env.RESEND_FROM ?? `Zunion <${resendFromEmail}>`,
     fromEmail: resendFromEmail,
-    passwordChangeEmail: process.env.PASSWORD_CHANGE_EMAIL ?? "mahmoudmostafa3104@gmail.com",
+    passwordChangeEmail: process.env.PASSWORD_CHANGE_EMAIL ?? "mahmoud_foly@icloud.com",
   },
 };
 
