@@ -514,7 +514,7 @@ async function syncCustomerAccountsTables(log: (msg: string) => void) {
       );
       alter table customer_account_transactions add column if not exists logo text not null default '';
       alter table customer_account_transactions drop constraint if exists customer_account_transactions_entry_type_check;
-      alter table customer_account_transactions add constraint customer_account_transactions_entry_type_check check (entry_type in ('charge', 'payment'));
+      alter table customer_account_transactions add constraint customer_account_transactions_entry_type_check check (entry_type in ('charge', 'payment', 'transfer_out', 'transfer_in', 'adjustment'));
       create unique index if not exists customer_account_transactions_client_key_idx
         on customer_account_transactions (client_key) where client_key is not null;
       create unique index if not exists customer_account_transactions_order_uniq

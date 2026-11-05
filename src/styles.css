@@ -10417,3 +10417,45 @@ a.cl-pill.red:hover { background: #b80f19; }
   .cl-confirm > div { flex-direction: column; gap: 2px; }
   .cl-confirm dd { text-align: start; }
 }
+
+/* --- opening a new accounting period: simplified confirmation popup --- */
+.cl-modal.cl-modal-open { padding: 0; overflow: hidden; width: min(460px, 100%); }
+.cl-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; background: #d4141f; color: #fff; }
+.cl-modal-head h3 { display: flex; align-items: center; gap: 10px; margin: 0; color: #fff; font-size: 19px; font-weight: 900; }
+.cl-modal-x { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; color: #fff; cursor: pointer; }
+.cl-modal-x:hover { background: rgba(255, 255, 255, .2); }
+.cl-modal-x:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.cl-modal-body { padding: 18px 20px 20px; }
+.cl-modal-open .cl-modal-lead { margin: 0 0 14px; color: #374151; font-size: 15px; font-weight: 600; line-height: 1.8; }
+.cl-transfer-box { display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; margin-bottom: 14px; border: 1px solid #e3e6ee; border-radius: 12px; background: #f5f6fb; }
+.cl-transfer-box span { color: #6b7280; font-size: 13px; font-weight: 800; }
+.cl-transfer-box strong { font-size: 26px; font-weight: 900; line-height: 1.2; overflow-wrap: anywhere; color: #0b2545; }
+.cl-transfer-box.debit { background: #fdecec; border-color: #f5cfd2; }
+.cl-transfer-box.debit strong { color: #c4101b; }
+.cl-transfer-box.credit { background: #eaf2fd; border-color: #cfe0f5; }
+.cl-transfer-box.credit strong { color: #0b57b7; }
+.cl-transfer-box.zero { background: #e9f9ee; border-color: #cdeed7; }
+.cl-transfer-box.zero strong { color: #146c35; }
+.cl-modal label.cl-date-field { display: block; margin-bottom: 10px; }
+.cl-modal-open .cl-modal-actions .primary-btn { display: inline-flex; align-items: center; gap: 8px; min-width: 150px; justify-content: center; }
+.cl-spin { animation: cl-spin 1s linear infinite; }
+@keyframes cl-spin { to { transform: rotate(360deg); } }
+
+/* --- closing summary of a historical period --- */
+.cl-closing { background: #fff; border: 1px solid #cfd8ea; border-top: 4px solid #0b2545; border-radius: 14px; padding: 14px 18px 16px; }
+.cl-closing h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 19px; font-weight: 900; color: #0b2545; }
+.cl-closing h3 svg { color: #0b2545; }
+.cl-closing dl { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.cl-closing dl > div { padding: 9px 12px; border: 1px solid #e3e6ee; border-radius: 10px; background: #f8f9fc; min-width: 0; }
+.cl-closing dt { color: #6b7280; font-size: 13px; font-weight: 800; margin-bottom: 3px; }
+.cl-closing dd { margin: 0; color: #0b2545; font-size: 20px; font-weight: 900; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.cl-closing dd small { display: block; margin-top: 2px; color: #6b7280; font-size: 12px; font-weight: 700; }
+.cl-closing dd.zero { color: #1a8f3f; }
+.cl-closing dd.ref { font-size: 15px; letter-spacing: .3px; }
+
+/* internal transfer / adjustment rows */
+.cl-table .cl-row-transfer_in td, .cl-table .cl-row-transfer_out td, .cl-table .cl-row-adjustment td { background: #eef2f9; font-weight: 800; }
+.cl-table .cl-row-transfer_in.last td, .cl-table .cl-row-transfer_out.last td { background: #e3e8f3; }
+.cl-page .cl-pill.sys { white-space: normal; text-align: center; line-height: 1.4; padding: 4px 14px; max-width: 190px; }
+@media (max-width: 900px) { .cl-closing dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .cl-closing dl { grid-template-columns: 1fr; } .cl-transfer-box strong { font-size: 22px; } }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, ChevronDown, Coins, FilePlus2, FileText, IdCard, Info, Layers, Plus, Printer, Search, ShoppingCart, UserRound, Users, Wallet, X } from "lucide-react";
+import { BookOpen, ChevronDown, Loader2, Lock, Coins, FilePlus2, FileText, IdCard, Info, Layers, Plus, Printer, Search, ShoppingCart, UserRound, Users, Wallet, X } from "lucide-react";
 import { normalizeDigitsToEnglish } from "../utils/formatters";
 
 type LedgerCustomer = {
@@ -12,7 +12,7 @@ type LedgerCustomer = {
 
 type LedgerRow = {
   id: string;
-  kind: "opening" | "carried" | "charge" | "payment" | "adjustment";
+  kind: "opening" | "carried" | "charge" | "payment" | "adjustment" | "transfer_out" | "transfer_in";
   txn_date_text: string;
   order_id: string | null;
   order_number: string;
@@ -51,7 +51,19 @@ type LedgerData = {
     closingBalance: number;
     snapshotClosing: number | null;
     driftAfterClose: number;
+    carriedIn: number | null;
+    minOpenDate: string | null;
+    legacyClose: boolean;
   };
+  closing: {
+    reference: string;
+    preTransferBalance: number;
+    transferredAmount: number;
+    closingAfterTransfer: number;
+    closedAt: string;
+    effectiveDate: string;
+    byName: string | null;
+  } | null;
   summary: { operationCount: number; totalWork: number; totalPayments: number; currentBalance: number };
   rows: LedgerRow[];
   total: number;
@@ -104,6 +116,13 @@ const todayIso = () => {
 };
 const newKey = () => globalThis.crypto?.randomUUID?.() ?? `k-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+/** "1,000 جنيه مدين" / "500 جنيه دائن" / "0 جنيه" */
+function balanceText(value: number) {
+  if (value > 0) return `${money(value)} جنيه مدين`;
+  if (value < 0) return `${money(-value)} جنيه دائن`;
+  return "0 جنيه";
+}
+
 function balanceInfo(value: number) {
   if (value > 0) return { label: "رصيد مدين — على العميل", tone: "debit" as const };
   if (value < 0) return { label: "رصيد دائن — للعميل", tone: "credit" as const };
@@ -139,6 +158,8 @@ function typeLabel(row: LedgerRow) {
   if (row.kind === "carried") return "رصيد مرحّل";
   if (row.kind === "opening") return "رصيد سابق";
   if (row.kind === "adjustment") return "تسوية";
+  if (row.kind === "transfer_out") return "ترحيل رصيد إلى الحساب الجديد";
+  if (row.kind === "transfer_in") return "رصيد مرحّل من الحساب السابق";
   return "شغل";
 }
 
@@ -168,6 +189,7 @@ function buildPrintHtml(data: LedgerData, periodTitle: string) {
   const body = data.rows
     .map((row) => {
       const system = row.source === "system";
+      const internal = row.kind !== "charge" && row.kind !== "payment";
       const cells = [
         system ? "—" : row.created_by_name || "—",
         system ? "—" : dayLabel(row.txn_date_text),
@@ -181,7 +203,7 @@ function buildPrintHtml(data: LedgerData, periodTitle: string) {
         row.credit ? money(row.credit) : "—",
         money(row.balance),
       ];
-      const cls = row.kind === "charge" ? "charge" : row.kind === "payment" ? "payment" : "system";
+      const cls = row.kind === "charge" ? "charge" : row.kind === "payment" ? "payment" : internal ? "system" : "system";
       return `<tr class="${cls}">${cells.map((cell, index) => `<td${index >= 6 ? ' class="num"' : ""}>${esc(cell)}</td>`).join("")}</tr>`;
     })
     .join("");
@@ -204,6 +226,9 @@ function buildPrintHtml(data: LedgerData, periodTitle: string) {
   tr.charge td:nth-child(9) { background: #fde8ea; }
   tr.payment td:nth-child(10) { background: #e3f6e8; }
   tr.system td { background: #f3f4f6; font-weight: 700; }
+  .closing { margin: 0 0 12px; padding: 8px 12px; border: 2px solid #0b2545; border-radius: 8px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 16px; font-size: 13px; }
+  .closing h2 { grid-column: 1 / -1; margin: 0 0 4px; font-size: 15px; color: #0b2545; }
+  .closing b { color: #0b2545; }
   .foot { margin-top: 12px; font-size: 14px; font-weight: 700; display: flex; gap: 24px; }
   .foot span { color: #0b2545; }
 </style></head><body>
@@ -213,13 +238,21 @@ function buildPrintHtml(data: LedgerData, periodTitle: string) {
   <div><b>كود العميل:</b> ${esc(data.customer.code || "—")}</div>
   <div><b>طرف:</b> ${esc(data.customer.party || "—")}</div>
   <div><b>الفترة المحاسبية:</b> ${esc(periodTitle)}</div>
-  <div><b>الرصيد الافتتاحي:</b> ${esc(money(data.period.openingBalance))}</div>
+  <div><b>${data.period.carriedIn !== null ? "الرصيد الافتتاحي المرحّل" : "الرصيد الافتتاحي"}:</b> ${esc(money(data.period.carriedIn !== null ? data.period.carriedIn : data.period.openingBalance))}</div>
   <div><b>عدد العمليات:</b> ${esc(data.summary.operationCount)}</div>
   <div><b>إجمالي الشغل:</b> ${esc(money(data.summary.totalWork))}</div>
   <div><b>إجمالي المدفوعات:</b> ${esc(money(data.summary.totalPayments))}</div>
 </div>
+${data.closing ? `<div class="closing"><h2>ملخص إقفال الحساب</h2>
+  <div><b>الرصيد قبل الترحيل:</b> <span dir="ltr">${esc(money(data.closing.preTransferBalance))}</span> (${esc(balanceInfo(data.closing.preTransferBalance).label)})</div>
+  <div><b>المبلغ المرحّل:</b> <span dir="ltr">${esc(money(data.closing.transferredAmount))}</span></div>
+  <div><b>رصيد الإقفال بعد الترحيل:</b> <span dir="ltr">${esc(money(data.closing.closingAfterTransfer))}</span></div>
+  <div><b>تاريخ الإقفال:</b> ${esc(dayLabel(data.closing.effectiveDate))}</div>
+  <div><b>تم بواسطة:</b> ${esc(data.closing.byName || "—")}</div>
+  <div><b>مرجع الترحيل:</b> <span dir="ltr">${esc(data.closing.reference)}</span></div>
+</div>` : ""}
 <table><thead><tr>${COLUMNS.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table>
-<div class="foot"><span>الرصيد الختامي: <span dir="ltr">${esc(money(data.period.closingBalance))}</span></span><span>${esc(info.label)}</span></div>
+<div class="foot"><span>${data.closing ? "رصيد الإقفال بعد الترحيل" : "الرصيد الختامي"}: <span dir="ltr">${esc(money(data.period.closingBalance))}</span></span><span>${esc(data.closing ? "حساب مقفل عند الصفر" : info.label)}</span></div>
 <script>window.onload = function () { setTimeout(function () { window.focus(); window.print(); }, 250); };</script>
 </body></html>`;
 }
@@ -252,6 +285,7 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
   const [openModal, setOpenModal] = useState(false);
   const [openSaving, setOpenSaving] = useState(false);
   const [openError, setOpenError] = useState("");
+  const [openDate, setOpenDate] = useState(todayIso());
   const openLock = useRef(false);
   const openKey = useRef("");
 
@@ -385,18 +419,22 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
     openKey.current = newKey();
     openLock.current = false;
     setOpenError(""); setOpenSaving(false);
+    setOpenDate(todayIso());
     setOpenModal(true);
   }
 
   async function confirmNewPeriod() {
     if (openLock.current || !view) return;
+    if (!openDate) return setOpenError("اختر تاريخ فتح الحساب الجديد");
+    if (openDate > todayIso()) return setOpenError("لا يمكن أن يكون تاريخ فتح الحساب الجديد في المستقبل");
+    if (view.period.minOpenDate && openDate < view.period.minOpenDate) return setOpenError(`لا يمكن أن يسبق التاريخ آخر حركة مسجلة في الحساب الحالي (${dayLabel(view.period.minOpenDate)})`);
     openLock.current = true;
     setOpenSaving(true);
     setOpenError("");
     try {
       await api(`/api/account-ledger/${encodeURIComponent(view.customer.id)}/periods`, {
         method: "POST",
-        body: JSON.stringify({ client_key: openKey.current, expected_period_id: view.period.id }),
+        body: JSON.stringify({ client_key: openKey.current, expected_period_id: view.period.id, effective_date: openDate }),
       });
       setOpenModal(false);
       setPeriodId("");
@@ -533,15 +571,30 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
 
           {view.period.status === "closed" ? (
             <div className="cl-notice info" role="note">
-              هذه فترة مغلقة (للعرض فقط). الرصيد الختامي لها: <b dir="ltr">{money(view.period.snapshotClosing ?? view.period.closingBalance)}</b>
-              {Math.abs(view.period.driftAfterClose) > 0.004 ? <> — تم تعديل أوردرات بعد إغلاقها بقيمة <b dir="ltr">{money(view.period.driftAfterClose)}</b> وتظهر كتسوية في الحساب الحالي.</> : null}
+              هذه فترة مغلقة (للعرض فقط).
+              {view.period.legacyClose ? <> الرصيد الختامي لها: <b dir="ltr">{money(view.period.snapshotClosing ?? view.period.closingBalance)}</b></> : null}
+              {Math.abs(view.period.driftAfterClose) > 0.004 ? <> تم تعديل أوردرات بعد إغلاقها بقيمة <b dir="ltr">{money(view.period.driftAfterClose)}</b> وتظهر كتسوية في الحساب الحالي.</> : null}
             </div>
+          ) : null}
+
+          {view.period.status === "closed" && view.closing ? (
+            <section className="cl-closing" aria-label="ملخص إقفال الحساب">
+              <h3><Lock size={20} aria-hidden="true" />ملخص إقفال الحساب</h3>
+              <dl>
+                <div><dt>الرصيد قبل الترحيل</dt><dd dir="ltr">{money(view.closing.preTransferBalance)}<small>{balanceInfo(view.closing.preTransferBalance).label}</small></dd></div>
+                <div><dt>المبلغ المرحّل</dt><dd dir="ltr">{money(view.closing.transferredAmount)}</dd></div>
+                <div><dt>رصيد الإقفال بعد الترحيل</dt><dd dir="ltr" className="zero">{money(view.closing.closingAfterTransfer)}</dd></div>
+                <div><dt>تاريخ الإقفال</dt><dd>{dayLabel(view.closing.effectiveDate)}</dd></div>
+                <div><dt>تم بواسطة</dt><dd>{view.closing.byName || "—"}</dd></div>
+                <div><dt>مرجع الترحيل</dt><dd dir="ltr" className="ref">{view.closing.reference}</dd></div>
+              </dl>
+            </section>
           ) : null}
 
           <section className="cl-ledger">
             <div className="cl-ledger-head">
               <h2><Layers size={26} aria-hidden="true" />كشف الحساب</h2>
-              <span className="cl-ledger-sub">الرصيد الافتتاحي: <b dir="ltr">{money(view.period.openingBalance)}</b></span>
+              <span className="cl-ledger-sub">{view.period.carriedIn !== null ? "الرصيد الافتتاحي المرحّل" : "الرصيد الافتتاحي"}: <b dir="ltr">{money(view.period.carriedIn !== null ? view.period.carriedIn : view.period.openingBalance)}</b></span>
             </div>
             <div className="cl-table-wrap">
               <table className="cl-table">
@@ -550,15 +603,16 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
                   {view.rows.length === 0 ? (
                     <tr><td colSpan={COLUMNS.length + 1} className="cl-table-empty">لا توجد حركات في هذه الفترة</td></tr>
                   ) : view.rows.map((row, index) => {
-                    const system = row.source === "system";
+                    const system = row.kind !== "charge" && row.kind !== "payment";
+                    const virtual = row.source === "system";
                     if (!system) seq += 1;
                     const isLast = index === view.rows.length - 1;
                     const pill = row.kind === "payment" ? "pay" : row.kind === "charge" ? "work" : "sys";
                     return (
                       <tr key={row.id} className={`cl-row-${row.kind}${isLast ? " last" : ""}`}>
                         <td className="cl-idx">{system ? "—" : seq}</td>
-                        <td className="cl-user">{system ? <Dash /> : row.created_by_name || <Dash />}</td>
-                        <td className="cl-nowrap">{system || !row.txn_date_text ? <Dash /> : dayLabel(row.txn_date_text)}</td>
+                        <td className="cl-user">{virtual ? <Dash /> : row.created_by_name || <Dash />}</td>
+                        <td className="cl-nowrap">{virtual || !row.txn_date_text ? <Dash /> : dayLabel(row.txn_date_text)}</td>
                         <td className="cl-nowrap">
                           {row.order_number
                             ? (onOrderClick && row.order_id
@@ -616,24 +670,30 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
       ) : null}
 
       {openModal && view ? (
-        <div className="cl-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !openSaving) setOpenModal(false); }}>
-          <div className="cl-modal" role="dialog" aria-modal="true" aria-labelledby="cl-open-title">
-            <h3 id="cl-open-title">فتح حساب جديد</h3>
-            <p className="cl-modal-lead">سيتم إغلاق الحساب الحالي بكل حركاته وفتح حساب جديد لنفس العميل، مع ترحيل الرصيد الحالي كما هو.</p>
-            <dl className="cl-confirm">
-              <div><dt>اسم العميل</dt><dd>{view.customer.name}</dd></div>
-              <div><dt>كود العميل</dt><dd dir="ltr">{codeLabel(view.customer.code)}</dd></div>
-              <div><dt>تاريخ فتح الحساب الجديد</dt><dd>{dayLabel(todayIso())}</dd></div>
-              <div><dt>الرصيد الحالي</dt><dd dir="ltr">{money(view.period.closingBalance)}</dd></div>
-              <div><dt>الرصيد الذي سيتم ترحيله</dt><dd dir="ltr">{money(view.period.closingBalance)}</dd></div>
-              <div><dt>نوع الرصيد</dt><dd><span className={`cl-tag ${closingInfo.tone}`}>{closingInfo.tone === "debit" ? "رصيد مدين" : closingInfo.tone === "credit" ? "رصيد دائن" : "حساب مسدد"}</span></dd></div>
-            </dl>
-            {openError ? <div className="cl-notice bad" role="alert">{openError}</div> : null}
-            <div className="cl-modal-actions">
-              <button type="button" className="primary-btn" disabled={openSaving} onClick={() => void confirmNewPeriod()}>{openSaving ? "جار الفتح..." : "تأكيد فتح الحساب"}</button>
-              <button type="button" className="ghost-btn" disabled={openSaving} onClick={() => setOpenModal(false)}>إلغاء</button>
+        <div className="cl-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !openSaving) setOpenModal(false); }} onKeyDown={(event) => { if (event.key === "Escape" && !openSaving) setOpenModal(false); }}>
+          <form className="cl-modal cl-modal-open" role="dialog" aria-modal="true" aria-labelledby="cl-open-title" onSubmit={(event) => { event.preventDefault(); void confirmNewPeriod(); }} noValidate>
+            <div className="cl-modal-head">
+              <h3 id="cl-open-title"><FilePlus2 size={22} aria-hidden="true" />فتح حساب جديد</h3>
+              <span role="button" tabIndex={0} className="cl-modal-x" aria-label="إغلاق" onClick={() => { if (!openSaving) setOpenModal(false); }} onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && !openSaving) setOpenModal(false); }}><X size={20} /></span>
             </div>
-          </div>
+            <div className="cl-modal-body">
+              <p className="cl-modal-lead">سيتم إغلاق الحساب الحالي وفتح حساب جديد مع ترحيل الرصيد المتبقي تلقائيًا.</p>
+              <div className={`cl-transfer-box ${balanceInfo(view.period.closingBalance).tone}`}>
+                <span>الرصيد الذي سيتم ترحيله</span>
+                <strong>{balanceText(view.period.closingBalance)}</strong>
+              </div>
+              <label className="cl-date-field">تاريخ فتح الحساب الجديد
+                <input type="date" autoFocus value={openDate} min={view.period.minOpenDate ?? undefined} max={todayIso()} onChange={(event) => setOpenDate(event.target.value)} disabled={openSaving} />
+              </label>
+              {openError ? <div className="cl-notice bad" role="alert">{openError}</div> : null}
+              <div className="cl-modal-actions">
+                <button type="submit" className="primary-btn" disabled={openSaving} aria-busy={openSaving}>
+                  {openSaving ? <><Loader2 size={18} aria-hidden="true" className="cl-spin" />جار الفتح...</> : "تأكيد فتح الحساب"}
+                </button>
+                <button type="button" className="ghost-btn" disabled={openSaving} onClick={() => setOpenModal(false)}>إلغاء</button>
+              </div>
+            </div>
+          </form>
         </div>
       ) : null}
     </div>

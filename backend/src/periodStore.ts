@@ -16,6 +16,8 @@ export type AccountPeriod = {
   closing_balance: string | number | null;
   opened_by_name: string | null;
   closed_by_name: string | null;
+  /** Drift on this closed period already settled by an adjustment row in a later period. */
+  drift_absorbed?: string | number | null;
 };
 
 /**
@@ -50,6 +52,44 @@ export const PERIOD_DDL = `
     on customer_account_transactions (customer_id, period_id);
   create index if not exists orders_customer_created_idx
     on orders (customer_id, created_at);
+  alter table customer_account_periods add column if not exists drift_absorbed numeric not null default 0;
+
+  -- One immutable row per balance transfer between two periods of the same customer.
+  create table if not exists customer_account_transfers (
+    id uuid primary key default gen_random_uuid(),
+    reference text not null unique,
+    customer_id uuid not null,
+    from_period_id uuid not null,
+    to_period_id uuid not null,
+    amount numeric not null,
+    pre_transfer_balance numeric not null,
+    closing_after numeric not null default 0,
+    effective_date date not null,
+    transferred_at timestamptz not null default now(),
+    transferred_by uuid references users(id) on delete set null,
+    transferred_by_name text,
+    client_key text
+  );
+  create unique index if not exists customer_account_transfers_from_idx on customer_account_transfers (from_period_id);
+  create unique index if not exists customer_account_transfers_to_idx on customer_account_transfers (to_period_id);
+  create unique index if not exists customer_account_transfers_key_idx on customer_account_transfers (client_key) where client_key is not null;
+  create index if not exists customer_account_transfers_customer_idx on customer_account_transfers (customer_id);
+
+  create or replace function customer_account_transfers_immutable() returns trigger as $$
+  begin
+    raise exception 'customer_account_transfers rows are immutable (balance transfers are a permanent record)';
+  end;
+  $$ language plpgsql;
+  drop trigger if exists customer_account_transfers_no_change on customer_account_transfers;
+  create trigger customer_account_transfers_no_change
+    before update or delete on customer_account_transfers
+    for each row execute function customer_account_transfers_immutable();
+
+  -- Transfer / adjustment rows live in the ledger table next to charges and payments.
+  alter table customer_account_transactions add column if not exists transfer_id uuid;
+  alter table customer_account_transactions drop constraint if exists customer_account_transactions_entry_type_check;
+  alter table customer_account_transactions add constraint customer_account_transactions_entry_type_check
+    check (entry_type in ('charge', 'payment', 'transfer_out', 'transfer_in', 'adjustment'));
 `;
 
 let ensured: Promise<void> | null = null;

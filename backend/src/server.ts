@@ -2548,21 +2548,28 @@ app.post("/api/account-ledger/:customerId/payments", requireAuth, requireRole("M
 app.post("/api/account-ledger/:customerId/periods", requireAuth, requireRole("Master", "Helper"), async (req, res) => {
   const customerId = ledgerCustomerId.safeParse(param(req.params.customerId));
   if (!customerId.success) return res.status(400).json({ message: "معرّف العميل غير صالح" });
-  const parsed = z.object({ client_key: z.string().min(8).max(120), expected_period_id: z.string().uuid().optional() }).safeParse(req.body);
+  const parsed = z.object({
+    client_key: z.string().min(8).max(120),
+    expected_period_id: z.string().uuid().optional(),
+    effective_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "طلب غير صحيح" });
   try {
     const result = await openNewPeriod(customerId.data, ledgerActor(req), {
       clientKey: parsed.data.client_key,
       expectedPeriodId: parsed.data.expected_period_id ?? null,
+      effectiveDate: parsed.data.effective_date ?? null,
     });
     if (!result.repeated) {
       await audit(req.user!, "CUSTOMER_ACCOUNT_PERIOD_OPENED", "customer_account_periods", result.period.id, result.previous ?? undefined, {
         customer_id: customerId.data,
         seq: result.period.seq,
         opening_balance: Number(result.period.opening_balance),
+        transfer_reference: result.reference,
+        pre_transfer_balance: result.preTransferBalance,
       }).catch(() => undefined);
     }
-    return res.status(result.repeated ? 200 : 201).json({ ok: true, repeated: result.repeated, period: { id: result.period.id, seq: result.period.seq } });
+    return res.status(result.repeated ? 200 : 201).json({ ok: true, repeated: result.repeated, reference: result.reference, preTransferBalance: result.preTransferBalance, period: { id: result.period.id, seq: result.period.seq } });
   } catch (error) {
     return sendLedgerError(res, error, "تعذر فتح حساب جديد، يرجى المحاولة مرة أخرى");
   }

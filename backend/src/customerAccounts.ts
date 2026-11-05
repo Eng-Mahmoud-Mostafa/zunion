@@ -54,6 +54,11 @@ export type StatementFilters = {
   periodIsFirst?: boolean;
   /** Draft orders are not chargeable. */
   excludeDrafts?: boolean;
+  /**
+   * Include the internal rows (balance transfers and reconciling adjustments). They are not
+   * customer money, so every normal statement/balance/report leaves them out.
+   */
+  includeSystem?: boolean;
 };
 
 /** Orders carry their own money; the ledger only holds manual postings. */
@@ -100,6 +105,8 @@ export function statementCtes(customerId: string | null, filters: StatementFilte
     params.push(Boolean(filters.periodIsFirst));
     ledgerCond.push(`(t.period_id = $${periodIdParam} or (t.period_id is null and $${params.length}::boolean))`);
   }
+
+  if (!filters.includeSystem) ledgerCond.push("t.entry_type in ('charge', 'payment')");
 
   const orderCond: string[] = [];
   if (customerId) { params.push(customerId); orderCond.push(`o.customer_id=$${params.length}`); }
@@ -362,6 +369,7 @@ export async function updateTransaction(
   );
   const existing = existingRows[0];
   if (!existing) return null;
+  if (existing.entry_type !== "charge" && existing.entry_type !== "payment") throw periodError("هذه حركة نظامية (ترحيل رصيد) ولا يمكن تعديلها", "ZUNION_PERIOD_CLOSED", 409);
   await assertRowPeriodOpen((sql, params = []) => query(sql, params) as any, customerId, (existing as { period_id?: string | null }).period_id ?? null);
 
   let quantity = Number(existing.quantity);
@@ -397,10 +405,11 @@ export async function updateTransaction(
 }
 
 export async function deleteTransaction(txnId: string, customerId: string): Promise<boolean> {
-  const { rows: found } = await query<{ period_id: string | null }>(
-    "select period_id from customer_account_transactions where id=$1 and customer_id=$2",
+  const { rows: found } = await query<{ period_id: string | null; entry_type: string }>(
+    "select period_id, entry_type from customer_account_transactions where id=$1 and customer_id=$2",
     [txnId, customerId],
   );
+  if (found[0] && found[0].entry_type !== "charge" && found[0].entry_type !== "payment") throw periodError("هذه حركة نظامية (ترحيل رصيد) ولا يمكن حذفها", "ZUNION_PERIOD_CLOSED", 409);
   if (found[0]) await assertRowPeriodOpen((sql, params = []) => query(sql, params) as any, customerId, found[0].period_id ?? null);
   const { rowCount } = await query(
     "delete from customer_account_transactions where id=$1 and customer_id=$2",

@@ -812,7 +812,7 @@ alter table customer_account_transactions add column if not exists customer_id u
 alter table customer_account_transactions add column if not exists txn_date date not null;
 alter table customer_account_transactions add column if not exists entry_type text not null;
 alter table customer_account_transactions drop constraint if exists customer_account_transactions_entry_type_check;
-alter table customer_account_transactions add constraint customer_account_transactions_entry_type_check check (entry_type in ('charge', 'payment'));
+alter table customer_account_transactions add constraint customer_account_transactions_entry_type_check check (entry_type in ('charge', 'payment', 'transfer_out', 'transfer_in', 'adjustment'));
 alter table customer_account_transactions add column if not exists order_id uuid;
 alter table customer_account_transactions add column if not exists description text not null default '';
 alter table customer_account_transactions add column if not exists logo text not null default '';
