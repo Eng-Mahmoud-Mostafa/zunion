@@ -8616,7 +8616,7 @@ input[type="number"] {
   white-space: nowrap;
 }
 
-:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card) *,
+:where(.app) button:not(.sidebar-item):not(.sidebar-parent):not(.sidebar-subitem):not(.sidebar-close):not(.sidebar-logout):not(.sidebar-overlay):not(.logo-secret-button):not(.top-logo-button):not(.hamburger-btn):not(.topbar-bell):not(.action-card):not(.settings-role-item) *,
 :where(.app) label.file-btn *,
 :where(.app) a.cd-action-btn * {
   color: #FFFFFF !important;
@@ -9656,11 +9656,20 @@ input[type="number"] {
 /* Roles two-column layout */
 .settings-page .settings-role-layout { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 18px; align-items: start; }
 .settings-page .settings-role-list { display: flex; flex-direction: column; gap: 10px; }
-.settings-page .settings-role-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: right; padding: 12px 14px; border: 1px solid #e5e7eb !important; border-radius: 12px; background: #fff !important; color: #08243d !important; cursor: pointer; }
-.settings-page .settings-role-item * { color: inherit !important; }
-.settings-page .settings-role-item strong { display: block; font-size: 15px; font-weight: 800; }
-.settings-page .settings-role-item .muted { display: block; font-size: 12px; color: #6b7280 !important; }
-.settings-page .settings-role-item.active { border-color: #ED1525 !important; background: #fff5f5 !important; }
+/* Role cards: red Zunion cards, text always fully visible (RTL + mixed Arabic/English). */
+.settings-page .settings-role-list { min-width: 0; }
+.settings-page .settings-role-item { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 8px; width: 100%; min-width: 0; height: auto; min-height: 64px; padding: 12px 14px; border: 2px solid transparent; border-radius: 12px; text-align: start; white-space: normal; overflow: visible; line-height: 1.4; cursor: pointer; position: relative; }
+.settings-page .settings-role-item > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; width: 100%; }
+.settings-page .settings-role-item * { color: #fff !important; }
+.settings-page .settings-role-item strong { display: block; max-width: 100%; font-size: 15px; font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; direction: rtl; unicode-bidi: isolate; text-align: right; }
+.settings-page .settings-role-item .muted { display: block; max-width: 100%; font-size: 12px; line-height: 1.5; font-weight: 600; white-space: normal; overflow-wrap: anywhere; direction: rtl; unicode-bidi: isolate; text-align: right; opacity: .95; }
+.settings-page .settings-role-item .settings-inline { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 6px; width: 100%; position: static; }
+.settings-page .settings-role-item .badge { position: static; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; white-space: nowrap; min-height: 24px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; line-height: 1.4; background: #fff !important; border: 1px solid rgba(255,255,255,.9); }
+.settings-page .settings-role-item .badge.badge-gray { color: #374151 !important; }
+.settings-page .settings-role-item .badge.badge-green { color: #166534 !important; }
+.settings-page .settings-role-item.active { background-color: #a9101b !important; border-color: #fff !important; box-shadow: 0 0 0 2px #ED1525; }
+.settings-page .settings-card-head .primary-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; flex: 0 0 auto; height: auto; min-height: 34px; line-height: 1.2; overflow: visible; }
+.settings-page .settings-card-head .primary-btn svg { flex: 0 0 auto; }
 .settings-page .settings-role-editor { min-width: 0; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
 
 /* Permission groups (role editor) */
