@@ -75,6 +75,7 @@ import {
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
 import { LoginShell } from "./components/LoginShell";
+import CustomerLedgerPage from "./components/CustomerLedgerPage";
 import CustomerAccountsPage from "./components/CustomerAccountsPage";
 import { DraggableDialog } from "./components/DraggableDialog";
 import { PartySelect, activePartyNames } from "./components/PartyManager";
@@ -97,7 +98,7 @@ import { allPermissionKeys, roleDefaultPermissions, type PermissionKey } from ".
 type OrderStatus = "جديد" | "في التشغيل" | "في التشطيب" | "جاهز" | "تم التسليم" | "مشكلة جودة" | "متأخر";
 type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "التشغيل" | "يروح للتشطيب" | "التشطيب" | "الشغل جاهز" | "تم التسليم";
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
-type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "products" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "menu" | "image";
+type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "products" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "customerLedger" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "menu" | "image";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
 type OrderItem = {
@@ -596,6 +597,7 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   finish: "finishing.view",
   customers: "customers.view",
   customerAccounts: "customers.view",
+  customerLedger: "customers.view",
   finance: "dailyAccounts.view",
   reports: "reports.view",
   import: "import.export",
@@ -3111,7 +3113,7 @@ function ordersListPrintRow(order: OrdersListRecord) {
   ];
 }
 
-function CustomerDrawer({ open, onClose, customerCode, customerName, customers, orders, session, setView, onOrderClick }: {
+function CustomerDrawer({ open, onClose, customerCode, customerName, customers, orders, session, setView, onOrderClick, onOpenAccount }: {
   open: boolean;
   onClose: () => void;
   customerCode: string;
@@ -3121,6 +3123,8 @@ function CustomerDrawer({ open, onClose, customerCode, customerName, customers, 
   session: Session;
   setView: (view: View) => void;
   onOrderClick?: (orderId: string) => void;
+  /** Opens this customer's accounting page (حساب العميل). */
+  onOpenAccount?: (customerId: string) => void;
 }) {
   const [drawerQuery, setDrawerQuery] = useState("");
   const [drawerStatus, setDrawerStatus] = useState("");
@@ -3193,6 +3197,9 @@ function CustomerDrawer({ open, onClose, customerCode, customerName, customers, 
             <h2>{displayName}</h2>
             {displayCode && <span className="cd-code">C-{displayCode}</span>}
           </div>
+          {customer && onOpenAccount && canAccessView(session, "customerLedger") ? (
+            <button type="button" className="cd-account-btn" onClick={() => onOpenAccount(customer.id)}>حساب العميل</button>
+          ) : null}
         </div>
 
         <div className="cd-section">
@@ -8468,6 +8475,21 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, parties 
   const [debtorOnly, setDebtorOnly] = useState(false);
   const [orderNo, setOrderNo] = useState("");
   const canPrintCustomers = hasPermission(session, "customers.print");
+  // True balances from the accounting ledger (includes payments recorded on حساب العميل). The page
+  // remounts whenever it is opened, so this is fresh after any payment or new accounting period.
+  const [ledgerBalances, setLedgerBalances] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    if (!(useServerAuth || !isLocalHost)) return;
+    let active = true;
+    fetch("/api/account-balances", { credentials: "include" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { balances?: Array<{ customer_id: string; balance: number }> } | null) => {
+        if (!active || !payload?.balances) return;
+        setLedgerBalances(Object.fromEntries(payload.balances.map((item) => [item.customer_id, Number(item.balance)])));
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   const partyOptions = useMemo(() => {
     const sources = new Set<string>();
@@ -8480,9 +8502,9 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, parties 
   // One grouped record per customer, with their orders, phone, and outstanding
   // balance (المديونية) = old balance + Σ remaining — the existing financial rule.
   const allCustomers = useMemo(() => {
-    const grouped = new Map<string, { name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }>();
+    const grouped = new Map<string, { id?: string; name: string; code: string; phone: string; email: string; address: string; source: string; old: number; totalOrders: number; paid: number; remaining: number; net: number; orders: Order[] }>();
     for (const customer of savedCustomers) {
-      grouped.set(customer.client_code || customer.phone || customer.client_name, { name: customer.client_name, code: customer.client_code, phone: customer.phone, email: customer.email || "", address: customer.address || "", source: customer.source_person, old: customer.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: customer.old_balance, orders: [] });
+      grouped.set(customer.client_code || customer.phone || customer.client_name, { id: customer.id, name: customer.client_name, code: customer.client_code, phone: customer.phone, email: customer.email || "", address: customer.address || "", source: customer.source_person, old: customer.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: customer.old_balance, orders: [] });
     }
     for (const order of orders) {
       if (order.draft) continue;
@@ -8496,8 +8518,14 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, parties 
       current.orders.push(order);
       grouped.set(key, current);
     }
+    if (ledgerBalances) {
+      for (const record of grouped.values()) {
+        const exact = record.id ? ledgerBalances[record.id] : undefined;
+        if (exact !== undefined) record.net = Math.round(exact * 100) / 100;
+      }
+    }
     return Array.from(grouped.values());
-  }, [orders, savedCustomers]);
+  }, [orders, savedCustomers, ledgerBalances]);
 
   // رقم أوردر: locate the order (leading zeros preserved), then its customer key.
   const orderLookup = useMemo(() => {
@@ -9640,7 +9668,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLog
   );
 }
 
-const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "products", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "finance", "reports", "audit", "import", "attendance", "alerts", "settings", "menu"];
+const knownViews: View[] = ["dashboard", "orders", "new", "editOrder", "drafts", "draftEdit", "addCustomer", "addProduct", "products", "search", "worker", "machineDist", "finish", "print", "sewing", "archive", "customers", "customerAccounts", "customerLedger", "finance", "reports", "audit", "import", "attendance", "alerts", "settings", "menu"];
 
 type ShellTab = { id: string; view: View; recordId?: string; label: string };
 
@@ -9663,6 +9691,7 @@ const TAB_META: Record<View, { label: string; icon: LucideIcon }> = {
   archive: { label: "أرشيف", icon: Archive },
   customers: { label: "حسابات العملاء", icon: Users },
   customerAccounts: { label: "كشف العملاء", icon: Users },
+  customerLedger: { label: "حساب العميل", icon: Landmark },
   finance: { label: "مصروفات وإيرادات", icon: WalletCards },
   reports: { label: "التقارير", icon: BarChart3 },
   audit: { label: "سجل العمليات", icon: History },
@@ -9676,7 +9705,7 @@ const TAB_META: Record<View, { label: string; icon: LucideIcon }> = {
 
 // "image" is deliberately not in knownViews: its source lives only in memory, so a
 // reload with #image/... falls back to the dashboard instead of an empty viewer.
-const RECORD_VIEWS: View[] = ["editOrder", "draftEdit", "image", "menu"];
+const RECORD_VIEWS: View[] = ["editOrder", "draftEdit", "image", "menu", "customerLedger"];
 
 function tabIdFor(view: View, recordId?: string) {
   return recordId ? `${view}:${recordId}` : view;
@@ -10200,6 +10229,7 @@ function ZunionApp() {
         children: [
           { id: "customers", label: "جميع العملاء", visible: true, icon: Users },
           { id: "customers", label: "بحث خاص بالعملاء", visible: true, icon: Search },
+          { id: "customerLedger", label: "حساب العميل", visible: true, icon: Landmark },
           { id: "customerAccounts", label: "إضافة دفعة", visible: true, icon: Banknote },
         ],
       },
@@ -10341,6 +10371,8 @@ function ZunionApp() {
         return <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "customers":
         return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
+      case "customerLedger":
+        return <CustomerLedgerPage customers={customers} parties={parties.filter((item) => item.active).map((item) => item.name)} session={session} initialCustomerId={tab.recordId} onOrderClick={onOrderNumberClick} />;
       case "customerAccounts":
         return <CustomerAccountsPage orders={orders} customers={customers} session={session} onOrderClick={onOrderNumberClick} />;
       case "finance":
@@ -10455,7 +10487,7 @@ function ZunionApp() {
           </div>
         </DraggableDialog>
       )}
-      <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={(next) => openView(next)} onOrderClick={onOrderNumberClick ? (key) => { setCustomerDrawer(null); onOrderNumberClick(key); } : undefined} />
+      <CustomerDrawer open={!!customerDrawer} onClose={() => setCustomerDrawer(null)} customerCode={customerDrawer?.code || ""} customerName={customerDrawer?.name || ""} customers={customers} orders={orders} session={session} setView={(next) => openView(next)} onOrderClick={onOrderNumberClick ? (key) => { setCustomerDrawer(null); onOrderNumberClick(key); } : undefined}  onOpenAccount={(customerId) => { setCustomerDrawer(null); openView("customerLedger", customerId); }} />
       <OrderDetailsDrawer open={!!orderDrawerOrder} onClose={() => setOrderDrawerOrderNumber(null)} order={orderDrawerOrder} customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => { setOrderDrawerOrderNumber(null); setCustomerDrawer({ code, name }); }} />
       <ProductDrawer open={!!productDrawer} onClose={() => setProductDrawer(null)} product={productDrawer} orders={orders} setView={(next) => openView(next)} />
       <UserDrawer open={!!userDrawer} onClose={() => setUserDrawer(null)} user={userDrawer} orders={orders} />

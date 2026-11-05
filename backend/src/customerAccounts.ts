@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { query, tx } from "./db.js";
+import { assertRowPeriodOpen, ensureActivePeriodId, periodError } from "./periodStore.js";
 
 export async function ensureCustomerAccount(customerId: string, client?: PoolClient): Promise<string> {
   const sql = `insert into customer_accounts (customer_id) values ($1)
@@ -22,6 +23,8 @@ export type CustomerTransactionRow = {
   customer_name: string;
   description: string;
   logo: string;
+  /** The order's colour, read live from the order (never copied into the ledger). */
+  color?: string;
   quantity: number;
   price: number;
   debit: number;
@@ -42,6 +45,15 @@ export type StatementFilters = {
   orderId?: string;
   limit?: number;
   offset?: number;
+  /**
+   * Restrict to one accounting period. Manual rows belong to the period stored on them (rows
+   * without one belong to the customer's first period); order-derived rows belong to the period
+   * that was active when the order was created.
+   */
+  periodId?: string;
+  periodIsFirst?: boolean;
+  /** Draft orders are not chargeable. */
+  excludeDrafts?: boolean;
 };
 
 /** Orders carry their own money; the ledger only holds manual postings. */
@@ -67,7 +79,7 @@ const ORDER_CUSTOMER = "coalesce(nullif(c.name, ''), nullif(o.customer_name_snap
  * `not exists` deliberately ignores the active filters: narrowing the view must
  * never resurrect an order's own row next to a manual one.
  */
-function statementCtes(customerId: string | null, filters: StatementFilters): { sql: string; params: unknown[] } {
+export function statementCtes(customerId: string | null, filters: StatementFilters): { sql: string; params: unknown[] } {
   const params: unknown[] = [];
   const ledgerCond: string[] = [];
   if (customerId) { params.push(customerId); ledgerCond.push(`t.customer_id=$${params.length}`); }
@@ -81,6 +93,14 @@ function statementCtes(customerId: string | null, filters: StatementFilters): { 
     ledgerCond.push(`(t.description ilike $${params.length} or coalesce(o.order_number, '') ilike $${params.length} or coalesce(c.name, '') ilike $${params.length})`);
   }
 
+  let periodIdParam = 0;
+  if (filters.periodId) {
+    params.push(filters.periodId);
+    periodIdParam = params.length;
+    params.push(Boolean(filters.periodIsFirst));
+    ledgerCond.push(`(t.period_id = $${periodIdParam} or (t.period_id is null and $${params.length}::boolean))`);
+  }
+
   const orderCond: string[] = [];
   if (customerId) { params.push(customerId); orderCond.push(`o.customer_id=$${params.length}`); }
   if (filters.from) { params.push(filters.from); orderCond.push(`${ORDER_DATE} >= $${params.length}`); }
@@ -91,6 +111,12 @@ function statementCtes(customerId: string | null, filters: StatementFilters): { 
     params.push(`%${filters.q}%`);
     orderCond.push(`(coalesce(o.order_number, '') ilike $${params.length} or coalesce(c.name, '') ilike $${params.length} or coalesce(o.customer_name_snapshot, '') ilike $${params.length})`);
   }
+  if (filters.periodId) {
+    // Period boundaries come from the period row itself (full timestamp precision).
+    orderCond.push(`o.created_at >= (select pp.opened_at from customer_account_periods pp where pp.id = $${periodIdParam})`);
+    orderCond.push(`o.created_at < coalesce((select pp.closed_at from customer_account_periods pp where pp.id = $${periodIdParam}), 'infinity'::timestamptz)`);
+  }
+  if (filters.excludeDrafts) orderCond.push("coalesce(o.draft, false) = false");
   const orderWhere = orderCond.length ? orderCond.join(" and ") : "true";
 
   const parts = [
@@ -98,7 +124,7 @@ function statementCtes(customerId: string | null, filters: StatementFilters): { 
        select t.id::text as id, t.customer_id, t.txn_date, t.entry_type, t.order_id,
 coalesce(o.order_number, '') as order_number,
           ${LEDGER_CUSTOMER} as customer_name,
-          t.description, t.logo, t.quantity, t.price, t.debit, t.credit,
+          t.description, t.logo, coalesce(o.color, '') as color, t.quantity, t.price, t.debit, t.credit,
           t.created_by, coalesce(nullif(u.full_name, ''), u.username) as created_by_name,
           t.created_at, 'ledger'::text as source
         from customer_account_transactions t
@@ -114,7 +140,7 @@ coalesce(o.order_number, '') as order_number,
        select 'oc-' || o.id::text as id, o.customer_id, ${ORDER_DATE} as txn_date, 'charge'::text as entry_type, o.id as order_id,
          coalesce(o.order_number, '') as order_number, ${ORDER_CUSTOMER} as customer_name,
          coalesce(nullif(o.product_name_snapshot, ''), nullif(o.type, ''), 'شغل') as description,
-         ${ORDER_LOGO} as logo, o.quantity::numeric as quantity, o.price as price,
+         ${ORDER_LOGO} as logo, coalesce(o.color, '') as color, o.quantity::numeric as quantity, o.price as price,
          o.total as debit, 0::numeric as credit,
          o.created_by, coalesce(nullif(u.full_name, ''), u.username) as created_by_name,
          o.created_at, 'order'::text as source
@@ -133,7 +159,7 @@ coalesce(o.order_number, '') as order_number,
        select 'op-' || o.id::text as id, o.customer_id, ${ORDER_DATE} as txn_date, 'payment'::text as entry_type, o.id as order_id,
          coalesce(o.order_number, '') as order_number, ${ORDER_CUSTOMER} as customer_name,
          'دفعة على الأوردر' as description,
-         ${ORDER_LOGO} as logo, 0::numeric as quantity, 0::numeric as price,
+         ${ORDER_LOGO} as logo, coalesce(o.color, '') as color, 0::numeric as quantity, 0::numeric as price,
          0::numeric as debit, o.paid as credit,
          o.created_by, coalesce(nullif(u.full_name, ''), u.username) as created_by_name,
          o.created_at, 'order'::text as source
@@ -150,7 +176,7 @@ coalesce(o.order_number, '') as order_number,
   return { sql: parts.join(",\n"), params };
 }
 
-function unionSelect(ctes: string): string {
+export function unionSelect(ctes: string): string {
   const names = ["ledger", "order_charge", "order_payment"].filter((name) => ctes.includes(`${name} as (`));
   return names.map((name) => `select * from ${name}`).join("\n union all\n");
 }
@@ -257,8 +283,18 @@ export async function createTransaction(input: {
   credit: number;
   clientKey: string;
   createdBy: string;
+  /** When given, the write is refused unless this is still the customer's active period. */
+  expectedPeriodId?: string | null;
 }): Promise<CustomerTransactionRow> {
   return tx(async (client) => {
+    // Serialise with "open a new accounting period" for this customer, then stamp the row with
+    // the period that is active right now (never a closed one).
+    await client.query("select id from customers where id=$1 for update", [input.customerId]);
+    const run = (sql: string, params: unknown[] = []) => client.query(sql, params) as Promise<{ rows: any[]; rowCount: number | null }>;
+    const activePeriodId = await ensureActivePeriodId(run, input.customerId);
+    if (input.expectedPeriodId && input.expectedPeriodId !== activePeriodId) {
+      throw periodError("هذه الفترة المحاسبية لم تعد نشطة. أعد تحميل الصفحة.", "ZUNION_PERIOD_CLOSED", 409);
+    }
     if (input.orderId) {
       const { rows } = await client.query<{ customer_id: string }>(
         "select customer_id from orders where id=$1",
@@ -278,8 +314,8 @@ export async function createTransaction(input: {
     try {
       const { rows } = await client.query<CustomerTransactionRow>(
         `insert into customer_account_transactions
-         (account_id, customer_id, txn_date, entry_type, order_id, description, logo, quantity, price, debit, credit, client_key, created_by)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         (account_id, customer_id, txn_date, entry_type, order_id, description, logo, quantity, price, debit, credit, client_key, created_by, period_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          returning *`,
         [
           input.accountId,
@@ -295,6 +331,7 @@ export async function createTransaction(input: {
           input.credit,
           input.clientKey,
           input.createdBy,
+          activePeriodId,
         ],
       );
       return rows[0];
@@ -325,6 +362,7 @@ export async function updateTransaction(
   );
   const existing = existingRows[0];
   if (!existing) return null;
+  await assertRowPeriodOpen((sql, params = []) => query(sql, params) as any, customerId, (existing as { period_id?: string | null }).period_id ?? null);
 
   let quantity = Number(existing.quantity);
   let price = Number(existing.price);
@@ -359,6 +397,11 @@ export async function updateTransaction(
 }
 
 export async function deleteTransaction(txnId: string, customerId: string): Promise<boolean> {
+  const { rows: found } = await query<{ period_id: string | null }>(
+    "select period_id from customer_account_transactions where id=$1 and customer_id=$2",
+    [txnId, customerId],
+  );
+  if (found[0]) await assertRowPeriodOpen((sql, params = []) => query(sql, params) as any, customerId, found[0].period_id ?? null);
   const { rowCount } = await query(
     "delete from customer_account_transactions where id=$1 and customer_id=$2",
     [txnId, customerId],

@@ -1,5 +1,6 @@
 import { query, databaseAvailable } from "./db.js";
 import { schemaSql } from "./schema.js";
+import { PERIOD_DDL } from "./periodStore.js";
 
 /**
  * Every `orders` column the backend reads or writes. Applied as `add column
@@ -555,6 +556,7 @@ async function syncSchemaDrift(log: (msg: string) => void) {
   await syncMachinesTable(log);
   await syncPartiesTable(log);
   await syncCustomerAccountsTables(log);
+  await guarded(() => query(PERIOD_DDL), log, "customer account periods");
   await syncOrderNumberSequence(log);
 }
 

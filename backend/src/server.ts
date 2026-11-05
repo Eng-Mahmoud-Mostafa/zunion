@@ -18,6 +18,7 @@ import { ORDER_EDIT_SUMMARY_JOIN, ORDER_EDIT_SUMMARY_SELECT, diffOrder, loadOrde
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { activateMachine, createOrReactivateMachine, deactivateMachine, findMachineByName, listMachines, loadMachine, removeMachine, renameMachine } from "./machines.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions, updateTransaction } from "./customerAccounts.js";
+import { getBalances, getLedger, openNewPeriod, PAYMENT_METHOD_KEYS, recordPayment } from "./accountLedger.js";
 import { effectivePermissions, isReservedRoleName, roleUpdateRejection, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
@@ -2401,6 +2402,7 @@ app.post("/api/customer-accounts/transactions", requireAuth, requireRole("Master
   } catch (err) {
     const code = (err as { code?: string })?.code;
     if (code === "ZUNION_ORDER_MISMATCH") return res.status(400).json({ message: "الأوردر لا ينتمي لهذا العميل" });
+    if (code === "ZUNION_PERIOD_CLOSED") return res.status(409).json({ message: "هذه الفترة المحاسبية مغلقة ولا يمكن تعديل حركاتها" });
     if (code === "ZUNION_ORDER_ALREADY_CHARGED") return res.status(409).json({ message: "هذا الأوردر مدين بالفعل في كشف العميل" });
     throw err;
   }
@@ -2418,7 +2420,13 @@ app.delete("/api/customer-accounts/transactions/:id", requireAuth, requireRole("
   const txnId = param(req.params.id);
   const customerId = String(req.query.customer_id ?? "");
   const before = await query("select * from customer_account_transactions where id=$1", [txnId]);
-  const deleted = await deleteTransaction(txnId, customerId);
+  let deleted = false;
+  try {
+    deleted = await deleteTransaction(txnId, customerId);
+  } catch (err) {
+    if ((err as { code?: string })?.code === "ZUNION_PERIOD_CLOSED") return res.status(409).json({ message: "هذه الفترة المحاسبية مغلقة ولا يمكن تعديل حركاتها" });
+    throw err;
+  }
   if (!deleted) return res.status(404).json({ message: "Transaction not found" });
   await audit(req.user!, "CUSTOMER_ACCOUNT_TRANSACTION_DELETED", "customer_account_transactions", txnId, before.rows[0]);
   res.json({ ok: true });
@@ -2437,12 +2445,127 @@ app.patch("/api/customer-accounts/transactions/:id", requireAuth, requireRole("M
     quantity: body.quantity,
     price: body.price,
     credit: body.credit,
+  }).catch((err: unknown) => {
+    if ((err as { code?: string })?.code === "ZUNION_PERIOD_CLOSED") return "CLOSED" as const;
+    throw err;
   });
+  if (updated === "CLOSED") return res.status(409).json({ message: "هذه الفترة المحاسبية مغلقة ولا يمكن تعديل حركاتها" });
   if (!updated) return res.status(404).json({ message: "Transaction not found" });
   if (before.rows[0]) {
     await audit(req.user!, "CUSTOMER_ACCOUNT_TRANSACTION_UPDATED", "customer_account_transactions", txnId, before.rows[0], updated);
   }
   res.json({ transaction: updated });
+});
+
+/* ------------------------------------------------------------------ */
+/* حساب العميل: period-aware ledger, manual payments, new periods      */
+/* ------------------------------------------------------------------ */
+const ledgerCustomerId = z.string().uuid();
+
+function sendLedgerError(res: express.Response, error: unknown, fallback: string) {
+  const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : 0;
+  const code = (error as { code?: string })?.code;
+  if (status && status < 500 && typeof code === "string" && code.startsWith("ZUNION_")) {
+    return res.status(status).json({ message: error instanceof Error ? error.message : fallback, code });
+  }
+  if (code === "ZUNION_ORDER_MISMATCH") return res.status(400).json({ message: "الأوردر لا ينتمي لهذا العميل" });
+  console.error("account ledger failed", error instanceof Error ? error.message : String(error));
+  return res.status(500).json({ message: fallback });
+}
+
+function ledgerActor(req: express.Request) {
+  const session = loadAppSessionCookie(req);
+  return { id: req.user?.id ?? null, name: session?.fullName || session?.username || req.user?.email || null };
+}
+
+app.get("/api/account-balances", requireAuth, requireRole("Master", "Helper", "Operator"), async (_req, res) => {
+  try {
+    return res.json({ balances: await getBalances() });
+  } catch (error) {
+    return sendLedgerError(res, error, "تعذر تحميل أرصدة العملاء");
+  }
+});
+
+app.get("/api/account-ledger/:customerId", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const customerId = ledgerCustomerId.safeParse(param(req.params.customerId));
+  if (!customerId.success) return res.status(400).json({ message: "معرّف العميل غير صالح" });
+  const periodRaw = String(req.query.period_id ?? "");
+  const periodId = periodRaw ? ledgerCustomerId.safeParse(periodRaw) : null;
+  if (periodId && !periodId.success) return res.status(400).json({ message: "معرّف الفترة غير صالح" });
+  try {
+    const result = await getLedger(customerId.data, {
+      periodId: periodId?.success ? periodId.data : undefined,
+      limit: Number(String(req.query.limit ?? "2000") || 2000),
+      offset: Number(String(req.query.offset ?? "0") || 0),
+    });
+    return res.json(result);
+  } catch (error) {
+    return sendLedgerError(res, error, "تعذر تحميل حساب العميل، يرجى المحاولة مرة أخرى");
+  }
+});
+
+const accountPaymentSchema = z.object({
+  amount: z.number().positive().max(1_000_000_000),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  method: z.string().refine((value) => PAYMENT_METHOD_KEYS.includes(value)),
+  notes: z.string().max(500).default(""),
+  client_key: z.string().min(8).max(120),
+  period_id: z.string().uuid().optional(),
+});
+
+app.post("/api/account-ledger/:customerId/payments", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
+  const customerId = ledgerCustomerId.safeParse(param(req.params.customerId));
+  if (!customerId.success) return res.status(400).json({ message: "معرّف العميل غير صالح" });
+  const parsed = accountPaymentSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "بيانات الدفعة غير صحيحة. تأكد من المبلغ والتاريخ وطريقة الدفع." });
+  const cents = Math.round(parsed.data.amount * 100);
+  if (Math.abs(parsed.data.amount * 100 - cents) > 1e-6) return res.status(400).json({ message: "المبلغ يجب ألا يزيد عن خانتين عشريتين" });
+  if (Number.isNaN(new Date(`${parsed.data.date}T00:00:00Z`).getTime())) return res.status(400).json({ message: "تاريخ الدفع غير صحيح" });
+  try {
+    const exists = await query("select 1 from customers where id = $1", [customerId.data]);
+    if (!exists.rows[0]) return res.status(404).json({ message: "العميل غير موجود" });
+    const row = await recordPayment(customerId.data, {
+      amount: parsed.data.amount,
+      date: parsed.data.date,
+      method: parsed.data.method,
+      notes: parsed.data.notes,
+      clientKey: parsed.data.client_key,
+      expectedPeriodId: parsed.data.period_id ?? null,
+      createdBy: req.user!.id,
+    });
+    await audit(req.user!, "CUSTOMER_ACCOUNT_PAID", "customer_account_transactions", row.id, undefined, {
+      customer_id: customerId.data,
+      amount: parsed.data.amount,
+      method: parsed.data.method,
+      period_id: parsed.data.period_id ?? null,
+    }).catch(() => undefined);
+    return res.status(201).json({ ok: true, transaction: { id: row.id } });
+  } catch (error) {
+    return sendLedgerError(res, error, "تعذر حفظ الدفعة، يرجى المحاولة مرة أخرى");
+  }
+});
+
+app.post("/api/account-ledger/:customerId/periods", requireAuth, requireRole("Master", "Helper"), async (req, res) => {
+  const customerId = ledgerCustomerId.safeParse(param(req.params.customerId));
+  if (!customerId.success) return res.status(400).json({ message: "معرّف العميل غير صالح" });
+  const parsed = z.object({ client_key: z.string().min(8).max(120), expected_period_id: z.string().uuid().optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "طلب غير صحيح" });
+  try {
+    const result = await openNewPeriod(customerId.data, ledgerActor(req), {
+      clientKey: parsed.data.client_key,
+      expectedPeriodId: parsed.data.expected_period_id ?? null,
+    });
+    if (!result.repeated) {
+      await audit(req.user!, "CUSTOMER_ACCOUNT_PERIOD_OPENED", "customer_account_periods", result.period.id, result.previous ?? undefined, {
+        customer_id: customerId.data,
+        seq: result.period.seq,
+        opening_balance: Number(result.period.opening_balance),
+      }).catch(() => undefined);
+    }
+    return res.status(result.repeated ? 200 : 201).json({ ok: true, repeated: result.repeated, period: { id: result.period.id, seq: result.period.seq } });
+  } catch (error) {
+    return sendLedgerError(res, error, "تعذر فتح حساب جديد، يرجى المحاولة مرة أخرى");
+  }
 });
 
 app.get("/api/products", requireAuth, async (_req, res) => {
