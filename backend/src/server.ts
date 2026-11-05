@@ -570,11 +570,11 @@ function appSessionHasPermission(session: AppSession | null, permission: Permiss
   return Array.isArray(session.permissions) && session.permissions.includes(permission);
 }
 
-function requireAppPermission(permission: PermissionKey) {
+function requireAppPermission(permission: PermissionKey, deniedMessage = "غير مصرح لك بتنفيذ هذا الإجراء") {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const session = loadAppSessionCookie(req);
     if (!session) return res.status(401).json({ message: "يجب تسجيل الدخول أولا." });
-    if (!appSessionHasPermission(session, permission)) return res.status(403).json({ message: "غير مصرح لك بتنفيذ هذا الإجراء" });
+    if (!appSessionHasPermission(session, permission)) return res.status(403).json({ message: deniedMessage });
     return next();
   };
 }
@@ -835,34 +835,116 @@ app.get("/api/users", requireAppPermission("users.view"), async (_req, res) => {
   }
 });
 
-app.post("/api/users", requireAppPermission("users.create"), async (req, res) => {
+type CreatedUserRow = { id: string; username: string; full_name?: string | null; email?: string | null; role: string; is_active?: boolean; must_change_password?: boolean; permission_overrides?: unknown; created_at?: string };
+
+/** True when the failure came from Postgres/PostgREST reporting a unique-key violation. */
+function isUniqueViolation(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error);
+  return /23505|duplicate key|already exists/i.test(text) || (error as { code?: string } | null)?.code === "23505";
+}
+
+/** True when the Supabase REST call never produced an HTTP response (DNS/network/unreachable/missing env). */
+function isSupabaseUnreachable(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  if (error.message === "Supabase server env vars are missing.") return true;
+  return error.name === "TypeError" || /fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|network/i.test(error.message);
+}
+
+app.post("/api/users", requireAppPermission("users.create", "ليس لديك صلاحية لإضافة مستخدم"), async (req, res) => {
   const parsed = userAdminSchema.extend({ password: z.string().min(4) }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "بيانات المستخدم غير صحيحة", issues: parsed.error.issues });
+  if (!parsed.success) {
+    const passwordIssue = parsed.error.issues.some((issue) => issue.path[0] === "password");
+    return res.status(400).json({
+      message: passwordIssue ? "كلمة المرور لا تستوفي شروط الأمان (4 أحرف على الأقل)" : "بيانات المستخدم غير صحيحة",
+    });
+  }
+  const username = parsed.data.username.trim().toLowerCase();
+  const fullName = parsed.data.name.trim();
+  const email = `${username.replace(/\s+/g, ".")}@zunion.local`;
+  if (!username || !fullName) return res.status(400).json({ message: "بيانات المستخدم غير صحيحة" });
   try {
-    const username = parsed.data.username.trim().toLowerCase();
-    const exists = await supabaseRest<Array<{ id: string }>>(`users_profile?username=eq.${encodeURIComponent(username)}&select=id`);
-    if (exists[0]) return res.status(409).json({ message: "اسم المستخدم مستخدم بالفعل" });
     validatePermissions(parsed.data.permissionOverrides.allow);
     validatePermissions(parsed.data.permissionOverrides.deny);
-    const salt = randomToken(12);
-    const rows = await supabaseRest<Array<{ id: string }>>("users_profile", {
-      method: "POST",
-      body: JSON.stringify([{
-        username,
-        full_name: parsed.data.name.trim(),
-        email: `${username.replace(/\s+/g, ".")}@zunion.local`,
-        role: parsed.data.roleId,
-        password_salt: salt,
-        password_hash: passwordHash(parsed.data.password, salt),
-        is_active: parsed.data.status === "active",
-        must_change_password: parsed.data.mustChangePassword,
-        permission_overrides: parsed.data.permissionOverrides,
-      }]),
-    });
-    await audit(null, "USER_CREATED", "users_profile", rows[0]?.id, undefined, { username, role: parsed.data.roleId });
-    return res.status(201).json({ user: rows[0] });
+  } catch {
+    return res.status(400).json({ message: "الصلاحيات المحددة غير صحيحة" });
+  }
+
+  const useSupabase = Boolean(config.supabaseUrl && config.supabaseServiceKey);
+  const salt = randomToken(12);
+  const password_hash = passwordHash(parsed.data.password, salt);
+  const overrides = parsed.data.permissionOverrides;
+  const isActive = parsed.data.status === "active";
+  const mustChange = parsed.data.mustChangePassword;
+
+  try {
+    // Usernames must be unique across BOTH stores, whichever one is reachable.
+    try {
+      const { rows } = await query<{ id: string }>(
+        "select id from users where lower(username) = $1 or lower(email) = $2 limit 1",
+        [username, email],
+      );
+      if (rows[0]) return res.status(409).json({ message: "اسم المستخدم موجود بالفعل" });
+    } catch (error) {
+      console.warn("create user: local duplicate check failed", error instanceof Error ? error.message : error);
+    }
+
+    let created: CreatedUserRow | null = null;
+    let supabaseUnreachable = !useSupabase;
+    if (useSupabase) {
+      try {
+        const exists = await supabaseRest<Array<{ id: string }>>(`users_profile?username=eq.${encodeURIComponent(username)}&select=id`);
+        if (exists[0]) return res.status(409).json({ message: "اسم المستخدم موجود بالفعل" });
+        const rows = await supabaseRest<CreatedUserRow[]>("users_profile", {
+          method: "POST",
+          body: JSON.stringify([{
+            username,
+            full_name: fullName,
+            email,
+            role: parsed.data.roleId,
+            password_salt: salt,
+            password_hash,
+            is_active: isActive,
+            must_change_password: mustChange,
+            permission_overrides: overrides,
+          }]),
+        });
+        created = rows[0] ?? null;
+      } catch (error) {
+        if (isUniqueViolation(error)) return res.status(409).json({ message: "اسم المستخدم موجود بالفعل" });
+        if (!isSupabaseUnreachable(error)) throw error;
+        supabaseUnreachable = true;
+        console.warn("create user: Supabase unreachable; using local users table.", error instanceof Error ? error.message : error);
+      }
+    }
+
+    // Local Postgres is the fallback when Supabase is unreachable, and a best-effort mirror otherwise
+    // (login and the user list already fall back to it, so both stores stay usable).
+    try {
+      const { rows } = await query<CreatedUserRow>(
+        `insert into users (email, role, username, full_name, password_salt, password_hash, must_change_password, is_active, permission_overrides)
+         values ($1, $2::user_role, $3, $4, $5, $6, $7, $8, $9::jsonb)
+         on conflict do nothing
+         returning id, username, full_name, email, role::text as role, is_active, must_change_password, permission_overrides, created_at`,
+        [email, parsed.data.roleId, username, fullName, salt, password_hash, mustChange, isActive, JSON.stringify(overrides)],
+      );
+      if (!created) {
+        if (!rows[0]) return res.status(409).json({ message: "اسم المستخدم موجود بالفعل" });
+        created = rows[0];
+      }
+    } catch (error) {
+      if (supabaseUnreachable || !created) throw error;
+      console.warn("create user: local mirror insert failed", error instanceof Error ? error.message : error);
+    }
+
+    await audit(null, "USER_CREATED", "users_profile", created?.id, undefined, { username, role: parsed.data.roleId }).catch(() => undefined);
+    const { password_hash: _hash, password_salt: _salt, ...safe } = (created ?? {}) as Record<string, unknown>;
+    return res.status(201).json({ user: safe });
   } catch (error) {
-    return res.status(500).json({ message: "تعذر إنشاء المستخدم", details: error instanceof Error ? error.message : String(error) });
+    // Log the real reason server-side (never the password or hash); keep the client message generic.
+    console.error("create user failed", { username, role: parsed.data.roleId, message: error instanceof Error ? error.message : String(error) });
+    if (isUniqueViolation(error)) return res.status(409).json({ message: "اسم المستخدم موجود بالفعل" });
+    if (/invalid input value for enum user_role/i.test(error instanceof Error ? error.message : "")) return res.status(400).json({ message: "الدور المحدد غير مدعوم" });
+    return res.status(500).json({ message: "حدث خطأ أثناء حفظ المستخدم، يرجى المحاولة مرة أخرى" });
   }
 });
 
