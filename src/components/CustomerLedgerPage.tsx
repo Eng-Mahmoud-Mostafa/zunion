@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, FilePlus2, Plus, Printer, Search, UserRound, X } from "lucide-react";
-import { formatDateArabic, normalizeDigitsToEnglish } from "../utils/formatters";
+import { BookOpen, ChevronDown, Coins, FilePlus2, FileText, IdCard, Info, Layers, Plus, Printer, Search, ShoppingCart, UserRound, Users, Wallet, X } from "lucide-react";
+import { normalizeDigitsToEnglish } from "../utils/formatters";
 
 type LedgerCustomer = {
   id: string;
@@ -92,7 +92,11 @@ const norm = (value: unknown) =>
     .replace(/ى/g, "ي")
     .replace(/ة/g, "ه")
     .trim();
-const dayLabel = (text: string) => (text ? formatDateArabic(`${text.slice(0, 10)}T00:00:00`) : "—");
+const codeLabel = (code: string | null | undefined) => (code ? (/^c-/i.test(code) ? code : `C-${code}`) : "—");
+const dayLabel = (text: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(text || "");
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : "—";
+};
 const todayIso = () => {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -135,7 +139,28 @@ function typeLabel(row: LedgerRow) {
   if (row.kind === "carried") return "رصيد مرحّل";
   if (row.kind === "opening") return "رصيد سابق";
   if (row.kind === "adjustment") return "تسوية";
-  return row.description || "أوردر";
+  return "شغل";
+}
+
+function Dash({ red }: { red?: boolean }) {
+  return <span className={`cl-dash${red ? " red" : ""}`}>—</span>;
+}
+
+/** A non-<button> so the app-wide red button style does not repaint it. */
+function OutlineAction({ disabled, onClick, children, title }: { disabled?: boolean; onClick: () => void; children: React.ReactNode; title?: string }) {
+  return (
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled ? true : undefined}
+      title={title}
+      className={`cl-outline-btn${disabled ? " disabled" : ""}`}
+      onClick={() => { if (!disabled) onClick(); }}
+      onKeyDown={(event) => { if (!disabled && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onClick(); } }}
+    >
+      {children}
+    </div>
+  );
 }
 
 function buildPrintHtml(data: LedgerData, periodTitle: string) {
@@ -398,21 +423,23 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
 
   const closing = view?.period.closingBalance ?? 0;
   const closingInfo = balanceInfo(closing);
+  const cardTone = balance === 0 ? "zero" : "owed";
+  let seq = 0;
 
   return (
     <div className="cl-page" dir="rtl">
-      <div className="cl-picker-row">
-        <div className="cl-field cl-field-customer" ref={pickerRef}>
-          <label htmlFor="cl-customer">اختر العميل</label>
+      <div className="cl-picker-bar">
+        <div className="cl-pick cl-pick-customer" ref={pickerRef}>
+          <label htmlFor="cl-customer" className="cl-pick-label"><UserRound size={24} aria-hidden="true" />اختر العميل</label>
           <div className="cl-combo">
-            <Search size={18} aria-hidden="true" className="cl-combo-icon" />
+            <Search size={20} aria-hidden="true" className="cl-combo-icon" />
             <input
               id="cl-customer"
               role="combobox"
               aria-expanded={pickerOpen}
               aria-controls="cl-customer-list"
               autoComplete="off"
-              placeholder={selected ? `${selected.client_name} — ${selected.client_code}` : "ابحث بالاسم أو الكود"}
+              placeholder={selected ? `${selected.client_name} — ${selected.client_code}` : "ابحث باسم العميل أو كود العميل ..."}
               value={search}
               onFocus={() => setPickerOpen(true)}
               onChange={(event) => { setSearch(event.target.value); setPickerOpen(true); }}
@@ -420,6 +447,7 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
             {selected ? (
               <span role="button" tabIndex={0} className="cl-clear" aria-label="إلغاء اختيار العميل" onClick={() => chooseCustomer("")} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") chooseCustomer(""); }}><X size={16} /></span>
             ) : null}
+            <ChevronDown size={20} aria-hidden="true" className="cl-chevron" />
             {pickerOpen ? (
               <div className="cl-combo-list" id="cl-customer-list" role="listbox">
                 {results.length === 0 ? <div className="cl-combo-empty">لا يوجد عملاء مطابقون</div> : null}
@@ -434,7 +462,7 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
                     onKeyDown={(event) => { if (event.key === "Enter") chooseCustomer(customer.id); }}
                   >
                     <strong>{customer.client_name}</strong>
-                    <span dir="ltr">{customer.client_code}</span>
+                    <span dir="ltr">{codeLabel(customer.client_code)}</span>
                     {customer.source_person ? <em>{customer.source_person}</em> : null}
                   </div>
                 ))}
@@ -442,32 +470,36 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
             ) : null}
           </div>
         </div>
-        <div className="cl-field cl-field-party">
-          <label htmlFor="cl-party">طرف</label>
-          <select id="cl-party" value={party} onChange={(event) => changeParty(event.target.value)}>
-            <option value="">الكل</option>
-            {partyOptions.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
+        <div className="cl-pick cl-pick-party">
+          <label htmlFor="cl-party" className="cl-pick-label"><Users size={22} aria-hidden="true" />طرف</label>
+          <div className="cl-select">
+            <select id="cl-party" value={party} onChange={(event) => changeParty(event.target.value)}>
+              <option value="">الكل</option>
+              {partyOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <ChevronDown size={20} aria-hidden="true" className="cl-chevron" />
+          </div>
         </div>
       </div>
 
       <div className="cl-actions">
-        <button type="button" className="primary-btn" disabled={!view || !canPay || !viewingActive} onClick={openPayment} title={!canPay ? "ليس لديك صلاحية لإضافة دفعة" : !viewingActive && view ? "الفترة المحاسبية مغلقة" : undefined}>
-          <Plus size={18} aria-hidden="true" />إضافة دفعة
+        <OutlineAction disabled={!view} onClick={printStatement}><Printer size={20} aria-hidden="true" />طباعة كشف الحساب</OutlineAction>
+        <button type="button" className="cl-btn-red" disabled={!view || !canPay || !viewingActive} onClick={openPayment} title={!canPay ? "ليس لديك صلاحية لإضافة دفعة" : !viewingActive && view ? "الفترة المحاسبية مغلقة" : undefined}>
+          <Plus size={20} aria-hidden="true" />إضافة دفعة
         </button>
-        <button type="button" className="primary-btn" disabled={!view || !canOpenPeriod || !viewingActive} onClick={openNewPeriodDialog} title={!canOpenPeriod ? "ليس لديك صلاحية لفتح حساب جديد" : !viewingActive && view ? "افتح الحساب الجديد من الحساب الحالي" : undefined}>
-          <FilePlus2 size={18} aria-hidden="true" />فتح حساب جديد
-        </button>
-        <div className="cl-period-select">
+        <OutlineAction disabled={!view || !canOpenPeriod || !viewingActive} onClick={openNewPeriodDialog} title={!canOpenPeriod ? "ليس لديك صلاحية لفتح حساب جديد" : !viewingActive && view ? "افتح الحساب الجديد من الحساب الحالي" : undefined}>
+          <FilePlus2 size={20} aria-hidden="true" />فتح حساب جديد
+        </OutlineAction>
+        <div className="cl-period">
           <label htmlFor="cl-period">الفترة المحاسبية</label>
-          <select id="cl-period" disabled={!view} value={view?.period.id ?? ""} onChange={(event) => { const next = event.target.value; const activeId = view?.periods.find((p) => p.status === "active")?.id; setPeriodId(next === activeId ? "" : next); }}>
-            {!view ? <option value="">—</option> : null}
-            {[...(view?.periods ?? [])].reverse().map((p) => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
-          </select>
+          <div className="cl-select">
+            <select id="cl-period" disabled={!view} value={view?.period.id ?? ""} onChange={(event) => { const next = event.target.value; const activeId = view?.periods.find((p) => p.status === "active")?.id; setPeriodId(next === activeId ? "" : next); }}>
+              {!view ? <option value="">—</option> : null}
+              {[...(view?.periods ?? [])].reverse().map((p) => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
+            </select>
+            <ChevronDown size={18} aria-hidden="true" className="cl-chevron" />
+          </div>
         </div>
-        <button type="button" className="primary-btn" disabled={!view} onClick={printStatement}>
-          <Printer size={18} aria-hidden="true" />طباعة كشف الحساب
-        </button>
       </div>
 
       {notice ? <div className={`cl-notice${notice.ok ? " ok" : " bad"}`} role="status">{notice.text}</div> : null}
@@ -483,25 +515,20 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
         <div className="cl-empty" role="status"><p>جار تحميل حساب العميل...</p></div>
       ) : view ? (
         <>
-          <section className="cl-card cl-info">
-            <h2><UserRound size={20} aria-hidden="true" />حساب العميل</h2>
-            <div className="cl-info-grid">
-              <div><span>اسم العميل</span><strong>{view.customer.name}</strong></div>
-              <div><span>كود العميل</span><strong dir="ltr">{view.customer.code || "—"}</strong></div>
-              <div><span>طرف</span><strong>{view.customer.party || "—"}</strong></div>
-              <div><span>الفترة</span><strong>{view.period.status === "active" ? `الحساب الحالي (فترة ${view.period.seq})` : `فترة ${view.period.seq} — مغلقة`}</strong></div>
+          <section className="cl-info">
+            <h2><UserRound size={36} fill="currentColor" aria-hidden="true" />حساب العميل</h2>
+            <div className="cl-info-fields">
+              <div className="cl-info-field"><UserRound size={22} aria-hidden="true" /><div><span>اسم العميل</span><strong>{view.customer.name}</strong></div></div>
+              <div className="cl-info-field"><IdCard size={22} aria-hidden="true" /><div><span>كود العميل</span><strong dir="ltr">{codeLabel(view.customer.code)}</strong></div></div>
+              <div className="cl-info-field"><Users size={22} aria-hidden="true" /><div><span>طرف</span><strong>{view.customer.party || "—"}</strong></div></div>
             </div>
           </section>
 
           <div className="cl-cards">
-            <div className="cl-stat"><span>عدد العمليات</span><strong>{money(view.summary.operationCount)}</strong></div>
-            <div className="cl-stat work"><span>إجمالي الشغل</span><strong dir="ltr">{money(view.summary.totalWork)}</strong></div>
-            <div className="cl-stat paid"><span>إجمالي المدفوعات</span><strong dir="ltr">{money(view.summary.totalPayments)}</strong></div>
-            <div className={`cl-stat bal ${balanceInfo(balance).tone}`}>
-              <span>الرصيد الحالي</span>
-              <strong dir="ltr">{money(balance)}</strong>
-              <em>{balanceInfo(balance).label}</em>
-            </div>
+            <div className="cl-stat ops"><FileText size={42} strokeWidth={1.6} aria-hidden="true" /><div><span>عدد العمليات</span><strong>{money(view.summary.operationCount)}</strong></div></div>
+            <div className="cl-stat work"><ShoppingCart size={42} strokeWidth={1.6} aria-hidden="true" /><div><span>إجمالي الشغل</span><strong dir="ltr">{money(view.summary.totalWork)}</strong></div></div>
+            <div className="cl-stat paid"><Wallet size={42} strokeWidth={1.6} aria-hidden="true" /><div><span>إجمالي المدفوعات</span><strong dir="ltr">{money(view.summary.totalPayments)}</strong></div></div>
+            <div className={`cl-stat bal ${cardTone}`}><Coins size={42} strokeWidth={1.6} aria-hidden="true" /><div><span>الرصيد الحالي</span><strong dir="ltr">{money(balance)}</strong></div></div>
           </div>
 
           {view.period.status === "closed" ? (
@@ -511,50 +538,58 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
             </div>
           ) : null}
 
-          <section className="cl-card">
+          <section className="cl-ledger">
             <div className="cl-ledger-head">
-              <h2>كشف الحساب</h2>
+              <h2><Layers size={26} aria-hidden="true" />كشف الحساب</h2>
               <span className="cl-ledger-sub">الرصيد الافتتاحي: <b dir="ltr">{money(view.period.openingBalance)}</b></span>
             </div>
             <div className="cl-table-wrap">
               <table className="cl-table">
-                <thead><tr>{COLUMNS.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                <thead><tr><th className="cl-idx">م</th>{COLUMNS.map((c) => <th key={c}>{c}</th>)}</tr></thead>
                 <tbody>
                   {view.rows.length === 0 ? (
-                    <tr><td colSpan={COLUMNS.length} className="cl-table-empty">لا توجد حركات في هذه الفترة</td></tr>
-                  ) : view.rows.map((row) => {
+                    <tr><td colSpan={COLUMNS.length + 1} className="cl-table-empty">لا توجد حركات في هذه الفترة</td></tr>
+                  ) : view.rows.map((row, index) => {
                     const system = row.source === "system";
+                    if (!system) seq += 1;
+                    const isLast = index === view.rows.length - 1;
+                    const pill = row.kind === "payment" ? "pay" : row.kind === "charge" ? "work" : "sys";
                     return (
-                      <tr key={row.id} className={`cl-row-${row.kind}`}>
-                        <td>{system ? "—" : row.created_by_name || "—"}</td>
-                        <td>{system ? "—" : dayLabel(row.txn_date_text)}</td>
+                      <tr key={row.id} className={`cl-row-${row.kind}${isLast ? " last" : ""}`}>
+                        <td className="cl-idx">{system ? "—" : seq}</td>
+                        <td className="cl-user">{system ? <Dash /> : row.created_by_name || <Dash />}</td>
+                        <td className="cl-nowrap">{system || !row.txn_date_text ? <Dash /> : dayLabel(row.txn_date_text)}</td>
                         <td className="cl-nowrap">
-                          {row.order_id && onOrderClick
-                            ? <a href={`#editOrder/${encodeURIComponent(row.order_id)}`} onClick={(event) => { event.preventDefault(); onOrderClick(row.order_id as string); }}>{row.order_number || "—"}</a>
-                            : row.order_number || "—"}
+                          {row.order_number
+                            ? (onOrderClick && row.order_id
+                              ? <a className="cl-pill red" href={`#editOrder/${encodeURIComponent(row.order_id)}`} onClick={(event) => { event.preventDefault(); onOrderClick(row.order_id as string); }}>{row.order_number}</a>
+                              : <span className="cl-pill red">{row.order_number}</span>)
+                            : <Dash />}
                         </td>
-                        <td className="cl-type">
-                          <b>{typeLabel(row)}</b>
-                          {row.kind === "payment" && row.description && row.description !== "دفعة على الأوردر" ? <small>{row.description}</small> : null}
-                        </td>
-                        <td>{row.color || "—"}</td>
-                        <td>{row.logo || "—"}</td>
-                        <td className="cl-num">{row.kind === "charge" ? money(row.quantity) : "—"}</td>
-                        <td className="cl-num">{row.kind === "charge" ? money(row.price) : "—"}</td>
-                        <td className="cl-num cl-debit">{row.debit ? money(row.debit) : "—"}</td>
-                        <td className="cl-num cl-credit">{row.credit ? money(row.credit) : "—"}</td>
-                        <td className={`cl-num cl-balance${row.balance < 0 ? " neg" : ""}`}>{money(row.balance)}</td>
+                        <td><span className={`cl-pill ${pill}`} title={row.kind === "payment" ? row.description : row.kind === "charge" ? row.description : undefined}>{typeLabel(row)}</span></td>
+                        <td>{row.color ? <span className="cl-pill red">{row.color}</span> : <Dash />}</td>
+                        <td>{row.logo || <Dash />}</td>
+                        <td className="cl-num cl-qty">{row.kind === "charge" ? money(row.quantity) : <Dash red />}</td>
+                        <td className="cl-num cl-qty">{row.kind === "charge" ? money(row.price) : <Dash red />}</td>
+                        <td className="cl-num cl-debit">{row.debit > 0 ? money(row.debit) : "0"}</td>
+                        <td className="cl-num cl-credit">{row.credit > 0 ? money(row.credit) : <Dash red />}</td>
+                        <td className={`cl-num cl-balance${row.balance > 0 ? " pos" : " neg"}`}>{money(row.balance)}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <div className="cl-ledger-foot">
-              <span>الرصيد الختامي: <b dir="ltr">{money(closing)}</b></span>
-              <span className={`cl-tag ${closingInfo.tone}`}>{balanceView.label}</span>
-            </div>
           </section>
+
+          <div className="cl-legend">
+            <div className="cl-legend-item"><span className="cl-pill work">شغل =</span><span>قيمة أوردر / شغل للعميل</span></div>
+            <div className="cl-legend-item"><span className="cl-pill pay">دفعة =</span><span>عملية دفع من العميل</span></div>
+            <div className="cl-note">
+              <Info size={20} aria-hidden="true" />
+              <p><b>ملاحظة:</b> الرصيد النهائي يتم احتسابه بشكل تراكمي بعد كل عملية<br /><small>( الرصيد الموجب = مبلغ مستحق من العميل ) ، ( الرصيد السالب = رصيد دائن لصالح العميل )</small></p>
+            </div>
+          </div>
         </>
       ) : null}
 
@@ -587,7 +622,7 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
             <p className="cl-modal-lead">سيتم إغلاق الحساب الحالي بكل حركاته وفتح حساب جديد لنفس العميل، مع ترحيل الرصيد الحالي كما هو.</p>
             <dl className="cl-confirm">
               <div><dt>اسم العميل</dt><dd>{view.customer.name}</dd></div>
-              <div><dt>كود العميل</dt><dd dir="ltr">{view.customer.code || "—"}</dd></div>
+              <div><dt>كود العميل</dt><dd dir="ltr">{codeLabel(view.customer.code)}</dd></div>
               <div><dt>تاريخ فتح الحساب الجديد</dt><dd>{dayLabel(todayIso())}</dd></div>
               <div><dt>الرصيد الحالي</dt><dd dir="ltr">{money(view.period.closingBalance)}</dd></div>
               <div><dt>الرصيد الذي سيتم ترحيله</dt><dd dir="ltr">{money(view.period.closingBalance)}</dd></div>
