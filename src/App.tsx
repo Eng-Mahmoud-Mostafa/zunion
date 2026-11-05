@@ -23,6 +23,7 @@ import {
   Copy,
   Download,
   Eye,
+  EyeOff,
   FilePlus,
   FileText,
   Home,
@@ -33,6 +34,8 @@ import {
   LayoutDashboard,
   LayoutGrid,
   Loader2,
+  Lock,
+  LogIn,
   LogOut,
   Mail,
   MapPin,
@@ -71,6 +74,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BrandLogo } from "./components/BrandLogo";
+import { LoginShell } from "./components/LoginShell";
 import CustomerAccountsPage from "./components/CustomerAccountsPage";
 import { DraggableDialog } from "./components/DraggableDialog";
 import { PartySelect, activePartyNames } from "./components/PartyManager";
@@ -2201,12 +2205,20 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [resetStep, setResetStep] = useState<"email" | "code" | "newPassword" | null>(null);
   const [resetEmail, setResetEmail] = useState("");
   const [resetCodeInput, setResetCodeInput] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
+  // A ref (not state) so two rapid clicks/Enter presses cannot both pass the guard before React re-renders.
+  const loginLock = useRef(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (loginLock.current) return;
     const normalizedUsername = username.trim().toLowerCase();
+    if (!normalizedUsername || !password) return setMessage("اكتب اسم المستخدم وكلمة المرور.");
     if (useServerAuth || !isLocalHost) {
-      setMessage("جار تسجيل الدخول...");
+      setMessage("");
+      loginLock.current = true;
+      setLoggingIn(true);
       try {
         const response = await fetch("/api/auth/login", {
           method: "POST",
@@ -2223,6 +2235,8 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         return;
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "تعذر تسجيل الدخول.");
+        loginLock.current = false;
+        setLoggingIn(false);
         return;
       }
     }
@@ -2348,74 +2362,86 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
 
   if (resetStep === "email") {
     return (
-      <main className="login-page" dir="rtl">
-        <form className="login-card" onSubmit={forgotPassword}>
-          <BrandLogo className="login-logo" />
-          <h1>استعادة كلمة المرور</h1>
-          <p>اكتب بريدك الإلكتروني وسيتم إرسال كود تحقق مكون من 6 أرقام، صالح لمدة 10 دقائق.</p>
-          <label>البريد الإلكتروني</label>
-          <input value={resetEmail} onChange={(event) => setResetEmail(event.target.value)} type="email" autoComplete="email" placeholder="example@email.com" />
-          {message && <div className="notice">{message}</div>}
-          <button className="primary-btn">إرسال كود التحقق</button>
-          <button className="ghost-btn" type="button" onClick={() => { setResetStep(null); setResetEmail(""); setMessage(""); }}>العودة لتسجيل الدخول</button>
-        </form>
-      </main>
+      <LoginShell compact onSubmit={forgotPassword}>
+          <h1 className="zl-step-title">استعادة كلمة المرور</h1>
+          <p className="zl-step-sub">اكتب بريدك الإلكتروني وسيتم إرسال كود تحقق مكون من 6 أرقام، صالح لمدة 10 دقائق.</p>
+          <label className="zl-plain-label">البريد الإلكتروني</label>
+          <input value={resetEmail} className="zl-plain-input" onChange={(event) => setResetEmail(event.target.value)} type="email" autoComplete="email" placeholder="example@email.com" />
+          {message && <div className={`zl-notice${/^(تم |إذا كان|كود التحقق|جار)/.test(message) ? " zl-notice-info" : ""}`} role="alert">{message}</div>}
+          <button className="zl-btn" type="submit">إرسال كود التحقق</button>
+          <button className="zl-btn-ghost" type="button" onClick={() => { setResetStep(null); setResetEmail(""); setMessage(""); }}>العودة لتسجيل الدخول</button>
+      </LoginShell>
     );
   }
 
   if (resetStep === "code") {
     return (
-      <main className="login-page" dir="rtl">
-        <form className="login-card" onSubmit={submitResetCode}>
-          <BrandLogo className="login-logo" />
-          <h1>كود التحقق</h1>
-          <p>أدخل كود التحقق المكون من 6 أرقام الذي تم إرساله للبريد: <strong>{resetEmail}</strong></p>
-          <label>كود التحقق</label>
-          <input value={resetCodeInput} onChange={(event) => setResetCodeInput(event.target.value)} inputMode="numeric" maxLength={6} autoComplete="one-time-code" />
-          {message && <div className="notice">{message}</div>}
-          <button className="primary-btn">تحقق من الكود</button>
-          <button className="ghost-btn" type="button" onClick={forgotPassword}>إعادة إرسال الكود</button>
-          <button className="ghost-btn" type="button" onClick={() => { setResetStep(null); setResetEmail(""); setResetCodeInput(""); setMessage(""); }}>العودة لتسجيل الدخول</button>
-        </form>
-      </main>
+      <LoginShell compact onSubmit={submitResetCode}>
+          <h1 className="zl-step-title">كود التحقق</h1>
+          <p className="zl-step-sub">أدخل كود التحقق المكون من 6 أرقام الذي تم إرساله للبريد: <strong>{resetEmail}</strong></p>
+          <label className="zl-plain-label">كود التحقق</label>
+          <input value={resetCodeInput} className="zl-plain-input" onChange={(event) => setResetCodeInput(event.target.value)} inputMode="numeric" maxLength={6} autoComplete="one-time-code" />
+          {message && <div className={`zl-notice${/^(تم |إذا كان|كود التحقق|جار)/.test(message) ? " zl-notice-info" : ""}`} role="alert">{message}</div>}
+          <button className="zl-btn" type="submit">تحقق من الكود</button>
+          <button className="zl-btn-ghost" type="button" onClick={forgotPassword}>إعادة إرسال الكود</button>
+          <button className="zl-btn-ghost" type="button" onClick={() => { setResetStep(null); setResetEmail(""); setResetCodeInput(""); setMessage(""); }}>العودة لتسجيل الدخول</button>
+      </LoginShell>
     );
   }
 
   if (resetStep === "newPassword") {
     return (
-      <main className="login-page" dir="rtl">
-        <form className="login-card" onSubmit={submitResetPassword}>
-          <BrandLogo className="login-logo" />
-          <h1>كلمة مرور جديدة</h1>
-          <p>اختر كلمة مرور جديدة لا تقل عن 4 أحرف.</p>
-          <label>كلمة المرور الجديدة</label>
-          <input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" />
-          <label>تأكيد كلمة المرور الجديدة</label>
-          <input value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} type="password" autoComplete="new-password" />
-          {message && <div className="notice">{message}</div>}
-          <button className="primary-btn">حفظ كلمة المرور</button>
-          <button className="ghost-btn" type="button" onClick={() => { setResetStep("code"); setNewPassword(""); setConfirmPassword(""); setMessage(""); }}>رجوع</button>
-        </form>
-      </main>
+      <LoginShell compact onSubmit={submitResetPassword}>
+          <h1 className="zl-step-title">كلمة مرور جديدة</h1>
+          <p className="zl-step-sub">اختر كلمة مرور جديدة لا تقل عن 4 أحرف.</p>
+          <label className="zl-plain-label">كلمة المرور الجديدة</label>
+          <input value={newPassword} className="zl-plain-input" onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" />
+          <label className="zl-plain-label">تأكيد كلمة المرور الجديدة</label>
+          <input value={confirmPassword} className="zl-plain-input" onChange={(event) => setConfirmPassword(event.target.value)} type="password" autoComplete="new-password" />
+          {message && <div className={`zl-notice${/^(تم |إذا كان|كود التحقق|جار)/.test(message) ? " zl-notice-info" : ""}`} role="alert">{message}</div>}
+          <button className="zl-btn" type="submit">حفظ كلمة المرور</button>
+          <button className="zl-btn-ghost" type="button" onClick={() => { setResetStep("code"); setNewPassword(""); setConfirmPassword(""); setMessage(""); }}>رجوع</button>
+      </LoginShell>
     );
   }
 
   return (
-    <main className="login-page" dir="rtl">
-      <form className="login-card" onSubmit={submit}>
-        <BrandLogo className="login-logo" />
-        <h1>نظام Zunion لإدارة الأوردرات</h1>
-        <p>واجهة داخلية عربية لإدارة التصنيع والتسليم والحسابات.</p>
-        <label>اسم المستخدم</label>
-        <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
-        <label>كلمة المرور</label>
-        <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" />
-        <button className="ghost-btn" type="button" onClick={() => { setResetStep("email"); setResetEmail(username.trim().toLowerCase()); setMessage(""); }}>نسيت كلمة المرور؟</button>
-        <label className="check stay-check"><input type="checkbox" checked={stayLoggedIn} onChange={(event) => setStayLoggedIn(event.target.checked)} /> البقاء مسجلا لمدة 14 يوم</label>
-        {message && <div className="notice">{message}</div>}
-        <button className="primary-btn">دخول لوحة التحكم</button>
-      </form>
-    </main>
+    <LoginShell onSubmit={submit}>
+      <div className="zl-title" dir="rtl">
+        <span className="zl-title-line" aria-hidden="true" />
+        <h1>مرحباً بك في Zunion</h1>
+        <span className="zl-title-line" aria-hidden="true" />
+      </div>
+      <p className="zl-sub">نظام إدارة المصنع والأوردرات</p>
+
+      <div className="zl-field">
+        <label className="zl-sr" htmlFor="zl-username">اسم المستخدم</label>
+        <span className="zl-icon zl-icon-end" aria-hidden="true"><User size={22} /></span>
+        <input id="zl-username" className="zl-input" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" placeholder="اسم المستخدم" autoCapitalize="none" spellCheck={false} disabled={loggingIn} />
+      </div>
+      <div className="zl-field">
+        <label className="zl-sr" htmlFor="zl-password">كلمة المرور</label>
+        <span className="zl-icon zl-icon-end" aria-hidden="true"><Lock size={22} /></span>
+        <input id="zl-password" className="zl-input zl-input-password" value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="كلمة المرور" disabled={loggingIn} />
+        <button type="button" className="zl-eye" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"} aria-pressed={showPassword}>
+          {showPassword ? <EyeOff size={22} /> : <Eye size={22} />}
+        </button>
+      </div>
+
+      <div className="zl-row">
+        <label className="zl-check">
+          <input type="checkbox" checked={stayLoggedIn} onChange={(event) => setStayLoggedIn(event.target.checked)} disabled={loggingIn} />
+          <span>تذكرني لمدة 14 يوم</span>
+        </label>
+        <button type="button" className="zl-link" onClick={() => { setResetStep("email"); setResetEmail(username.trim().toLowerCase()); setMessage(""); }}>نسيت كلمة المرور؟</button>
+      </div>
+
+      {message && <div className={`zl-notice${/^(تم |إذا كان|كود التحقق|جار)/.test(message) ? " zl-notice-info" : ""}`} role="alert">{message}</div>}
+      <button className="zl-btn zl-btn-login" type="submit" disabled={loggingIn} aria-busy={loggingIn}>
+        {loggingIn ? <Loader2 size={24} className="zl-spin-static" aria-hidden="true" /> : <LogIn size={24} aria-hidden="true" />}
+        <span>{loggingIn ? "جار تسجيل الدخول..." : "تسجيل الدخول"}</span>
+      </button>
+    </LoginShell>
   );
 }
 
@@ -2476,11 +2502,11 @@ function OptionalPasswordChangePanel({ session, onChanged }: { session: Session;
       <form className="settings-form" onSubmit={submit}>
         <label>كلمة المرور الحالية</label>
         <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" />
-        <label>كلمة المرور الجديدة</label>
+        <label className="zl-plain-label">كلمة المرور الجديدة</label>
         <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" />
-        <label>تأكيد كلمة المرور الجديدة</label>
+        <label className="zl-plain-label">تأكيد كلمة المرور الجديدة</label>
         <input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" />
-        {message && <div className="notice">{message}</div>}
+        {message && <div className={`zl-notice${/^(تم |إذا كان|كود التحقق|جار)/.test(message) ? " zl-notice-info" : ""}`} role="alert">{message}</div>}
         <button className="primary-btn">تغيير كلمة المرور</button>
       </form>
     </section>
@@ -8859,7 +8885,7 @@ function FinancePageModern({ session }: { session: Session }) {
           </div>
           <div className="finance-save-row">
             <button className="primary-btn" type="submit">حفظ المعاملة</button>
-            <button className="ghost-btn" type="button" onClick={() => { setDescription(""); setAmount(0); setExpenseType(""); }}>إلغاء</button>
+            <button className="zl-btn-ghost" type="button" onClick={() => { setDescription(""); setAmount(0); setExpenseType(""); }}>إلغاء</button>
           </div>
         </form>
         {notice && <p className="success-note">{notice}</p>}
