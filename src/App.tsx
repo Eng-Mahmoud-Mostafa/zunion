@@ -10230,7 +10230,6 @@ function ZunionApp() {
           { id: "customers", label: "جميع العملاء", visible: true, icon: Users },
           { id: "customers", label: "بحث خاص بالعملاء", visible: true, icon: Search },
           { id: "customerLedger", label: "حساب العميل", visible: true, icon: Landmark },
-          { id: "customerAccounts", label: "إضافة دفعة", visible: true, icon: Banknote },
         ],
       },
       { id: "machineDist", label: "توزيع المكن", visible: false, icon: LayoutGrid },
