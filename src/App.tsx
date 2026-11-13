@@ -4546,7 +4546,7 @@ function OrderSearchModal({ open, onClose, onSelectOrder }: { open: boolean; onC
   );
 }
 
-function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, canManageParties = false, onAddProduct, onCreateParty, onUpdateParty, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly: readOnlyProp = false, canEdit = false, onViewImage, onPrint, closeSaveMode = "save", onDirtyChange, registerActions }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; canManageParties?: boolean; onAddProduct?: () => void; onCreateParty?: (name: string) => Promise<void> | void; onUpdateParty?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; canEdit?: boolean; onViewImage?: (src: string, title: string) => void; onPrint?: (order: Order) => void; tabId?: string; closeSaveMode?: "draft" | "save"; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void }) {
+function OrderForm({ initial, startAsDraft = false, customers = [], products = [], parties = [], canAddProduct = false, canManageParties = false, onAddProduct, onCreateParty, onUpdateParty, onCancel, onOpenOrder, onSave, onSaveDraft, onSendToProduction, readOnly: readOnlyProp = false, canEdit = false, onViewImage, onPrint, closeSaveMode = "save", onDirtyChange, registerActions, onRetryDraftNavigation }: { initial?: Order; startAsDraft?: boolean; customers?: Customer[]; products?: Product[]; parties?: Party[]; canAddProduct?: boolean; canManageParties?: boolean; onAddProduct?: () => void; onCreateParty?: (name: string) => Promise<void> | void; onUpdateParty?: (id: string, changes: { name?: string; active?: boolean }) => Promise<void> | void; onCancel?: () => void; onOpenOrder?: (order: Order) => void; onSave: (order: Order) => void | Promise<Order | void>; onSaveDraft?: (order: Order) => void | Promise<Order | void>; onSendToProduction?: (order: Order) => void | Promise<Order | void>; readOnly?: boolean; canEdit?: boolean; onViewImage?: (src: string, title: string) => void; onPrint?: (order: Order) => void; tabId?: string; closeSaveMode?: "draft" | "save"; onDirtyChange?: (dirty: boolean) => void; registerActions?: (actions: { saveForClose: () => Promise<boolean> } | null) => void; onRetryDraftNavigation?: () => void }) {
   // A brand-new order starts with no party selected ("اختر طرف"); the user must
   // pick one. Existing/draft orders keep their saved party (via initial).
   const [form, setForm] = useState<Order>(() => initial ?? { ...emptyOrder, id: createId(), source_person: "", delivery_date: "", created_at: new Date().toISOString() });
@@ -4560,6 +4560,10 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const baselineRef = useRef<string | null>(JSON.stringify(form));
+  const latestFormRef = useRef(form);
+  latestFormRef.current = form;
+  const draftSaveRef = useRef<Promise<boolean> | null>(null);
+  const pendingAttachmentsRef = useRef(0);
   const onDirtyChangeRef = useRef(onDirtyChange);
   onDirtyChangeRef.current = onDirtyChange;
   useEffect(() => {
@@ -4571,6 +4575,11 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
     }
     onDirtyChangeRef.current?.(serialized !== baselineRef.current);
   }, [form]);
+  useEffect(() => {
+    if (!initial || !startAsDraft || JSON.stringify(form) === baselineRef.current) return;
+    const timer = window.setTimeout(() => { void saveExistingDraft(); }, 700);
+    return () => window.clearTimeout(timer);
+  }, [form, initial, startAsDraft]);
   // Edit mode is granted by whoever opened the order, and only متابعة أوردرات
   // grants it. If that permission is withdrawn while the shared details tab is
   // open — e.g. the same order is reopened from a production/archive section —
@@ -4867,6 +4876,8 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
 
   async function setOperationAttachment(index: number, key: "logoImage" | "workOrderImage", file: File | undefined) {
     if (!file) return;
+    pendingAttachmentsRef.current += 1;
+    try {
     if (!file.size) {
       setImageMessage(index, key, "ملف الصورة فارغ");
       return;
@@ -4900,6 +4911,9 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
       setImageMessage(index, key, "تم لصق الصورة بنجاح");
     } catch {
       setImageMessage(index, key, "حدث خطأ أثناء لصق الصورة");
+    }
+    } finally {
+      pendingAttachmentsRef.current -= 1;
     }
   }
 
@@ -5059,6 +5073,7 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
   }
 
   async function saveDraftTemp(): Promise<boolean> {
+    if (initial && startAsDraft) return saveExistingDraft();
     if (saving) return false;
     const now = new Date().toISOString();
     const selectedName = selectedProduct?.name || form.productName;
@@ -5120,7 +5135,76 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
     return true;
   }
 
+  async function saveExistingDraft(): Promise<boolean> {
+    if (!initial || !onSaveDraft) return true;
+    if (draftSaveRef.current) {
+      const finished = await draftSaveRef.current;
+      if (!finished) return false;
+    }
+    const task = (async () => {
+      while (pendingAttachmentsRef.current > 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, 25));
+      }
+      // Let React commit an attachment that finished processing in this tick.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const snapshot = latestFormRef.current;
+      const serialized = JSON.stringify(snapshot);
+      if (serialized === baselineRef.current) return true;
+      const now = new Date().toISOString();
+      const order = calculate({
+        ...snapshot,
+        operationMethods: (snapshot.operationItems || []).map((item) => item.method.trim()).filter(Boolean),
+        draft: true,
+        order_status: "جديد",
+        workStage: "new",
+        workflow_stage: "أوردر جديد",
+        operation_status: "not_started",
+        finishing_status: "not_started",
+        created_at: snapshot.created_at || now,
+        updated_at: now,
+      });
+      setSaving(true);
+      setSaveError("");
+      try {
+        const saved = await onSaveDraft(order);
+        if (saved) {
+          setForm((current) => {
+            const next = { ...current, id: saved.id, order_number: saved.order_number || current.order_number };
+            if (JSON.stringify(current) === serialized) {
+              next.operationItems = saved.operationItems;
+              baselineRef.current = JSON.stringify(next);
+              onDirtyChangeRef.current?.(false);
+            } else {
+              next.operationItems = current.operationItems?.map((item, index) => {
+                const old = snapshot.operationItems?.[index];
+                const uploaded = saved.operationItems?.[index];
+                return {
+                  ...item,
+                  logoImage: old && item.logoImage === old.logoImage ? uploaded?.logoImage || item.logoImage : item.logoImage,
+                  workOrderImage: old && item.workOrderImage === old.workOrderImage ? uploaded?.workOrderImage || item.workOrderImage : item.workOrderImage,
+                };
+              });
+              baselineRef.current = serialized;
+            }
+            latestFormRef.current = next;
+            return next;
+          });
+        }
+        return true;
+      } catch {
+        setSaveError("تعذر حفظ المسودة تلقائيًا. تحقق من الاتصال ثم أعد المحاولة.");
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    })();
+    draftSaveRef.current = task;
+    try { return await task; }
+    finally { if (draftSaveRef.current === task) draftSaveRef.current = null; }
+  }
+
   async function saveForClose(): Promise<boolean> {
+    if (initial && startAsDraft) return saveExistingDraft();
     if (saving) return false;
     if (closeSaveMode === "draft") return saveDraftTemp();
     const order = buildValidatedOrder(false);
@@ -5471,7 +5555,12 @@ function OrderForm({ initial, startAsDraft = false, customers = [], products = [
       </div>
 
       <div className="nf-save-error">
-        <ErrorText message={saveError} />
+        {startAsDraft && initial && saveError ? (
+          <div className="draft-autosave-error" role="alert">
+            <span>{saveError}</span>
+            <button type="button" className="ghost-btn compact" onClick={() => { if (onRetryDraftNavigation) onRetryDraftNavigation(); else void saveExistingDraft(); }}>إعادة المحاولة</button>
+          </div>
+        ) : <ErrorText message={saveError} />}
       </div>
 
       <div className="nf-draft-notice">
@@ -9856,6 +9945,28 @@ function ZunionApp() {
   // "replace" rewrites the current entry (redirects, initial load).
   const navMode = useRef<"push" | "history" | "replace">("push");
   const [pendingNav, setPendingNav] = useState<ShellTab | null>(null);
+  const draftNavTargetRef = useRef<{ tab: ShellTab; mode: "push" | "history" | "replace" } | null>(null);
+  const draftNavBusyRef = useRef(false);
+
+  async function finishDraftNavigation() {
+    if (draftNavBusyRef.current || !draftNavTargetRef.current || !activeTabId) return;
+    draftNavBusyRef.current = true;
+    try {
+      let controller = tabControllers.current.get(activeTabId);
+      if (!controller) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        controller = tabControllers.current.get(activeTabId);
+      }
+      const ok = await controller?.saveForClose();
+      if (ok) {
+        const target = draftNavTargetRef.current;
+        draftNavTargetRef.current = null;
+        if (target) showTab(target.tab, target.mode);
+      }
+    } finally {
+      draftNavBusyRef.current = false;
+    }
+  }
 
   function syncTabHash(tab: { view: View; recordId?: string }, mode: "push" | "replace") {
     const hash = encodeTabHash(tab);
@@ -9906,6 +10017,12 @@ function ZunionApp() {
     if (tab.id === activeTabId) {
       // Same page: keep it (and its form state) mounted; just realign the URL.
       if (mode !== "history") syncTabHash(tab, "replace");
+      return;
+    }
+    if (activeTab?.view === "draftEdit") {
+      if (mode === "history") syncTabHash(activeTab, "replace");
+      draftNavTargetRef.current = { tab, mode: "push" };
+      void finishDraftNavigation();
       return;
     }
     if (activeTabId && dirtyMap[activeTabId]) {
@@ -10376,7 +10493,7 @@ function ZunionApp() {
       case "draftEdit": {
         const draft = tab.recordId ? orders.find((item) => item.id === tab.recordId && item.draft) : null;
         if (!draft) return <ErrorPanel message="لم يتم العثور على المسودة المطلوبة" />;
-        return <OrderForm initial={draft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} />;
+        return <OrderForm initial={draft} startAsDraft customers={customers} products={products} parties={parties} canAddProduct={isMaster || isOperator} canManageParties={isMaster} onCreateParty={createParty} onUpdateParty={updateParty} onAddProduct={() => openView("addProduct")} onSave={(order) => saveDraftOrder({ ...order, draft: true, workStage: "new", order_status: "جديد" })} onSaveDraft={saveDraftOrder} onSendToProduction={sendOrderToOperation} onCancel={() => requestCloseTab(tab.id)} onViewImage={openImageViewer} onOpenOrder={openOrderFromSearch} onPrint={(order) => printOrderFromForm(order, orders)} tabId={tab.id} closeSaveMode="draft" onDirtyChange={reportDirty(tab.id)} registerActions={registerTabActions(tab.id)} onRetryDraftNavigation={() => { if (draftNavTargetRef.current) void finishDraftNavigation(); else void tabControllers.current.get(tab.id)?.saveForClose(); }} />;
       }
       case "editOrder": {
         const order = tab.recordId ? findOrderByKey(tab.recordId) : null;
