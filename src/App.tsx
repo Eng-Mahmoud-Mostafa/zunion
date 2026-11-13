@@ -1,4 +1,5 @@
 ﻿import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import QRCode from "qrcode";
 import * as XLSX from "xlsx";
 import {
@@ -2851,6 +2852,19 @@ function OrderDetailsReadView({ order, canEdit, onEdit, onPrint, onViewImage }: 
   const [history, setHistory] = useState<OrderHistory | null>(null);
   const [histError, setHistError] = useState("");
   const [histOpen, setHistOpen] = useState(false);
+  const [workPreview, setWorkPreview] = useState<{ src: string; title: string } | null>(null);
+  const [previewSize, setPreviewSize] = useState<"normal" | "maximized" | "minimized">("normal");
+  useEffect(() => { setWorkPreview(null); setPreviewSize("normal"); }, [order.id]);
+  useEffect(() => {
+    if (!workPreview) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setWorkPreview(null); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [workPreview]);
+  const openWorkPreview = (src: string, title: string) => {
+    setWorkPreview({ src, title });
+    setPreviewSize("normal");
+  };
   useEffect(() => {
     if (!order.id) return;
     let active = true;
@@ -2896,9 +2910,12 @@ function OrderDetailsReadView({ order, canEdit, onEdit, onPrint, onViewImage }: 
         <div className="odv-attach-grid">
           {images.map((img, i) => (
             <div className="odv-attach-card" key={i}>
-              <AttachmentImage src={img.src} alt={img.name} className="odv-attach-img" onOpen={onViewImage ? () => onViewImage(img.src, `${labelPrefix}${img.method ? ` · ${img.method}` : ""}`) : undefined} />
+              <AttachmentImage src={img.src} alt={img.name} className="odv-attach-img" onOpen={title === "أمر الشغل" ? () => openWorkPreview(img.src, img.name) : onViewImage ? () => onViewImage(img.src, `${labelPrefix}${img.method ? ` · ${img.method}` : ""}`) : undefined} />
               {img.method ? <span className="odv-attach-method">{img.method}</span> : null}
-              <a href={img.src} download={img.name} className="odv-attach-dl"><Download size={13} /> تحميل</a>
+              <div className="odv-attach-actions">
+                {title === "أمر الشغل" && <button type="button" className="odv-attach-dl" onClick={() => openWorkPreview(img.src, img.name)}><Eye size={13} /> عرض</button>}
+                <a href={img.src} download={img.name} className="odv-attach-dl"><Download size={13} /> تحميل</a>
+              </div>
             </div>
           ))}
         </div>
@@ -2950,6 +2967,24 @@ function OrderDetailsReadView({ order, canEdit, onEdit, onPrint, onViewImage }: 
         {attachPanel("أمر الشغل", workImages, "أمر الشغل")}
         {attachPanel("أمر اللوجو", logoImages, "أمر اللوجو")}
       </div>
+      {workPreview && createPortal(
+        previewSize === "minimized" ? (
+          <button type="button" className="odv-preview-bar" onClick={() => setPreviewSize("normal")} aria-label="فتح معاينة أمر الشغل">أمر الشغل · {workPreview.title}</button>
+        ) : (
+          <div className="odv-preview-layer">
+            <div className={`odv-preview-window${previewSize === "maximized" ? " maximized" : ""}`} role="dialog" aria-label={`معاينة ${workPreview.title}`} aria-modal="false">
+              <div className="odv-preview-toolbar">
+                <strong>أمر الشغل · {workPreview.title}</strong>
+                <div className="odv-preview-controls">
+                  {previewSize === "maximized" ? <button type="button" onClick={() => setPreviewSize("normal")}>استعادة الحجم</button> : <button type="button" onClick={() => setPreviewSize("maximized")}>تكبير</button>}
+                  <button type="button" onClick={() => setPreviewSize("minimized")}>تصغير</button>
+                  <button type="button" onClick={() => setWorkPreview(null)}>إغلاق</button>
+                </div>
+              </div>
+              <div className="odv-preview-stage"><img src={workPreview.src} alt={workPreview.title} /></div>
+            </div>
+          </div>
+        ), document.body)}
 
       <section className="odv-section odv-history">
         <button type="button" className="odv-history-toggle" onClick={() => setHistOpen((o) => !o)} aria-expanded={histOpen}>
