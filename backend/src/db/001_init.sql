@@ -1,5 +1,20 @@
 create extension if not exists pgcrypto;
 
+create table if not exists notifications (
+  id uuid primary key default gen_random_uuid(),
+  recipient_key text not null,
+  event_key text not null,
+  kind text not null,
+  title text not null,
+  body text not null default '',
+  target_kind text not null,
+  target_id text,
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  unique (recipient_key, event_key)
+);
+create index if not exists notifications_recipient_recent_idx on notifications (recipient_key, created_at desc);
+
 do $$ begin
   create type user_role as enum ('Master', 'Helper', 'Worker', 'Finish', 'Operator', 'Supervisor', 'Finishing');
 exception when duplicate_object then null; end $$;
@@ -880,7 +895,7 @@ do $$ begin
      and exists (select 1 from pg_roles where rolname = 'authenticated')
   then
     -- User directory, credentials and audit trail: service-role only.
-    revoke all on users, users_profile, roles, password_reset_codes, otp_codes, sessions, audit_logs, order_files, machine_assignments, workers, machines from anon, authenticated;
+    revoke all on users, users_profile, roles, password_reset_codes, otp_codes, sessions, audit_logs, order_files, machine_assignments, workers, machines, notifications from anon, authenticated;
     -- App data: closed to anon/authenticated except the two dashboard reads below.
     revoke all on customers, products, orders, order_items, monthly_periods, expenses, incomes, transactions, operation_logs, company_settings from anon, authenticated;
     grant usage on schema public to anon;

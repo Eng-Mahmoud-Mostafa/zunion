@@ -533,6 +533,20 @@ async function syncCustomerAccountsTables(log: (msg: string) => void) {
  * abort startup.
  */
 async function syncSchemaDrift(log: (msg: string) => void) {
+  await guarded(() => query(`create table if not exists notifications (
+    id uuid primary key default gen_random_uuid(),
+    recipient_key text not null,
+    event_key text not null,
+    kind text not null,
+    title text not null,
+    body text not null default '',
+    target_kind text not null,
+    target_id text,
+    created_at timestamptz not null default now(),
+    read_at timestamptz,
+    unique (recipient_key, event_key)
+  )`), log, "notifications table");
+  await guarded(() => query("create index if not exists notifications_recipient_recent_idx on notifications (recipient_key, created_at desc)"), log, "notifications index");
   await syncOrdersColumns(log);
   await syncCustomersColumns(log);
   await syncOrderCompletion(log);

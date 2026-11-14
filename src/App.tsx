@@ -102,6 +102,8 @@ type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
 type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "products" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "customerLedger" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "menu" | "image";
 type Role = string;
 type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
+type AppNotification = { id: string; kind: string; title: string; body: string; target_kind: string; target_id: string | null; created_at: string; read_at: string | null };
+type NotificationFeed = { notifications: AppNotification[]; unreadCount: number };
 type OrderItem = {
   id: string;
   product_name: string;
@@ -9867,6 +9869,38 @@ function ZunionApp() {
   const view: View = activeTab ? activeTab.view : "dashboard";
   const anyDirty = Object.keys(dirtyMap).some((key) => dirtyMap[key]);
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 1024);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationFeed, setNotificationFeed] = useState<NotificationFeed>({ notifications: [], unreadCount: 0 });
+  const [notificationError, setNotificationError] = useState("");
+  const notificationRef = useRef<HTMLDivElement>(null);
+  const notificationOwnerRef = useRef(session?.username || session?.email);
+  notificationOwnerRef.current = session?.username || session?.email;
+  async function refreshNotifications() {
+    const owner = notificationOwnerRef.current;
+    try {
+      const feed = await backendJson<NotificationFeed>("/api/notifications");
+      if (notificationOwnerRef.current !== owner) return;
+      setNotificationFeed(feed);
+      setNotificationError("");
+    } catch {
+      if (notificationOwnerRef.current !== owner) return;
+      setNotificationError("تعذر تحميل الإشعارات. حاول مرة أخرى.");
+    }
+  }
+  useEffect(() => {
+    setNotificationFeed({ notifications: [], unreadCount: 0 });
+    setNotificationsOpen(false);
+    if (!session) return;
+    void refreshNotifications();
+    const timer = window.setInterval(() => void refreshNotifications(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [session?.username, session?.email]);
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const close = (event: PointerEvent) => { if (!notificationRef.current?.contains(event.target as Node)) setNotificationsOpen(false); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [notificationsOpen]);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [sentNotice, setSentNotice] = useState("");
   const [searchGoOrderId, setSearchGoOrderId] = useState<string | null>(null);
@@ -10406,6 +10440,34 @@ function ZunionApp() {
     if (window.innerWidth <= 1024) setDrawerOpen(false);
   }
 
+  async function openNotification(notice: AppNotification) {
+    setNotificationError("");
+    try {
+      await backendJson(`/api/notifications/${encodeURIComponent(notice.id)}/read`, { method: "PATCH" });
+      await refreshNotifications();
+      setNotificationsOpen(false);
+      if (notice.target_kind === "operation" && canAccessView(session, "worker")) openView("worker");
+      else if (notice.target_kind === "finishing" && canAccessView(session, "finish")) openView("finish");
+      else if (notice.target_kind === "finance" && canAccessView(session, "finance")) openView("finance");
+      else if (notice.target_kind === "order" && notice.target_id && canAccessView(session, "editOrder")) {
+        const payload = await backendJson<{ order: Record<string, unknown> }>(`/api/orders/${encodeURIComponent(notice.target_id)}`);
+        openOrderDetails(notice.target_id, orderFromApi(payload.order));
+      }
+    } catch {
+      setNotificationError("تعذر فتح الإشعار. حاول مرة أخرى.");
+      setNotificationsOpen(true);
+    }
+  }
+
+  async function markAllNotificationsRead() {
+    try {
+      await backendJson("/api/notifications/read-all", { method: "PATCH" });
+      await refreshNotifications();
+    } catch {
+      setNotificationError("تعذر تحديث الإشعارات. حاول مرة أخرى.");
+    }
+  }
+
   // Clicking a sidebar parent section opens its in-content card menu (keyed by the
   // section id) instead of jumping to the first subpage.
   function openSectionMenu(section: SidebarItemConfig) {
@@ -10579,7 +10641,18 @@ function ZunionApp() {
             <span className="topbar-current-label">المستخدم الحالي</span>
             <strong className="topbar-current-name">{session.username || session.fullName || <EmailText email={session.email} className="account-email" />}</strong>
           </div>
-          <button type="button" className="topbar-bell" aria-label="التنبيهات" onClick={() => selectSidebarView("alerts")}><Bell size={20} /><span className="topbar-notification-dot" /></button>
+          <div className="topbar-notifications" ref={notificationRef}>
+            <button type="button" className="topbar-bell" aria-label={`الإشعارات${notificationFeed.unreadCount ? `، ${notificationFeed.unreadCount} غير مقروء` : ""}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); if (!notificationsOpen) void refreshNotifications(); }}>
+              <Bell size={20} />{notificationFeed.unreadCount > 0 && <span className="topbar-notification-count">{notificationFeed.unreadCount > 99 ? "99+" : notificationFeed.unreadCount}</span>}
+            </button>
+            {notificationsOpen && <section className="notification-panel" role="dialog" aria-label="الإشعارات" dir="rtl">
+              <div className="notification-panel-head"><h2>الإشعارات <span>{notificationFeed.unreadCount}</span></h2><button type="button" onClick={() => void markAllNotificationsRead()} disabled={!notificationFeed.unreadCount}>تحديد الكل كمقروء</button></div>
+              {notificationError && <p className="notification-error" role="alert">{notificationError} <button type="button" onClick={() => void refreshNotifications()}>إعادة المحاولة</button></p>}
+              {notificationFeed.notifications.length ? <div className="notification-list">{notificationFeed.notifications.map((notice) => <button type="button" key={notice.id} className={`notification-item${notice.read_at ? "" : " unread"}`} onClick={() => void openNotification(notice)}>
+                <strong>{notice.title}</strong><span>{notice.body}</span><small>{formatDateTimeCairo(notice.created_at)}</small>
+              </button>)}</div> : <p className="notification-empty">لا توجد إشعارات</p>}
+            </section>}
+          </div>
           <div className="topbar-brand" dir="ltr">zunion system control</div>
         </header>
         <section className="page">

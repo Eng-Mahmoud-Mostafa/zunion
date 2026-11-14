@@ -22,6 +22,21 @@ set search_path = public;
 
 create extension if not exists pgcrypto;
 
+create table if not exists notifications (
+  id uuid primary key default gen_random_uuid(),
+  recipient_key text not null,
+  event_key text not null,
+  kind text not null,
+  title text not null,
+  body text not null default '',
+  target_kind text not null,
+  target_id text,
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  unique (recipient_key, event_key)
+);
+create index if not exists notifications_recipient_recent_idx on notifications (recipient_key, created_at desc);
+
 do $$ begin
   create type user_role as enum ('Master', 'Helper', 'Worker', 'Finish', 'Operator', 'Supervisor', 'Finishing');
 exception when duplicate_object then null; end $$;

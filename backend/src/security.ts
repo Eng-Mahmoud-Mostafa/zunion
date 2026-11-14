@@ -91,6 +91,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   const email = session.email || `${session.username || "user"}@zunion.local`;
   const role = session.role || "Worker";
+  const databaseRole = ["Master", "Helper", "Worker", "Finish", "Operator", "Supervisor", "Finishing"].includes(role) ? role : "Worker";
   try {
     const { rows } = await query<AuthUser & { token_version: number }>(
       `insert into users (email, role, username, full_name)
@@ -100,14 +101,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
          username = coalesce(users.username, excluded.username),
          full_name = coalesce(users.full_name, excluded.full_name)
        returning id, email, role, token_version`,
-      [email, role, session.username ?? null, session.fullName ?? null],
+      [email, databaseRole, session.username ?? null, session.fullName ?? null],
     );
     const row = rows[0];
     if (!row) return res.status(401).json({ message: "Unauthorized" });
     if (Number(session.tokenVersion ?? 0) < Number(row.token_version ?? 0)) {
       return res.status(401).json({ message: "انتهت الجلسة. سجل الدخول مرة أخرى" });
     }
-    req.user = { id: row.id, email: row.email, role: row.role };
+    req.user = { id: row.id, email: row.email, role: databaseRole === role ? row.role : role };
     return next();
   } catch (error) {
     console.error("requireAuth: database error during session validation.", error instanceof Error ? error.message : error);

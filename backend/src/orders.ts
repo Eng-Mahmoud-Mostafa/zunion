@@ -66,6 +66,6 @@ export async function ensureCustomer(client: PoolClient, input: {
 }
 
 export async function loadOrder(id: string) {
-  const { rows } = await query("select * from orders where id = $1", [id]);
+  const { rows } = await query<import("./notifications.js").OrderRecord>("select * from orders where id = $1", [id]);
   return rows[0] ?? null;
 }

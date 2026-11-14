@@ -23,6 +23,7 @@ import { effectivePermissions, isReservedRoleName, roleUpdateRejection, validate
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
 import { ensureSchema } from "./ensureSchema.js";
+import { financeChanged, notificationsFor, orderChanged, readAllNotifications, readNotification, staffChanged } from "./notifications.js";
 
 const app = express();
 fs.mkdirSync(config.uploadDir, { recursive: true });
@@ -49,6 +50,7 @@ const serviceRoutedPrefixes = [
   "/incomes",
   "/reports",
   "/dashboard",
+  "/notifications",
   "/audit",
   "/finance",
   "/users",
@@ -522,8 +524,18 @@ async function persistProfilePassword(profile: AppUser, password: string, mustCh
   }
 }
 
-function makeSession(user: AppUser, stayLoggedIn = true) {
+async function makeSession(user: AppUser, stayLoggedIn = true) {
   const maxAge = stayLoggedIn ? 14 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000;
+  let permissions: string[] = effectivePermissions(user);
+  try {
+    const { rows } = await query<{ permissions: string[] }>("select permissions from roles where name=$1 and status='active' limit 1", [user.role]);
+    if (Array.isArray(rows[0]?.permissions)) {
+      const configured = new Set(rows[0].permissions);
+      for (const value of user.permission_overrides?.allow ?? []) configured.add(value);
+      for (const value of user.permission_overrides?.deny ?? []) configured.delete(value);
+      permissions = Array.from(configured);
+    }
+  } catch (error) { console.warn("Role permissions lookup failed", error); }
   return {
     session: {
       email: user.email,
@@ -532,7 +544,7 @@ function makeSession(user: AppUser, stayLoggedIn = true) {
       role: user.role,
       mustChangePassword: user.must_change_password === true,
       tokenVersion: user.token_version ?? 0,
-      permissions: effectivePermissions(user),
+      permissions,
       loggedInAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + maxAge).toISOString(),
     },
@@ -559,7 +571,7 @@ function setAppSessionCookie(res: express.Response, session: object, maxAge: num
 function requireFinanceSession(req: express.Request, res: express.Response, next: express.NextFunction) {
   const session = loadAppSessionCookie(req);
   if (!session) return res.status(401).json({ error: "يجب تسجيل الدخول أولا." });
-  if (!["Master", "Helper"].includes(String(session.role || ""))) {
+  if (!appSessionHasPermission(session, "dailyAccounts.view")) {
     return res.status(403).json({ error: "ليس لديك صلاحية لحفظ المعاملات المالية." });
   }
   return next();
@@ -570,6 +582,44 @@ function appSessionHasPermission(session: AppSession | null, permission: Permiss
   if (session.role === "Master") return true;
   return Array.isArray(session.permissions) && session.permissions.includes(permission);
 }
+
+function canReadOrderRecord(req: express.Request, order: { work_stage?: unknown; draft?: unknown }) {
+  const session = loadAppSessionCookie(req);
+  if (!session) return false;
+  const stage = String(order.work_stage ?? "");
+  if (session.role === "Worker") return stage === "operation" && appSessionHasPermission(session, "operation.view");
+  if (session.role === "Finish" || session.role === "Finishing") return stage === "finishing" && appSessionHasPermission(session, "finishing.view");
+  return appSessionHasPermission(session, "orders.view")
+    || (stage === "operation" && appSessionHasPermission(session, "operation.view"))
+    || (stage === "finishing" && appSessionHasPermission(session, "finishing.view"));
+}
+
+async function tryNotify(action: () => Promise<unknown>) {
+  try { await action(); }
+  catch (error) { console.error("Notification delivery failed", error); }
+}
+
+app.get("/api/notifications", requireAuth, async (req, res) => {
+  const username = loadAppSessionCookie(req)?.username;
+  if (!username) return res.status(401).json({ message: "Unauthorized" });
+  res.json(await notificationsFor(username));
+});
+
+app.patch("/api/notifications/read-all", requireAuth, async (req, res) => {
+  const username = loadAppSessionCookie(req)?.username;
+  if (!username) return res.status(401).json({ message: "Unauthorized" });
+  await readAllNotifications(username);
+  res.json({ ok: true });
+});
+
+app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
+  const username = loadAppSessionCookie(req)?.username;
+  if (!username) return res.status(401).json({ message: "Unauthorized" });
+  const id = param(req.params.id);
+  if (!z.string().uuid().safeParse(id).success) return res.status(400).json({ message: "Invalid notification" });
+  if (!await readNotification(username, id)) return res.status(404).json({ message: "Notification not found" });
+  res.json({ ok: true });
+});
 
 function requireAppPermission(permission: PermissionKey, deniedMessage = "غير مصرح لك بتنفيذ هذا الإجراء") {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -609,7 +659,7 @@ app.post("/api/auth/login", async (req, res) => {
   const profile = await loadProfile(username);
   if (!profile || profile.is_active === false) return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
   if (!passwordValid(profile, parsed.data.password)) return res.status(401).json({ error: "اسم المستخدم أو كلمة المرور غير صحيحة." });
-  const { session, maxAge } = makeSession(profile, parsed.data.stayLoggedIn);
+  const { session, maxAge } = await makeSession(profile, parsed.data.stayLoggedIn);
   if (config.supabaseUrl && config.supabaseServiceKey && profile.id) {
     supabaseRest(`users_profile?id=eq.${encodeURIComponent(profile.id)}`, {
       method: "PATCH",
@@ -628,7 +678,7 @@ app.post("/api/auth/change-password", requireAuth, async (req, res) => {
   if (!passwordValid(profile, parsed.data.oldPassword)) return res.status(401).json({ error: "كلمة المرور القديمة غير صحيحة." });
   try {
     const updated = await persistProfilePassword(profile, parsed.data.newPassword, false);
-    const { session: nextSession, maxAge } = makeSession(updated, true);
+    const { session: nextSession, maxAge } = await makeSession(updated, true);
     setAppSessionCookie(res, nextSession, maxAge);
     res.clearCookie("zunion_password_code");
     await audit(req.user!, "PASSWORD_CHANGED", "auth", updated.id || profile.id, undefined, { username: profile.username });
@@ -872,7 +922,7 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : "تعذر تغيير كلمة المرور حالياً. حاول مرة أخرى" });
   }
-  const { session: nextSession, maxAge } = makeSession(updated, true);
+  const { session: nextSession, maxAge } = await makeSession(updated, true);
   setAppSessionCookie(res, nextSession, maxAge);
   audit(null, "PASSWORD_CHANGED", "auth", updated.id || profile.id, undefined, { username: profile.username }).catch(() => undefined);
   return res.json({ ok: true, session: nextSession });
@@ -889,7 +939,7 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
   try {
     const profile = await findProfileByEmail(user.email);
     if (profile) {
-      const session = makeSession(profile, true).session;
+      const session = (await makeSession(profile, true)).session;
       return res.json({ user, session });
     }
   } catch (error) {
@@ -1500,6 +1550,13 @@ app.post("/api/orders", requireAuth, requireRole("Master", "Helper", "Operator",
     throw error;
   }
   await audit(req.user!, "ORDER_CREATED", "orders", inserted.id, undefined, { ...order, order_number: inserted.order_number });
+  if (inserted.created) await tryNotify(async () => {
+    const current = await loadOrder(inserted.id);
+    if (current) {
+      await orderChanged(null, current);
+      await staffChanged({ ...current, worker_name: "", sewing_worker: "", printing_worker: "", operation_workers: [] }, current);
+    }
+  });
   res.status(inserted.created ? 201 : 200).json(inserted);
 });
 
@@ -1507,6 +1564,7 @@ app.get("/api/orders/:id", requireAuth, async (req, res) => {
   const id = param(req.params.id);
   const order = await loadOrder(id);
   if (!order) return res.status(404).json({ message: "Order not found" });
+  if (!canReadOrderRecord(req, order)) return res.status(403).json({ message: "Forbidden" });
   const files = await query("select id, file_type, original_name, mime_type, size, created_at from order_files where order_id=$1 order by created_at desc", [id]);
   res.json({ order: stripFinancial(order, req.user!.role), files: files.rows });
 });
@@ -1524,6 +1582,7 @@ app.get("/api/orders/:id/details", requireAuth, async (req, res) => {
   const id = param(req.params.id);
   const order = await loadOrder(id);
   if (!order) return res.status(404).json({ message: "Order not found" });
+  if (!canReadOrderRecord(req, order)) return res.status(403).json({ message: "Forbidden" });
   const files = await query("select id, file_type, original_name, mime_type, size, created_at from order_files where order_id=$1 order by created_at desc", [id]);
   let customer = null;
   if (order.customer_id) {
@@ -1630,6 +1689,7 @@ app.put("/api/orders/:id", requireAuth, requireRole("Master", "Helper", "Operato
     throw error;
   }
   await audit(req.user!, "ORDER_EDITED", "orders", id, oldOrder, { changes });
+  await tryNotify(async () => { const current = await loadOrder(id); if (current) { await orderChanged(oldOrder, current); await staffChanged(oldOrder, current); } });
   res.json({ ok: true, changed: true, changes });
 });
 
@@ -1664,6 +1724,7 @@ app.patch("/api/orders/:id/worker", requireAuth, requireRole("Master", "Helper",
   if (workerViolation) return res.status(400).json({ message: workerViolation });
   await query(`update orders set worker_name=$1, updated_by=$2 where id=$3`, [parsed.data.worker_name, req.user!.id, id]);
   await audit(req.user!, "WORKER_ASSIGNED", "orders", id, { worker_name: oldOrder.worker_name ?? "" }, parsed.data);
+  await tryNotify(async () => { const current = await loadOrder(id); if (current) await staffChanged(oldOrder, current); });
   res.json({ ok: true });
 });
 
@@ -1680,6 +1741,7 @@ app.patch("/api/orders/:id/staff", requireAuth, requireRole("Master", "Helper", 
   }
   await query(`update orders set operation_workers=$1, operation_supervisors=$2, updated_by=$3 where id=$4`, [JSON.stringify(parsed.data.worker_names), JSON.stringify(parsed.data.supervisor_names), req.user!.id, id]);
   await audit(req.user!, "STAFF_ASSIGNED", "orders", id, oldStaff, parsed.data);
+  await tryNotify(async () => { const current = await loadOrder(id); if (current) await staffChanged(oldOrder, current); });
   res.json({ ok: true });
 });
 
@@ -1708,6 +1770,7 @@ app.patch("/api/orders/:id/sewing", requireAuth, requireRole("Master", "Helper",
   );
   await audit(req.user!, "SEWING_UPDATED", "orders", id, { sewing_worker: oldOrder.sewing_worker ?? "", sewing_status: oldOrder.sewing_status ?? "" }, parsed.data);
   const saved = await loadOrder(id);
+  if (saved) await tryNotify(() => staffChanged(oldOrder, saved));
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });
 
@@ -1725,6 +1788,7 @@ app.patch("/api/orders/:id/printing", requireAuth, requireRole("Master", "Helper
   );
   await audit(req.user!, "PRINTING_UPDATED", "orders", id, { printing_worker: oldOrder.printing_worker ?? "", printing_status: oldOrder.printing_status ?? "" }, parsed.data);
   const saved = await loadOrder(id);
+  if (saved) await tryNotify(() => staffChanged(oldOrder, saved));
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });
 
@@ -1742,6 +1806,7 @@ app.patch("/api/orders/:id/finishing", requireAuth, requireRole("Master", "Helpe
   );
   await audit(req.user!, "FINISHING_UPDATED", "orders", id, { finishing_worker: oldOrder.finishing_worker ?? "", finishing_status: oldOrder.finishing_status ?? "" }, parsed.data);
   const saved = await loadOrder(id);
+  if (saved) await tryNotify(() => orderChanged(oldOrder, saved));
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });
 
@@ -1940,6 +2005,7 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
     [parsed.data.status, parsed.data.workStage ?? workStageFromStatus(parsed.data.status), parsed.data.production_notes ?? null, parsed.data.finishing_notes ?? null, parsed.data.damaged_pieces ?? null, req.user!.id, id],
   );
   await audit(req.user!, "STATUS_CHANGED", "orders", id, { status: oldOrder.status }, parsed.data);
+  await tryNotify(async () => { const current = await loadOrder(id); if (current) await orderChanged(oldOrder, current); });
   res.json({ ok: true });
 });
 
@@ -2539,6 +2605,7 @@ app.post("/api/account-ledger/:customerId/payments", requireAuth, requireRole("M
       method: parsed.data.method,
       period_id: parsed.data.period_id ?? null,
     }).catch(() => undefined);
+    await tryNotify(() => financeChanged(`account-payment:${row.id}`, "دفعة عميل جديدة", "تم تسجيل دفعة في حساب العميل", customerId.data));
     return res.status(201).json({ ok: true, transaction: { id: row.id } });
   } catch (error) {
     return sendLedgerError(res, error, "تعذر حفظ الدفعة، يرجى المحاولة مرة أخرى");
@@ -2750,6 +2817,7 @@ app.post("/api/expenses", requireAuth, requireRole("Master", "Helper"), async (r
   if (!parsed.success) return res.status(400).json({ message: "Invalid expense", issues: parsed.error.issues });
   const { rows } = await query<{ id: string }>("insert into expenses (monthly_period_id, type, quantity, price, created_by) values ($1,$2,$3,$4,$5) returning id", [parsed.data.monthly_period_id, parsed.data.type, parsed.data.quantity, parsed.data.price, req.user!.id]);
   await audit(req.user!, "EXPENSE_ADDED", "expenses", rows[0].id, undefined, parsed.data);
+  await tryNotify(() => financeChanged(`expense:${rows[0].id}`, "مصروف جديد", `تم تسجيل مصروف: ${parsed.data.type}`, rows[0].id));
   res.status(201).json(rows[0]);
 });
 
@@ -2763,6 +2831,7 @@ app.post("/api/incomes", requireAuth, requireRole("Master", "Helper"), async (re
   if (!parsed.success) return res.status(400).json({ message: "Invalid income", issues: parsed.error.issues });
   const { rows } = await query<{ id: string }>("insert into incomes (monthly_period_id, from_name, value, reason, created_by) values ($1,$2,$3,$4,$5) returning id", [parsed.data.monthly_period_id, parsed.data.from_name, parsed.data.value, parsed.data.reason, req.user!.id]);
   await audit(req.user!, "INCOME_ADDED", "incomes", rows[0].id, undefined, parsed.data);
+  await tryNotify(() => financeChanged(`income:${rows[0].id}`, "إيراد جديد", `تم تسجيل إيراد من ${parsed.data.from_name}`, rows[0].id));
   res.status(201).json(rows[0]);
 });
 
@@ -2854,6 +2923,8 @@ app.post("/api/finance/transactions", requireFinanceSession, async (req, res) =>
         },
       ]),
     });
+    const transactionId = String((rows[0] as { id?: unknown } | undefined)?.id ?? "");
+    if (transactionId) await tryNotify(() => financeChanged(`transaction:${transactionId}`, "معاملة مالية جديدة", "تم تسجيل معاملة مالية جديدة", transactionId));
     return res.status(201).json({ transaction: rows[0] ?? null });
   } catch (error) {
     console.error("Finance transaction insert failed", error);
