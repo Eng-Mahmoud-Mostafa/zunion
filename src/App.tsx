@@ -9741,8 +9741,9 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLog
 
   return (
     <>
-      <aside className={`sidebar${drawerOpen ? " drawer-open" : ""}`}>
+      <aside id="zunion-sidebar" className={`sidebar${drawerOpen ? " drawer-open" : ""}`} aria-hidden={!drawerOpen} inert={!drawerOpen}>
         <button type="button" className="sidebar-close" aria-label="إغلاق القائمة" onClick={onCloseDrawer}><X size={22} /></button>
+        <button type="button" className="hamburger-btn sidebar-hamburger" aria-label="إغلاق القائمة" aria-expanded={drawerOpen} aria-controls="zunion-sidebar" onClick={onCloseDrawer}><Menu size={24} /></button>
         <div className="sidebar-logo-button">
           <BrandLogo className="sidebar-logo" />
         </div>
@@ -9865,7 +9866,7 @@ function ZunionApp() {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null;
   const view: View = activeTab ? activeTab.view : "dashboard";
   const anyDirty = Object.keys(dirtyMap).some((key) => dirtyMap[key]);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 1024);
   const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
   const [sentNotice, setSentNotice] = useState("");
   const [searchGoOrderId, setSearchGoOrderId] = useState<string | null>(null);
@@ -10402,14 +10403,14 @@ function ZunionApp() {
 
   function selectSidebarView(nextView: View) {
     openView(nextView);
-    setDrawerOpen(false);
+    if (window.innerWidth <= 1024) setDrawerOpen(false);
   }
 
   // Clicking a sidebar parent section opens its in-content card menu (keyed by the
   // section id) instead of jumping to the first subpage.
   function openSectionMenu(section: SidebarItemConfig) {
     openView("menu", section.id, section.label);
-    setDrawerOpen(false);
+    if (window.innerWidth <= 1024) setDrawerOpen(false);
   }
 
   function logout() {
@@ -10561,7 +10562,7 @@ function ZunionApp() {
   }
 
   return (
-    <div className="app" dir="rtl" onInputCapture={normalizeInputDigits}>
+    <div className={`app${drawerOpen ? " sidebar-open" : " sidebar-collapsed"}`} dir="rtl" onInputCapture={normalizeInputDigits}>
       <Sidebar
         items={sidebarItems}
         activeView={view === "menu" ? ((activeTab?.recordId as View) ?? "dashboard") : view === "editOrder" || view === "search" ? "orders" : view === "draftEdit" ? "drafts" : view}
@@ -10573,7 +10574,7 @@ function ZunionApp() {
       />
       <main className="content">
         <header className="topbar">
-          <button type="button" className="hamburger-btn" aria-label="فتح القائمة" onClick={() => setDrawerOpen(true)}><Menu size={24} /></button>
+          <button type="button" className="hamburger-btn" aria-label={drawerOpen ? "إغلاق القائمة" : "فتح القائمة"} aria-expanded={drawerOpen} aria-controls="zunion-sidebar" onClick={() => setDrawerOpen((open) => !open)}><Menu size={24} /></button>
           <div className="topbar-current">
             <span className="topbar-current-label">المستخدم الحالي</span>
             <strong className="topbar-current-name">{session.username || session.fullName || <EmailText email={session.email} className="account-email" />}</strong>

@@ -10059,6 +10059,19 @@ th {
 .sidebar .sidebar-close { padding: 0 !important; }
 .sidebar .sidebar-toggle { display: inline-flex !important; align-items: center !important; justify-content: center !important; }
 
+/* The header control owns the shared sidebar state on every page. */
+.app .hamburger-btn { display: inline-grid; place-items: center; flex: 0 0 auto; width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); cursor: pointer; }
+.app .sidebar .sidebar-hamburger { display: none; }
+.app .sidebar-close { display: inline-grid !important; place-items: center; position: absolute; top: 10px; left: 10px; width: 38px !important; height: 38px !important; min-height: 38px !important; border-radius: 50% !important; background: rgba(255,255,255,.12) !important; color: #fff !important; cursor: pointer; }
+@media (min-width: 1025px) {
+  .app.sidebar-collapsed .sidebar { transform: translateX(110%); pointer-events: none; }
+  .app.sidebar-collapsed .content { width: 100% !important; max-width: 100% !important; margin-right: 0 !important; }
+}
+@media (max-width: 1024px) {
+  .app.sidebar-open .topbar .hamburger-btn { visibility: hidden; }
+  .app.sidebar-open .sidebar .sidebar-hamburger { display: inline-grid; position: absolute; top: 10px; right: 12px; z-index: 1; }
+}
+
 /* Identifiers and dates stay on one line even inside wrapping fixed-layout tables. */
 .ws-table td[class*="-num"], .ws-table td[class*="-date"],
 .orders-list-table td[class*="-num"], .orders-list-table td[class*="-date"],
