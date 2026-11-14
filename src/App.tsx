@@ -6934,6 +6934,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [spreadSort, setSpreadSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
   const [machineOverrides, setMachineOverrides] = useState<Record<string, string>>({});
   const [cellSaving, setCellSaving] = useState<Record<string, boolean>>({});
+  const completingProductionRef = useRef<Set<string>>(new Set());
   const [cellError, setCellError] = useState<Record<string, string>>({});
   const [workerEditId, setWorkerEditId] = useState<string | null>(null);
   const [problemEditId, setProblemEditId] = useState<string | null>(null);
@@ -6974,6 +6975,37 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     const next = { ...record };
     delete next[key];
     return next;
+  }
+
+  function completeProduction(id: string, stage: "sewing" | "printing") {
+    const key = `${id}:complete`;
+    if (completingProductionRef.current.has(id)) return;
+    completingProductionRef.current.add(id);
+    setCellSaving((current) => ({ ...current, [key]: true }));
+    setCellError((current) => withoutKey(current, key));
+    void backendJson(`/api/orders/${encodeURIComponent(id)}/complete-production`, {
+      method: "PATCH",
+      body: JSON.stringify({ stage }),
+    }).then(() => {
+      if (stage === "sewing") setSewingRows((current) => current.filter((row) => row.id !== id));
+      else setPrintingRows((current) => current.filter((row) => row.id !== id));
+      setOrders((current) => current.map((order) => order.id === id
+        ? { ...applyBackendStatus(order, "WORKER_DONE"), [stage === "sewing" ? "sewing_status" : "printing_status"]: "done" }
+        : order));
+      onFinished?.(id);
+      setToast("تم إنهاء التشغيل وتحويل الأوردر إلى التشطيب بنجاح");
+    }).catch(() => {
+      setCellError((current) => ({ ...current, [key]: "تعذر نقل الأوردر إلى التشطيب. حاول مرة أخرى." }));
+    }).finally(() => {
+      completingProductionRef.current.delete(id);
+      setCellSaving((current) => withoutKey(current, key));
+    });
+  }
+
+  function completionFeedback(id: string) {
+    if (cellSaving[`${id}:complete`]) return <span className="ws-feedback ws-saving">جارِ النقل…</span>;
+    const error = cellError[`${id}:complete`];
+    return error ? <span className="ws-feedback ws-error">{error}</span> : null;
   }
 
   function renderOrdersListHeaders(headers: readonly string[] = ordersListHeaders) {
@@ -7032,7 +7064,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     setSewingLoading(true);
     setSewingError("");
     backendJson<{ orders: Array<Record<string, unknown>> }>(`/api/orders?type=${encodeURIComponent("خياطه")}&draft=false`)
-      .then((payload) => { if (active) setSewingRows(payload.orders.map(sewingRowFromRaw)); })
+      .then((payload) => { if (active) setSewingRows(payload.orders.filter((row) => !["finishing", "completed", "cancelled"].includes(String(row.work_stage ?? ""))).map(sewingRowFromRaw)); })
       .catch((error) => { if (active) setSewingError(error instanceof Error ? error.message : "تعذر تحميل أوردرات الخياطة."); })
       .finally(() => { if (active) setSewingLoading(false); });
     return () => { active = false; };
@@ -7044,7 +7076,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     setPrintingLoading(true);
     setPrintingError("");
     backendJson<{ orders: Array<Record<string, unknown>> }>(`/api/orders?type=${encodeURIComponent("طباعه")}&draft=false`)
-      .then((payload) => { if (active) setPrintingRows(payload.orders.map(printingRowFromRaw)); })
+      .then((payload) => { if (active) setPrintingRows(payload.orders.filter((row) => !["finishing", "completed", "cancelled"].includes(String(row.work_stage ?? ""))).map(printingRowFromRaw)); })
       .catch((error) => { if (active) setPrintingError(error instanceof Error ? error.message : "تعذر تحميل أوردرات الطباعة."); })
       .finally(() => { if (active) setPrintingLoading(false); });
     return () => { active = false; };
@@ -7480,12 +7512,8 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                     {sewingCellFeedback(row.id)}
                   </td>
                   <td className="ws-cell-action">
-                    {row.done ? (
-                      <span className="ws-tam-on ws-sewing-done">تم</span>
-                    ) : (
-                      <button type="button" className="ws-cell-edit ws-hd-end" onClick={() => saveSewingCell(row.id, { sewing_status: "done" })}>إنهاء</button>
-                    )}
-                    {sewingCellFeedback(row.id)}
+                    <button type="button" className="ws-cell-edit ws-hd-end" disabled={Boolean(cellSaving[`${row.id}:complete`])} onClick={() => completeProduction(row.id, "sewing")}>إنهاء</button>
+                    {completionFeedback(row.id)}
                   </td>
                 </tr>
               ))}
@@ -7635,12 +7663,8 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
                     {printingCellFeedback(row.id)}
                   </td>
                   <td className="ws-cell-action">
-                    {row.done ? (
-                      <span className="ws-tam-on ws-sewing-done">تم</span>
-                    ) : (
-                      <button type="button" className="ws-cell-edit ws-hd-end" disabled={Boolean(cellSaving[`${row.id}:printing`])} onClick={() => savePrintingCell(row.id, { printing_status: "done" })}>إنهاء</button>
-                    )}
-                    {printingCellFeedback(row.id)}
+                    <button type="button" className="ws-cell-edit ws-hd-end" disabled={Boolean(cellSaving[`${row.id}:complete`])} onClick={() => completeProduction(row.id, "printing")}>إنهاء</button>
+                    {completionFeedback(row.id)}
                   </td>
                 </tr>
               ))}

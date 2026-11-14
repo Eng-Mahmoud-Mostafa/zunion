@@ -24,6 +24,7 @@ import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
 import { ensureSchema } from "./ensureSchema.js";
 import { financeChanged, notificationsFor, orderChanged, readAllNotifications, readNotification, staffChanged } from "./notifications.js";
+import { completeProductionOrder } from "./productionCompletion.js";
 
 const app = express();
 fs.mkdirSync(config.uploadDir, { recursive: true });
@@ -1790,6 +1791,22 @@ app.patch("/api/orders/:id/printing", requireAuth, requireRole("Master", "Helper
   const saved = await loadOrder(id);
   if (saved) await tryNotify(() => staffChanged(oldOrder, saved));
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
+});
+
+app.patch("/api/orders/:id/complete-production", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+  const id = param(req.params.id);
+  const stage = req.body?.stage;
+  if (stage !== "sewing" && stage !== "printing") return res.status(400).json({ message: "مرحلة التشغيل غير صحيحة" });
+  const result = await completeProductionOrder(id, stage, req.user!.id);
+  if (result.outcome === "missing") return res.status(404).json({ message: "الأوردر غير موجود" });
+  if (result.outcome === "wrong-type") return res.status(400).json({ message: "الأوردر لا ينتمي إلى هذه المرحلة" });
+  if (result.outcome === "draft") return res.status(409).json({ message: "لا يمكن إنهاء أوردر محفوظ مؤقتاً" });
+  if (result.outcome === "ineligible") return res.status(409).json({ message: "هذا الأوردر لم يعد متاحاً في هذه المرحلة" });
+  if (result.outcome === "already-transferred") return res.json({ ok: true, alreadyTransferred: true, order: stripFinancial(result.current, req.user!.role) });
+  await tryNotify(() => orderChanged(result.previous, result.current));
+  try { await audit(req.user!, "PRODUCTION_COMPLETED", "orders", id, { work_stage: result.previous.work_stage, [result.statusColumn]: result.previous[result.statusColumn] }, { work_stage: "finishing", [result.statusColumn]: "done" }); }
+  catch (error) { console.error("Production completion audit failed", error); }
+  res.json({ ok: true, order: stripFinancial(result.current, req.user!.role) });
 });
 
 app.patch("/api/orders/:id/finishing", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (req, res) => {
