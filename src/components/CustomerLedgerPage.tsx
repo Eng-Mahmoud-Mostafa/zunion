@@ -331,6 +331,10 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
     setPickerOpen(false);
   }
 
+  useEffect(() => {
+    if (initialCustomerId) chooseCustomer(initialCustomerId);
+  }, [initialCustomerId]);
+
   function changeParty(next: string) {
     setParty(next);
     // A customer who does not belong to the chosen طرف must not stay selected.
@@ -345,15 +349,16 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
   useEffect(() => {
     if (!customerId) { setData(null); return; }
     let active = true;
+    const controller = new AbortController();
     setLoading(true);
     setError("");
     (async () => {
       const collected: LedgerRow[] = [];
       let first: LedgerData | null = null;
-      for (let offset = 0; offset < 100000; ) {
+      for (let offset = 0; active; ) {
         const qs = new URLSearchParams({ limit: "2000", offset: String(offset) });
         if (periodId) qs.set("period_id", periodId);
-        const page = await api<LedgerData>(`/api/account-ledger/${encodeURIComponent(customerId)}?${qs.toString()}`);
+        const page = await api<LedgerData>(`/api/account-ledger/${encodeURIComponent(customerId)}?${qs.toString()}`, { signal: controller.signal });
         first = first ?? page;
         collected.push(...page.rows);
         if (!page.hasMore || page.rows.length === 0) break;
@@ -367,7 +372,7 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
         setError(err instanceof Error ? err.message : "تعذر تحميل حساب العميل");
       })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    return () => { active = false; controller.abort(); };
   }, [customerId, periodId, tick]);
 
   useEffect(() => {
@@ -377,9 +382,8 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
   }, [notice]);
 
   const view = data && data.customer.id === customerId ? data : null;
-  const viewingActive = view?.period.status === "active";
+  const viewingActive = !loading && view?.period.status === "active";
   const balance = view ? view.summary.currentBalance : 0;
-  const balanceView = balanceInfo(view ? view.period.closingBalance : 0);
 
   function openPayment() {
     if (!view || !canPay || !viewingActive) return;
@@ -459,10 +463,7 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
     win.document.close();
   }
 
-  const closing = view?.period.closingBalance ?? 0;
-  const closingInfo = balanceInfo(closing);
-  const cardTone = balance === 0 ? "zero" : "owed";
-  let seq = 0;
+  const cardTone = balance > 0 ? "owed" : balance < 0 ? "credit" : "zero";
 
   return (
     <div className="cl-page" dir="rtl">
@@ -521,7 +522,7 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
       </div>
 
       <div className="cl-actions">
-        <OutlineAction disabled={!view} onClick={printStatement}><Printer size={20} aria-hidden="true" />طباعة كشف الحساب</OutlineAction>
+        <OutlineAction disabled={!view || loading} onClick={printStatement}><Printer size={20} aria-hidden="true" />طباعة كشف الحساب</OutlineAction>
         <button type="button" className="cl-btn-red" disabled={!view || !canPay || !viewingActive} onClick={openPayment} title={!canPay ? "ليس لديك صلاحية لإضافة دفعة" : !viewingActive && view ? "الفترة المحاسبية مغلقة" : undefined}>
           <Plus size={20} aria-hidden="true" />إضافة دفعة
         </button>
@@ -531,7 +532,7 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
         <div className="cl-period">
           <label htmlFor="cl-period">الفترة المحاسبية</label>
           <div className="cl-select">
-            <select id="cl-period" disabled={!view} value={view?.period.id ?? ""} onChange={(event) => { const next = event.target.value; const activeId = view?.periods.find((p) => p.status === "active")?.id; setPeriodId(next === activeId ? "" : next); }}>
+            <select id="cl-period" disabled={!view || loading} value={periodId || view?.periods.find((p) => p.status === "active")?.id || ""} onChange={(event) => { const next = event.target.value; const activeId = view?.periods.find((p) => p.status === "active")?.id; setPeriodId(next === activeId ? "" : next); }}>
               {!view ? <option value="">—</option> : null}
               {[...(view?.periods ?? [])].reverse().map((p) => <option key={p.id} value={p.id}>{periodLabel(p)}</option>)}
             </select>
@@ -598,19 +599,16 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
             </div>
             <div className="cl-table-wrap">
               <table className="cl-table">
-                <thead><tr><th className="cl-idx">م</th>{COLUMNS.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                <thead><tr>{COLUMNS.map((c) => <th key={c}>{c}</th>)}</tr></thead>
                 <tbody>
                   {view.rows.length === 0 ? (
-                    <tr><td colSpan={COLUMNS.length + 1} className="cl-table-empty">لا توجد حركات في هذه الفترة</td></tr>
+                    <tr><td colSpan={COLUMNS.length} className="cl-table-empty">لا توجد حركات في هذه الفترة</td></tr>
                   ) : view.rows.map((row, index) => {
-                    const system = row.kind !== "charge" && row.kind !== "payment";
                     const virtual = row.source === "system";
-                    if (!system) seq += 1;
                     const isLast = index === view.rows.length - 1;
                     const pill = row.kind === "payment" ? "pay" : row.kind === "charge" ? "work" : "sys";
                     return (
                       <tr key={row.id} className={`cl-row-${row.kind}${isLast ? " last" : ""}`}>
-                        <td className="cl-idx">{system ? "—" : seq}</td>
                         <td className="cl-user">{virtual ? <Dash /> : row.created_by_name || <Dash />}</td>
                         <td className="cl-nowrap">{virtual || !row.txn_date_text ? <Dash /> : dayLabel(row.txn_date_text)}</td>
                         <td className="cl-nowrap">
@@ -677,7 +675,6 @@ export default function CustomerLedgerPage({ customers, parties, session, initia
               <span role="button" tabIndex={0} className="cl-modal-x" aria-label="إغلاق" onClick={() => { if (!openSaving) setOpenModal(false); }} onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && !openSaving) setOpenModal(false); }}><X size={20} /></span>
             </div>
             <div className="cl-modal-body">
-              <p className="cl-modal-lead">سيتم إغلاق الحساب الحالي وفتح حساب جديد مع ترحيل الرصيد المتبقي تلقائيًا.</p>
               <div className={`cl-transfer-box ${balanceInfo(view.period.closingBalance).tone}`}>
                 <span>الرصيد الذي سيتم ترحيله</span>
                 <strong>{balanceText(view.period.closingBalance)}</strong>

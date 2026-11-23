@@ -18,7 +18,8 @@ import { ORDER_EDIT_SUMMARY_JOIN, ORDER_EDIT_SUMMARY_SELECT, diffOrder, loadOrde
 import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { activateMachine, createOrReactivateMachine, deactivateMachine, findMachineByName, listMachines, loadMachine, removeMachine, renameMachine } from "./machines.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions, updateTransaction } from "./customerAccounts.js";
-import { getBalances, getLedger, openNewPeriod, PAYMENT_METHOD_KEYS, recordPayment } from "./accountLedger.js";
+import { getBalances, getLedger, getCustomerPaymentReceipts, openNewPeriod, PAYMENT_METHOD_KEYS, recordPayment } from "./accountLedger.js";
+import { isAccountDate } from "./accountDates.js";
 import { effectivePermissions, isReservedRoleName, roleUpdateRejection, validatePermissions, type PermissionKey } from "./permissions.js";
 import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
@@ -2569,6 +2570,14 @@ app.get("/api/account-balances", requireAuth, requireRole("Master", "Helper", "O
   }
 });
 
+app.get("/api/finance/customer-payments", requireAuth, requireRole("Master", "Helper", "Operator"), async (_req, res) => {
+  try {
+    return res.json({ transactions: await getCustomerPaymentReceipts() });
+  } catch (error) {
+    return sendLedgerError(res, error, "تعذر تحميل دفعات العملاء");
+  }
+});
+
 app.get("/api/account-ledger/:customerId", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const customerId = ledgerCustomerId.safeParse(param(req.params.customerId));
   if (!customerId.success) return res.status(400).json({ message: "معرّف العميل غير صالح" });
@@ -2603,7 +2612,7 @@ app.post("/api/account-ledger/:customerId/payments", requireAuth, requireRole("M
   if (!parsed.success) return res.status(400).json({ message: "بيانات الدفعة غير صحيحة. تأكد من المبلغ والتاريخ وطريقة الدفع." });
   const cents = Math.round(parsed.data.amount * 100);
   if (Math.abs(parsed.data.amount * 100 - cents) > 1e-6) return res.status(400).json({ message: "المبلغ يجب ألا يزيد عن خانتين عشريتين" });
-  if (Number.isNaN(new Date(`${parsed.data.date}T00:00:00Z`).getTime())) return res.status(400).json({ message: "تاريخ الدفع غير صحيح" });
+  if (!isAccountDate(parsed.data.date)) return res.status(400).json({ message: "تاريخ الدفع غير صحيح" });
   try {
     const exists = await query("select 1 from customers where id = $1", [customerId.data]);
     if (!exists.rows[0]) return res.status(404).json({ message: "العميل غير موجود" });

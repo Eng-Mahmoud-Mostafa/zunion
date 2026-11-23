@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { isAccountDate } from "./accountDates.js";
 import { query, tx } from "./db.js";
 import { createTransaction, ensureCustomerAccount, statementCtes, unionSelect } from "./customerAccounts.js";
 import {
@@ -431,12 +432,12 @@ export async function openNewPeriod(
 
     // The selected date is the accounting date of the transfer. It may not be in the future and may not
     // precede the period's own start or anything already recorded in it.
-    const today = (await run("select current_date::text as d, (current_date + 1)::text as tomorrow")).rows[0];
+    const today = (await run("select (clock_timestamp() at time zone 'Africa/Cairo')::date::text as d")).rows[0];
     const effective = (opts.effectiveDate && String(opts.effectiveDate)) || today.d;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(effective) || Number.isNaN(new Date(`${effective}T00:00:00Z`).getTime())) {
+    if (!isAccountDate(effective)) {
       throw periodError("تاريخ فتح الحساب الجديد غير صحيح", "ZUNION_BAD_OPEN_DATE", 400);
     }
-    if (effective > today.tomorrow) throw periodError("لا يمكن أن يكون تاريخ فتح الحساب الجديد في المستقبل", "ZUNION_BAD_OPEN_DATE", 400);
+    if (effective > today.d) throw periodError("لا يمكن أن يكون تاريخ فتح الحساب الجديد في المستقبل", "ZUNION_BAD_OPEN_DATE", 400);
     if (ledger._minOpenDate && effective < ledger._minOpenDate) {
       throw periodError(`لا يمكن أن يسبق تاريخ فتح الحساب الجديد آخر حركة مسجلة في الحساب الحالي (${ledger._minOpenDate})`, "ZUNION_BAD_OPEN_DATE", 400);
     }
@@ -549,3 +550,22 @@ export async function recordPayment(
 }
 
 export const PAYMENT_METHOD_KEYS = Object.keys(PAYMENT_METHODS);
+
+/** Read the original receipt once in finance/reports; never mirror it into transactions.
+ * Order-linked receipts retain the existing order finance flow. Internal transfers
+ * and opening balances are deliberately excluded from cash receipts.
+ */
+export async function getCustomerPaymentReceipts() {
+  const { rows } = await query(`
+    select 'customer-payment:' || t.id::text as id, 'income'::text as transaction_type,
+      to_char(t.txn_date, 'YYYY-MM-DD') as date, t.description, t.credit as amount,
+      'دفعة عميل'::text as expense_type, ''::text as account_destination,
+      c.name as customer_name, null::text as detail_number,
+      coalesce(nullif(u.full_name, ''), u.username) as added_by, t.created_at
+    from customer_account_transactions t
+    join customers c on c.id = t.customer_id
+    left join users u on u.id = t.created_by
+    where t.entry_type = 'payment' and t.order_id is null
+    order by t.created_at desc, t.id`);
+  return rows;
+}

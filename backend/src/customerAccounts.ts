@@ -297,6 +297,21 @@ export async function createTransaction(input: {
     // Serialise with "open a new accounting period" for this customer, then stamp the row with
     // the period that is active right now (never a closed one).
     await client.query("select id from customers where id=$1 for update", [input.customerId]);
+    // A committed payment remains the same payment even if the response was lost and
+    // the account was closed before the client retried it.
+    const { rows: dupRows } = await client.query<CustomerTransactionRow>(
+      "select * from customer_account_transactions where client_key=$1 limit 1",
+      [input.clientKey],
+    );
+    if (dupRows[0]) {
+      const existing = dupRows[0];
+      if (existing.customer_id !== input.customerId || existing.entry_type !== input.entryType ||
+          existing.order_id !== input.orderId || Number(existing.debit) !== input.debit ||
+          Number(existing.credit) !== input.credit) {
+        throw periodError("مرجع العملية مستخدم لحركة مختلفة. أعد فتح النموذج.", "ZUNION_TRANSACTION_KEY_CONFLICT", 409);
+      }
+      return existing;
+    }
     const run = (sql: string, params: unknown[] = []) => client.query(sql, params) as Promise<{ rows: any[]; rowCount: number | null }>;
     const activePeriodId = await ensureActivePeriodId(run, input.customerId);
     if (input.expectedPeriodId && input.expectedPeriodId !== activePeriodId) {
@@ -311,12 +326,6 @@ export async function createTransaction(input: {
         throw Object.assign(new Error("الأوردر لا ينتمي لهذا العميل"), { code: "ZUNION_ORDER_MISMATCH" });
       }
     }
-
-    const { rows: dupRows } = await client.query<{ id: string }>(
-      "select id from customer_account_transactions where client_key=$1 limit 1",
-      [input.clientKey],
-    );
-    if (dupRows[0]) return dupRows[0] as CustomerTransactionRow;
 
     try {
       const { rows } = await client.query<CustomerTransactionRow>(

@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "check:account-ledger": "node scripts/check-account-ledger.mjs",
+    "check:account-ledger-ui": "node scripts/verify-customer-ledger.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build --configLoader native",
     "local": "npm run build && node scripts/serve-local.cjs",
@@ -21,6 +23,7 @@
     "xlsx": "0.18.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.17",
     "@types/qrcode": "^1.5.6",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",

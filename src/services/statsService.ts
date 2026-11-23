@@ -216,7 +216,7 @@ async function queryOrders(limit?: number) {
   return (data || []) as DbOrder[];
 }
 
-async function queryTransactions(limit?: number) {
+async function queryStoredTransactions(limit?: number) {
   const localRows = loadLocalTransactions();
   if (!supabase) return limit ? localRows.slice(0, limit) : localRows;
   if (localRows.length) return limit ? localRows.slice(0, limit) : localRows;
@@ -228,6 +228,21 @@ async function queryTransactions(limit?: number) {
     return limit ? rows.slice(0, limit) : rows;
   }
   return (data || []) as DbTransaction[];
+}
+
+async function queryTransactions(limit?: number) {
+  if (import.meta.env.VITE_USE_SERVER_AUTH !== "true") return queryStoredTransactions(limit);
+  const [stored, response] = await Promise.all([
+    queryStoredTransactions(),
+    fetch("/api/finance/customer-payments", { credentials: "include" }),
+  ]);
+  // Offline/local mode and roles without financial access keep their existing view.
+  if (response.status === 401 || response.status === 403) return limit ? stored.slice(0, limit) : stored;
+  if (!response.ok) throw new Error("تعذر تحميل دفعات العملاء في التقرير المالي");
+  const { transactions = [] } = await response.json() as { transactions: DbTransaction[] };
+  const byId = new Map([...stored, ...transactions].map(row => [row.id, row]));
+  const rows = [...byId.values()].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+  return limit ? rows.slice(0, limit) : rows;
 }
 
 export async function getLatestOrders(limit = 5) {
@@ -297,12 +312,7 @@ export async function getMonthlyFinancialStats(month: number, year: number, acco
     };
   } catch (error) {
     warnSupabaseRead("getMonthlyFinancialStats", error);
-    return {
-      incomeTotal: 0,
-      expenseTotal: 0,
-      netTotal: 0,
-      transactions: [],
-    };
+    throw error;
   }
 }
 
@@ -380,6 +390,6 @@ export async function getReportsData(month: number, year: number): Promise<Repor
     };
   } catch (error) {
     warnSupabaseRead("getReportsData", error);
-    return emptyReportsData();
+    throw error;
   }
 }
