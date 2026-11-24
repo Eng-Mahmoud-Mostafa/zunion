@@ -24,4 +24,3 @@ try{let target;({child,target}=await launch());cdp=await connect(target.webSocke
  await cdp.send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await click('الأرشيف');await wait('!!document.querySelector(".production-panel tbody a")');assert.equal(await page('document.querySelector(".production-panel").getBoundingClientRect().right<=innerWidth'),true);
  console.log('PASS settings removal and individuals tabs; priority save/reopen; archive order links and unknown dates; worker creation; mobile panel containment.');
 }finally{cdp?.close();if(child)cleanup(child);await new Promise(r=>server.close(r));}
-

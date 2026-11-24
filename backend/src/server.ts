@@ -2048,7 +2048,7 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
   const allowed =
     role === "Master" ||
     (role === "Helper" && ["SENT_TO_WORKER", "CUSTOMER_MESSAGED"].includes(parsed.data.status)) ||
-    (role === "Worker" && ["WORKER_STARTED", "WORKER_DONE"].includes(parsed.data.status)) ||
+    (["Worker", "Operator", "Supervisor"].includes(role) && appSessionHasPermission(loadAppSessionCookie(req), "operation.update") && ["WORKER_STARTED", "WORKER_DONE"].includes(parsed.data.status)) ||
     (role === "Finish" && ["FINISH_STARTED", "FINISH_DONE", "READY"].includes(parsed.data.status));
   if (!allowed) return res.status(403).json({ message: "Forbidden status transition" });
   if (parsed.data.status === "WORKER_DONE") {
