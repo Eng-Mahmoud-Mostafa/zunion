@@ -8481,7 +8481,7 @@ function ImportExport({ orders, setOrders, session }: { orders: Order[]; setOrde
   );
 }
 
-function CustomerAccounts({ orders, customers: savedCustomers, session, parties = [], onCustomerClick, onOrderClick }: { orders: Order[]; customers: Customer[]; session: Session; setOrders?: React.Dispatch<React.SetStateAction<Order[]>>; parties?: Party[]; onCustomerClick?: (code: string, name: string) => void; onOrderClick?: (orderId: string) => void }) {
+function CustomerAccounts({ orders, customers: savedCustomers, session, parties = [], onCustomerClick, onOrderClick }: { orders: Order[]; customers: Customer[]; session: Session; setOrders?: React.Dispatch<React.SetStateAction<Order[]>>; parties?: Party[]; onCustomerClick?: (customerId: string, name: string) => void; onOrderClick?: (orderId: string) => void }) {
   const [search, setSearch] = useState("");
   const [partyFilter, setPartyFilter] = useState("");
   const [debtorOnly, setDebtorOnly] = useState(false);
@@ -8521,7 +8521,8 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, parties 
     for (const order of orders) {
       if (order.draft) continue;
       const key = order.client_code || order.phone || order.client_name;
-      const current = grouped.get(key) ?? { name: order.client_name, code: order.client_code, phone: order.phone, email: "", address: "", source: order.source_person, old: order.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: 0, orders: [] };
+      const current = grouped.get(key) ?? { id: order.customer_id || undefined, name: order.client_name, code: order.client_code, phone: order.phone, email: "", address: "", source: order.source_person, old: order.old_balance, totalOrders: 0, paid: 0, remaining: 0, net: 0, orders: [] };
+      if (!current.id && order.customer_id) current.id = order.customer_id;
       current.totalOrders += 1;
       current.paid += order.paid;
       current.remaining += order.remaining;
@@ -8613,28 +8614,23 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, parties 
       {orderNo.trim() && orderLookup && !orderLookup.found && (
         <p className="cf-note tab-confirm-error">لا يوجد أوردر بهذا الرقم.</p>
       )}
+      {orderLookup?.found && orderLookup.order && onOrderClick && customers.some(customer => (customer.code || customer.phone || customer.name) === orderLookup.key) && (
+        <p className="cf-note"><button type="button" className="primary-btn compact" onClick={() => onOrderClick(orderLookup.order!.id)}>فتح الأوردر {orderLookup.order.order_number}</button></p>
+      )}
       <div className="table-wrap accounts-table customers-filter-table">
         <table>
-          <thead><tr>{["اسم العميل", "كود العميل", "طرف", "رقم الهاتف", "المديونية", "الإجراءات"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
+          <thead><tr>{["اسم العميل", "كود العميل", "طرف", "رقم الهاتف", "المديونية"].map((head) => <th key={head}>{head}</th>)}</tr></thead>
           <tbody>
             {customers.length === 0 && (
-              <tr><td colSpan={6} className="muted" style={{ textAlign: "center" }}>{hasFilters ? "لا يوجد عملاء مطابقون للفلاتر." : "لا يوجد عملاء."}</td></tr>
+              <tr><td colSpan={5} className="muted" style={{ textAlign: "center" }}>{hasFilters ? "لا يوجد عملاء مطابقون للفلاتر." : "لا يوجد عملاء."}</td></tr>
             )}
             {customers.map((customer) => (
               <tr key={customer.code || customer.phone || customer.name}>
-                <td>{onCustomerClick ? <button type="button" className="cd-client-link" onClick={() => onCustomerClick(customer.id || "", customer.name)}>{customer.name}</button> : customer.name}</td>
+                <td>{customer.id && canAccessView(session, "customerLedger") ? <a className="cd-client-link cf-customer-link" href={`#customerLedger/${encodeURIComponent(customer.id)}`} onClick={onCustomerClick ? (event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); onCustomerClick(customer.id!, customer.name); } : undefined}>{customer.name}</a> : customer.name}</td>
                 <td>{customer.code || "—"}</td>
                 <td>{customer.source || "—"}</td>
                 <td dir="ltr" style={{ textAlign: "right" }}>{customer.phone || "—"}</td>
                 <td className={customer.net > 0 ? "cf-debt" : undefined}>{formatMoney(customer.net)}</td>
-                <td>
-                  <div className="settings-row-actions">
-                    {onCustomerClick && <button type="button" className="ghost-btn compact" onClick={() => onCustomerClick(customer.code, customer.name)}>فتح</button>}
-                    {orderLookup?.found && onOrderClick && (customer.code || customer.phone || customer.name) === orderLookup.key && (
-                      <button type="button" className="primary-btn compact" onClick={() => orderLookup.order && onOrderClick(orderLookup.order.id)}>فتح الأوردر {orderLookup.order?.order_number}</button>
-                    )}
-                  </div>
-                </td>
               </tr>
             ))}
           </tbody>
@@ -10301,8 +10297,6 @@ function ZunionApp() {
         id: "customers", label: "العملاء", visible: true, icon: Users,
         children: [
           { id: "customers", label: "جميع العملاء", visible: true, icon: Users },
-          { id: "customers", label: "بحث خاص بالعملاء", visible: true, icon: Search },
-          { id: "customerLedger", label: "حساب العميل", visible: true, icon: Landmark },
         ],
       },
       { id: "machineDist", label: "توزيع المكن", visible: false, icon: LayoutGrid },
