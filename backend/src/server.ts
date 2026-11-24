@@ -25,7 +25,7 @@ import { SEED_USERS, SEED_PASSWORD } from "./seeds.js";
 import { ensureSeededUsers } from "./seed.js";
 import { ensureSchema } from "./ensureSchema.js";
 import { financeChanged, notificationsFor, orderChanged, readAllNotifications, readNotification, staffChanged } from "./notifications.js";
-import { completeProductionOrder } from "./productionCompletion.js";
+import { readProductionQueue, saveProductionQueue, completeProductionOrder } from "./productionCompletion.js";
 
 const app = express();
 fs.mkdirSync(config.uploadDir, { recursive: true });
@@ -42,6 +42,11 @@ app.use(cookieParser());
 const serviceRoutedPrefixes = [
   "/auth",
   "/orders",
+  "/production",
+  "/workers",
+  "/settings",
+  "/account-ledger",
+  "/account-balances",
   "/customers",
   "/customer-accounts",
   "/products",
@@ -68,11 +73,13 @@ app.use((req, _res, next) => {
 
 app.get("/api/health", async (_req, res) => {
   let dbStatus: string;
+  let productionSchema = "unavailable";
   if (!config.databaseConfigured) {
     dbStatus = "not_configured";
   } else {
     try {
-      await query("select 1");
+      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready");
+      productionSchema = schema.rows[0]?.ready ? "ready" : "pending";
       dbStatus = "ok";
     } catch (error) {
       dbStatus = error instanceof Error ? error.message : "error";
@@ -81,6 +88,7 @@ app.get("/api/health", async (_req, res) => {
   res.status(200).json({
     ok: true,
     db: dbStatus,
+    productionSchema,
     email: config.resend.apiKey ? "configured" : "not_configured",
     time: new Date().toISOString(),
   });
@@ -585,11 +593,16 @@ function appSessionHasPermission(session: AppSession | null, permission: Permiss
   return Array.isArray(session.permissions) && session.permissions.includes(permission);
 }
 
-function canReadOrderRecord(req: express.Request, order: { work_stage?: unknown; draft?: unknown }) {
+async function canReadOrderRecord(req: express.Request, order: { id?: unknown; work_stage?: unknown; draft?: unknown }) {
   const session = loadAppSessionCookie(req);
   if (!session) return false;
   const stage = String(order.work_stage ?? "");
-  if (session.role === "Worker") return stage === "operation" && appSessionHasPermission(session, "operation.view");
+  if (session.role === "Worker") {
+    if (!appSessionHasPermission(session, "operation.view") || order.draft) return false;
+    if (stage === "operation") return true;
+    const completed = await query("select 1 from production_stage_completions where order_id=$1 limit 1", [order.id]);
+    return completed.rows.length > 0;
+  }
   if (session.role === "Finish" || session.role === "Finishing") return stage === "finishing" && appSessionHasPermission(session, "finishing.view");
   return appSessionHasPermission(session, "orders.view")
     || (stage === "operation" && appSessionHasPermission(session, "operation.view"))
@@ -1566,7 +1579,7 @@ app.get("/api/orders/:id", requireAuth, async (req, res) => {
   const id = param(req.params.id);
   const order = await loadOrder(id);
   if (!order) return res.status(404).json({ message: "Order not found" });
-  if (!canReadOrderRecord(req, order)) return res.status(403).json({ message: "Forbidden" });
+  if (!await canReadOrderRecord(req, order)) return res.status(403).json({ message: "Forbidden" });
   const files = await query("select id, file_type, original_name, mime_type, size, created_at from order_files where order_id=$1 order by created_at desc", [id]);
   res.json({ order: stripFinancial(order, req.user!.role), files: files.rows });
 });
@@ -1584,7 +1597,7 @@ app.get("/api/orders/:id/details", requireAuth, async (req, res) => {
   const id = param(req.params.id);
   const order = await loadOrder(id);
   if (!order) return res.status(404).json({ message: "Order not found" });
-  if (!canReadOrderRecord(req, order)) return res.status(403).json({ message: "Forbidden" });
+  if (!await canReadOrderRecord(req, order)) return res.status(403).json({ message: "Forbidden" });
   const files = await query("select id, file_type, original_name, mime_type, size, created_at from order_files where order_id=$1 order by created_at desc", [id]);
   let customer = null;
   if (order.customer_id) {
@@ -1597,9 +1610,9 @@ app.get("/api/orders/:id/details", requireAuth, async (req, res) => {
   );
   res.json({
     order: stripFinancial(order, req.user!.role),
-    customer,
+    customer: canSeeFinancials(req.user!.role) ? customer : customer ? { id: customer.id, name: customer.name, code: customer.code, phone: customer.phone, source_party: customer.source_party } : null,
     files: files.rows,
-    activity: activity.rows,
+    activity: canSeeFinancials(req.user!.role) ? activity.rows : activity.rows.map(({old_value_json, new_value_json, ...entry}) => entry),
   });
 });
 
@@ -1794,10 +1807,49 @@ app.patch("/api/orders/:id/printing", requireAuth, requireRole("Master", "Helper
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });
 
-app.patch("/api/orders/:id/complete-production", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+function requireProductionPermission(action: "operation.view" | "operation.update") {
+ return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (!appSessionHasPermission(loadAppSessionCookie(req), action)) return res.status(403).json({message:"ليست لديك صلاحية التشغيل المطلوبة"});
+  next();
+ };
+}
+app.get("/api/production/:stage/queue", requireAuth, requireProductionPermission("operation.view"), async(req,res)=>{
+ const stage=param(req.params.stage);
+ if(stage!=="printing" && stage!=="sewing") return res.sendStatus(400);
+ res.json(await readProductionQueue(stage));
+});
+app.put("/api/production/:stage/queue", requireAuth, requireProductionPermission("operation.update"), async(req,res)=>{
+ const stage=param(req.params.stage);
+ if(stage!=="printing" && stage!=="sewing") return res.sendStatus(400);
+ const parsed=z.object({ids:z.array(z.uuid()).max(10000),revision:z.number().int().nonnegative()}).safeParse(req.body);
+ if(!parsed.success) return res.sendStatus(400);
+ const saved=await saveProductionQueue(stage,parsed.data.ids,parsed.data.revision,req.user!);
+ if(!saved) return res.status(409).json({message:"تغير الطابور بواسطة مستخدم آخر. أعد التحميل ثم رتب من جديد."});
+ res.json(await readProductionQueue(stage));
+});
+app.get("/api/production/:stage/archive", requireAuth, requireProductionPermission("operation.view"), async(req,res)=>{
+ const stage=param(req.params.stage);
+ if(!["embroidery","printing","sewing"].includes(stage)) return res.sendStatus(400);
+ const {rows}=await query(`
+    select order_id,stage,completed_at,worker_name,priority,snapshot from production_stage_completions where stage=$1
+    union all
+    select o.id,$1::text,null::timestamptz,
+      case $1 when 'embroidery' then o.worker_name when 'printing' then o.printing_worker else o.sewing_worker end,
+      null::integer,jsonb_build_object('order_number',o.order_number,'customer_name_snapshot',o.customer_name_snapshot,
+      'source_party',o.source_party,'type',o.type,'color',o.color,'quantity',o.quantity,'delivery_date',o.delivery_date,
+      'logo',(select string_agg(i.logo_place,'، ') from order_items i where i.order_id=o.id))
+    from orders o where not o.draft and o.work_stage in ('finishing','completed')
+      and (($1='printing' and o.printing_status='done') or ($1='sewing' and o.sewing_status='done')
+        or ($1='embroidery' and o.type='تطريز' and exists(select 1 from audit_logs a where a.entity_id=o.id
+          and a.entity_type='orders' and a.new_value_json->>'status'='WORKER_DONE')))
+      and not exists(select 1 from production_stage_completions c where c.order_id=o.id and c.stage=$1)
+    order by completed_at desc nulls last`,[stage]);
+ res.json({completions:rows});
+});
+app.patch("/api/orders/:id/complete-production", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
   const id = param(req.params.id);
   const stage = req.body?.stage;
-  if (stage !== "sewing" && stage !== "printing") return res.status(400).json({ message: "مرحلة التشغيل غير صحيحة" });
+  if (stage !== "embroidery" && stage !== "sewing" && stage !== "printing") return res.status(400).json({ message: "مرحلة التشغيل غير صحيحة" });
   const result = await completeProductionOrder(id, stage, req.user!.id);
   if (result.outcome === "missing") return res.status(404).json({ message: "الأوردر غير موجود" });
   if (result.outcome === "wrong-type") return res.status(400).json({ message: "الأوردر لا ينتمي إلى هذه المرحلة" });
@@ -1805,8 +1857,6 @@ app.patch("/api/orders/:id/complete-production", requireAuth, requireRole("Maste
   if (result.outcome === "ineligible") return res.status(409).json({ message: "هذا الأوردر لم يعد متاحاً في هذه المرحلة" });
   if (result.outcome === "already-transferred") return res.json({ ok: true, alreadyTransferred: true, order: stripFinancial(result.current, req.user!.role) });
   await tryNotify(() => orderChanged(result.previous, result.current));
-  try { await audit(req.user!, "PRODUCTION_COMPLETED", "orders", id, { work_stage: result.previous.work_stage, [result.statusColumn]: result.previous[result.statusColumn] }, { work_stage: "finishing", [result.statusColumn]: "done" }); }
-  catch (error) { console.error("Production completion audit failed", error); }
   res.json({ ok: true, order: stripFinancial(result.current, req.user!.role) });
 });
 
@@ -1866,7 +1916,7 @@ app.get("/api/workers", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/workers", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.post("/api/workers", requireAuth, requireRole("Master"), async (req, res) => {
   const parsed = workerCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "بيانات العامل غير صالحة", issues: parsed.error.issues });
   const { name, department, card_id, phone } = parsed.data;
@@ -1889,7 +1939,7 @@ app.post("/api/workers", requireAuth, requireRole("Master", "Helper", "Operator"
   res.json({ worker: rows[0] });
 });
 
-app.patch("/api/workers/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.patch("/api/workers/:id", requireAuth, requireRole("Master"), async (req, res) => {
   const id = param(req.params.id);
   const parsed = workerUpdateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "بيانات العامل غير صالحة", issues: parsed.error.issues });
@@ -1912,29 +1962,13 @@ app.patch("/api/workers/:id", requireAuth, requireRole("Master", "Helper", "Oper
   res.json({ worker: rows[0] });
 });
 
-app.delete("/api/workers/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.delete("/api/workers/:id", requireAuth, requireRole("Master"), async (req, res) => {
   const id = param(req.params.id);
   const found = await query<{ id: string; name: string; active: boolean }>(`select id, name, active from workers where id = $1`, [id]);
   if (!found.rows[0]) return res.status(404).json({ message: "Worker not found" });
-  const name = found.rows[0].name;
-  const assignment = await query<{ has: boolean }>(`
-    select exists(
-      select 1 from orders o
-      where (o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower($1))
-         or (o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower($1))
-         or (o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower($1))
-         or (o.worker_name is not null and trim(coalesce(o.worker_name, '')) <> '' and lower(o.worker_name) = lower($1))
-         or exists (select 1 from jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) n where trim(coalesce(n, '')) <> '' and lower(n) = lower($1))
-    ) as has
-  `, [name]);
-  if (assignment.rows[0]?.has) {
-    const { rows } = await query(`update workers set active = false, updated_by = $1 where id = $2 returning id, name, active, department, card_id, phone, created_at`, [req.user!.id, id]);
-    await audit(req.user!, "WORKER_DEACTIVATED", "workers", id, { active: true }, { active: false });
-    return res.json({ worker: rows[0], deactivated: true });
-  }
-  await query(`delete from workers where id = $1`, [id]);
-  await audit(req.user!, "WORKER_DELETED", "workers", id, found.rows[0], undefined);
-  res.json({ worker: found.rows[0], deleted: true });
+  const {rows}=await query("update workers set active=false,updated_by=$1 where id=$2 returning *",[req.user!.id,id]);
+  await audit(req.user!,"WORKER_DEACTIVATED","workers",id,found.rows[0],rows[0]);
+  res.json({worker:rows[0],deactivated:true});
 });
 
 // ---------------------------------------------------------------------------
@@ -2017,6 +2051,14 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
     (role === "Worker" && ["WORKER_STARTED", "WORKER_DONE"].includes(parsed.data.status)) ||
     (role === "Finish" && ["FINISH_STARTED", "FINISH_DONE", "READY"].includes(parsed.data.status));
   if (!allowed) return res.status(403).json({ message: "Forbidden status transition" });
+  if (parsed.data.status === "WORKER_DONE") {
+    if (!appSessionHasPermission(loadAppSessionCookie(req), "operation.update")) return res.sendStatus(403);
+    const stage = ["طباعه","طباعة"].includes(String(oldOrder.type)) ? "printing" : ["خياطه","خياطة"].includes(String(oldOrder.type)) ? "sewing" : "embroidery";
+    const result = await completeProductionOrder(id, stage, req.user!.id);
+    if (result.outcome !== "transferred" && result.outcome !== "already-transferred") return res.status(409).json({message:"الأوردر غير مؤهل لإنهاء المرحلة"});
+    if (result.outcome === "transferred") await tryNotify(() => orderChanged(result.previous, result.current));
+    return res.json({ok:true});
+  }
   await query(
     `update orders set status=$1, work_stage=$2, production_notes=coalesce($3, production_notes), finishing_notes=coalesce($4, finishing_notes),
      damaged_pieces=coalesce($5, damaged_pieces), updated_by=$6 where id=$7`,

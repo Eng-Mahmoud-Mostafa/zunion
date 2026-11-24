@@ -111,6 +111,10 @@ try {
   await cdp.send("Page.navigate", { url: `${base}/?direct=c1&role=Operator` });
   await wait("!!document.querySelector('.cl-stat')");
   assert.equal(await page("[...document.querySelectorAll('.cl-outline-btn')].find(el=>el.textContent.includes('فتح حساب')).getAttribute('aria-disabled')"), "true");
+  await page(`(() => {const cells=document.querySelector('.cl-table tbody tr')?.cells;if(cells){cells[0].textContent='مستخدم طويل الاسم English Administrator';cells[2].textContent='26-9-15-266868';cells[8].textContent='123,456,789.99';cells[10].textContent='987,654,321.99';}})()`);
+  await cdp.send("Emulation.setPageScaleFactor", {pageScaleFactor:1.25});
+  assert.equal(await page("document.documentElement.scrollWidth <= window.innerWidth"), true);
+  await cdp.send("Emulation.setPageScaleFactor", {pageScaleFactor:1});
   await cdp.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   await sleep(250);
   assert.equal(await page("document.documentElement.scrollWidth <= window.innerWidth"), true);

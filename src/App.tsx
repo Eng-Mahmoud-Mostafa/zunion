@@ -1,3 +1,4 @@
+import ProductionTools, { useProductionQueue } from "./components/ProductionTools";
 ﻿import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import QRCode from "qrcode";
@@ -6936,6 +6937,10 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [cellSaving, setCellSaving] = useState<Record<string, boolean>>({});
   const completingProductionRef = useRef<Set<string>>(new Set());
   const [cellError, setCellError] = useState<Record<string, string>>({});
+  const [queueRefresh, setQueueRefresh] = useState(0);
+  const productionStage = queue === "worker" ? "embroidery" : queue === "printing" || queue === "sewing" ? queue : undefined;
+  const savedQueue = useProductionQueue(productionStage, queueRefresh);
+  const priorityRank = (id: string) => { const index = savedQueue.ids.indexOf(id); return index < 0 ? Number.MAX_SAFE_INTEGER : index; };
   const [workerEditId, setWorkerEditId] = useState<string | null>(null);
   const [problemEditId, setProblemEditId] = useState<string | null>(null);
   const [problemDraft, setProblemDraft] = useState("");
@@ -6962,7 +6967,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [finishingLoading, setFinishingLoading] = useState(false);
   const [finishingError, setFinishingError] = useState("");
   const wsWrapRef = useRef<HTMLDivElement | null>(null);
-  const canManageWorkers = ["Master", "Helper", "Operator", "Supervisor"].includes(session.role);
+  const canManageWorkers = false;
   // Non-blocking success toast (e.g. after إنهاء in التشغيل); auto-dismisses.
   const [toast, setToast] = useState<string>("");
   useEffect(() => {
@@ -6992,6 +6997,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       setOrders((current) => current.map((order) => order.id === id
         ? { ...applyBackendStatus(order, "WORKER_DONE"), [stage === "sewing" ? "sewing_status" : "printing_status"]: "done" }
         : order));
+      setQueueRefresh(value => value + 1);
       onFinished?.(id);
       setToast("تم إنهاء التشغيل وتحويل الأوردر إلى التشطيب بنجاح");
     }).catch(() => {
@@ -7297,85 +7303,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     setWorkersFeedback("");
   }
 
-  function openWorkerForm(worker?: WorkerRecord) {
-    setWorkersError("");
-    setWorkersFeedback("");
-    setWorkerForm(worker
-      ? { id: worker.id, name: worker.name, card_id: worker.card_id, phone: worker.phone }
-      : { id: null, name: "", card_id: "", phone: "" });
-  }
-
-  function saveWorkerForm(): Promise<boolean> {
-    if (!workerForm || !workersDept || workersSaving) return Promise.resolve(false);
-    const name = workerForm.name.trim();
-    const card_id = workerForm.card_id.trim();
-    const phone = workerForm.phone.trim();
-    if (!name) { setWorkersError("اسم العامل مطلوب"); return Promise.resolve(false); }
-    if (!card_id) { setWorkersError("رقم البطاقة مطلوب"); return Promise.resolve(false); }
-    if (!phone) { setWorkersError("رقم التليفون مطلوب"); return Promise.resolve(false); }
-    setWorkersSaving(true);
-    setWorkersError("");
-    setWorkersFeedback("");
-    const request = workerForm.id
-      ? backendJson<{ worker: WorkerRecord }>(`/api/workers/${encodeURIComponent(workerForm.id)}`, {
-          method: "PATCH",
-          body: JSON.stringify({ name, card_id, phone, department: workersDept }),
-        })
-      : backendJson<{ worker: WorkerRecord }>("/api/workers", {
-          method: "POST",
-          body: JSON.stringify({ name, card_id, phone, department: workersDept }),
-        });
-    return request
-      .then(({ worker }) => {
-        setWorkersSaving(false);
-        const updated = worker.active && worker.department === workersDept;
-        setWorkersRegistry((current) => (updated
-          ? current.some((item) => item.id === worker.id)
-            ? current.map((item) => item.id === worker.id ? worker : item)
-            : [worker, ...current]
-          : current));
-        setWorkersFeedback(workerForm.id ? "تم حفظ بيانات العامل" : "تم إضافة العامل بنجاح");
-        setWorkerForm(null);
-        return true;
-      })
-      .catch((error) => {
-        setWorkersSaving(false);
-        setWorkersError(error instanceof Error ? error.message : "تعذر حفظ بيانات العامل");
-        return false;
-      });
-  }
-
-  // The add/edit form holds values that differ from what is saved.
-  const workerFormDirty = (() => {
-    if (!workerForm) return false;
-    const saved = workerForm.id ? workersRegistry.find((worker) => worker.id === workerForm.id) : null;
-    const base = saved ? { name: saved.name, card_id: saved.card_id, phone: saved.phone } : { name: "", card_id: "", phone: "" };
-    return workerForm.name.trim() !== base.name.trim() || workerForm.card_id.trim() !== String(base.card_id ?? "").trim() || workerForm.phone.trim() !== String(base.phone ?? "").trim();
-  })();
-
-  function removeWorker(worker: WorkerRecord) {
-    if (workersSaving) return;
-    if (!window.confirm(`هل تريد مسح العامل "${worker.name}"؟`)) return;
-    setWorkersSaving(true);
-    setWorkersError("");
-    setWorkersFeedback("");
-    backendJson<{ worker: WorkerRecord; deactivated?: boolean }>(`/api/workers/${encodeURIComponent(worker.id)}`, { method: "DELETE" })
-      .then(({ worker: removed, deactivated }) => {
-        setWorkersSaving(false);
-        if (deactivated) {
-          setWorkersRegistry((current) => current.map((item) => item.id === removed.id ? { ...item, active: false } : item));
-          setWorkersFeedback(`تم تعطيل العامل "${removed.name}" لأنه مسجّل على أوردرات سابقة`);
-        } else {
-          setWorkersRegistry((current) => current.filter((item) => item.id !== removed.id));
-          setWorkersFeedback(`تم مسح العامل "${removed.name}"`);
-        }
-      })
-      .catch((error) => {
-        setWorkersSaving(false);
-        setWorkersError(error instanceof Error ? error.message : "تعذر مسح العامل");
-      });
-  }
-
   function renderSewingSpread() {
     if (sewingLoading && sewingRows.length === 0 && !sewingError) return <LoadingPanel />;
     if (sewingError && sewingRows.length === 0) return <ErrorPanel message={sewingError || "تعذر تحميل البيانات."} />;
@@ -7390,6 +7317,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
         party: shared?.source_person ?? row.party,
       };
     });
+    rows.sort((a,b) => priorityRank(a.id) - priorityRank(b.id));
     const sewingWorkerNames = Array.from(new Set([
       ...workersRegistry.filter((worker) => worker.active).map((worker) => worker.name),
       ...orders.map((order) => order.sewing_worker || ""),
@@ -7435,6 +7363,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     }
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number }> = [
+      { key: "priority", label: "الترتيب", cls: "ws-hd", rowSpan: 2 },
       { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
@@ -7465,9 +7394,10 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={12} />}
+              {rows.length === 0 && <EmptyRow colSpan={13} />}
               {rows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
+                  <td className="ws-priority">{priorityRank(row.id) === Number.MAX_SAFE_INTEGER ? "—" : priorityRank(row.id) + 1}{!!row.sewingWorker && !row.done && <small>جاري التشغيل</small>}</td>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
@@ -7520,7 +7450,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
             </tbody>
           </table>
         </div>
-        <div className="ws-lower">
+        <div className="ws-lower"><ProductionTools stage="sewing" canReorder={hasPermission(session, "operation.update")} onOrderClick={onOrderClick} onSaved={() => setQueueRefresh(value => value + 1)} />{savedQueue.error && <span role="alert">{savedQueue.error}</span>}
           <button type="button" className="ws-workers-open" onClick={() => openWorkersModal("sewing")}>العمال</button>
         </div>
       </div>
@@ -7541,6 +7471,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
         party: shared?.source_person ?? row.party,
       };
     });
+    rows.sort((a,b) => priorityRank(a.id) - priorityRank(b.id));
     const printingWorkerNames = Array.from(new Set([
       ...workersRegistry.filter((worker) => worker.active).map((worker) => worker.name),
       ...orders.map((order) => order.printing_worker || ""),
@@ -7586,6 +7517,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     }
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number }> = [
+      { key: "priority", label: "الترتيب", cls: "ws-hd", rowSpan: 2 },
       { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
@@ -7616,9 +7548,10 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={12} />}
+              {rows.length === 0 && <EmptyRow colSpan={13} />}
               {rows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
+                  <td className="ws-priority">{priorityRank(row.id) === Number.MAX_SAFE_INTEGER ? "—" : priorityRank(row.id) + 1}{!!row.printingWorker && !row.done && <small>جاري التشغيل</small>}</td>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
                   <td className="ws-date">{row.deliveryDate || ""}</td>
                   <td className="ws-num">{onOrderClick ? <button type="button" className="ws-num-text" onClick={() => onOrderClick(row.id)}>{row.orderNumber}</button> : <span className="ws-num-static">{row.orderNumber}</span>}</td>
@@ -7671,7 +7604,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
             </tbody>
           </table>
         </div>
-        <div className="ws-lower">
+        <div className="ws-lower"><ProductionTools stage="printing" canReorder={hasPermission(session, "operation.update")} onOrderClick={onOrderClick} onSaved={() => setQueueRefresh(value => value + 1)} />{savedQueue.error && <span role="alert">{savedQueue.error}</span>}
           <button type="button" className="ws-workers-open" onClick={() => openWorkersModal("printing")}>العمال</button>
         </div>
       </div>
@@ -7773,7 +7706,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={12} />}
+              {rows.length === 0 && <EmptyRow colSpan={13} />}
               {rows.map((row) => (
                 <tr key={row.id} className={highlightOrderId === row.id ? "ws-row-highlight" : undefined} data-order-row-id={row.id}>
                   <td className="ws-user" title={row.addedBy}>{row.addedBy}</td>
@@ -8193,7 +8126,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           </table>
         </div>
         <div className="ws-lower">
-          <button type="button" className="ws-workers-open" onClick={() => openWorkersModal("operation")}>العمال</button>
+          <button type="button" className="ws-workers-open" onClick={() => openWorkersModal("operation")}>العمال</button><ProductionTools stage="embroidery" canReorder={false} onOrderClick={onOrderClick} onSaved={() => setQueueRefresh(value => value + 1)} />
           {onDistribute && (
             <button type="button" className="ws-distribute-btn" onClick={onDistribute}>توزيع مكن</button>
           )}
@@ -8204,86 +8137,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   }
 
   function renderWorkersModal() {
-    if (!workersDept) return null;
-    const departmentWorkers = workersRegistry.filter((worker) => worker.department === workersDept);
-    return (
-      <DraggableDialog
-        dialogClassName="ws-modal ws-management-modal ws-workers-modal"
-        headClassName="ws-modal-head"
-        ariaLabel={`عمال ${workerDepartmentLabel(workersDept)}`}
-        onClose={closeWorkersModal}
-        title={<h2>عمال {workerDepartmentLabel(workersDept)}</h2>}
-        dirty={workerFormDirty}
-        onSave={saveWorkerForm}
-      >
-        <div className="ws-modal-feedback">
-          {workersError && <div className="ws-modal-error">{workersError}</div>}
-          {workersFeedback && <div className="ws-modal-ok">{workersFeedback}</div>}
-        </div>
-        {canManageWorkers && (
-          <div className="ws-workers-toolbar">
-            <button type="button" className="ws-workers-add-btn" disabled={workersSaving || workerForm !== null} onClick={() => openWorkerForm()}>
-              إضافة عامل
-            </button>
-          </div>
-        )}
-        {canManageWorkers && workerForm && (
-          <div className="ws-worker-form">
-            <div className="ws-worker-field">
-              <label>الاسم</label>
-              <input value={workerForm.name} onChange={(event) => setWorkerForm({ ...workerForm, name: event.target.value })} />
-            </div>
-            <div className="ws-worker-field">
-              <label>رقم البطاقة</label>
-              <input type="text" inputMode="numeric" dir="ltr" value={workerForm.card_id} onChange={(event) => setWorkerForm({ ...workerForm, card_id: event.target.value })} />
-            </div>
-            <div className="ws-worker-field">
-              <label>رقم التليفون</label>
-              <input type="text" inputMode="tel" dir="ltr" value={workerForm.phone} onChange={(event) => setWorkerForm({ ...workerForm, phone: event.target.value })} />
-            </div>
-            <div className="ws-worker-form-actions">
-              <button type="button" className="ws-btn-save" disabled={workersSaving} onClick={saveWorkerForm}>
-                {workersSaving ? "جارِ الحفظ…" : "حفظ"}
-              </button>
-              <button type="button" className="ws-btn-cancel" disabled={workersSaving} onClick={() => setWorkerForm(null)}>إلغاء</button>
-            </div>
-          </div>
-        )}
-        <div className="ws-workers-table-wrap">
-          <table className="ws-workers-table">
-            <thead>
-              <tr>
-                <th>الاسم</th>
-                <th>رقم البطاقة</th>
-                <th>رقم التليفون</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {departmentWorkers.length === 0 && (
-                <tr><td colSpan={4} className="ws-workers-empty">لا يوجد عمال بعد</td></tr>
-              )}
-              {departmentWorkers.map((worker) => (
-                <tr key={worker.id} className={worker.active ? undefined : "ws-worker-inactive"}>
-                  <td className="ws-worker-name">{worker.name}{!worker.active && <span className="ws-worker-disabled-badge">معطّل</span>}</td>
-                  <td className="ws-worker-ident" dir="ltr">{worker.card_id || "—"}</td>
-                  <td className="ws-worker-ident" dir="ltr">{worker.phone || "—"}</td>
-                  <td className="ws-worker-actions-cell">
-                    {canManageWorkers && (
-                      <>
-                        <button type="button" className="ws-workers-remove" disabled={workersSaving} onClick={() => openWorkerForm(worker)}>تعديل</button>
-                        <button type="button" className="ws-workers-remove" disabled={workersSaving || !worker.active} onClick={() => removeWorker(worker)}>مسح</button>
-                      </>
-                    )}
-                    {!canManageWorkers && <span className="ws-workers-empty">—</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </DraggableDialog>
-    );
+    return <DraggableDialog dialogClassName="ws-modal" headClassName="ws-modal-head" ariaLabel="العمال" onClose={closeWorkersModal} title={<h2>العمال</h2>}><p>إدارة العمال من الإعدادات ← الأفراد ← العمال</p><ul>{workersRegistry.filter(w => w.department === workersDept).map(w => <li key={w.id}>{w.name} {w.active ? "" : "(متوقف)"}</li>)}</ul></DraggableDialog>;
   }
 
   if (!body) {
@@ -8760,7 +8614,7 @@ function CustomerAccounts({ orders, customers: savedCustomers, session, parties 
             )}
             {customers.map((customer) => (
               <tr key={customer.code || customer.phone || customer.name}>
-                <td>{onCustomerClick ? <button type="button" className="cd-client-link" onClick={() => onCustomerClick(customer.code, customer.name)}>{customer.name}</button> : customer.name}</td>
+                <td>{onCustomerClick ? <button type="button" className="cd-client-link" onClick={() => onCustomerClick(customer.id || "", customer.name)}>{customer.name}</button> : customer.name}</td>
                 <td>{customer.code || "—"}</td>
                 <td>{customer.source || "—"}</td>
                 <td dir="ltr" style={{ textAlign: "right" }}>{customer.phone || "—"}</td>
@@ -10565,7 +10419,7 @@ function ZunionApp() {
         // العملاء opens the customer search/filter page directly; its subpages stay
         // reachable from the sidebar dropdown. Other sections show a card menu.
         if (tab.recordId === "customers") {
-          return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
+          return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} onCustomerClick={(id) => { if (id && canAccessView(session, "customerLedger")) openView("customerLedger", id); }} onOrderClick={onOrderNumberClick} />;
         }
         const section = sidebarItems.find((item) => item.id === tab.recordId);
         if (!section || !section.children?.length) return <ErrorPanel message="القائمة غير متاحة" />;
@@ -10608,7 +10462,7 @@ function ZunionApp() {
       case "archive":
         return <ArchivePage customers={customers} setOrders={setOrders} session={session} setView={(next) => openView(next)} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
       case "customers":
-        return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} onCustomerClick={(code, name) => setCustomerDrawer({ code, name })} onOrderClick={onOrderNumberClick} />;
+        return <CustomerAccounts orders={orders} customers={customers} session={session} setOrders={setOrders} parties={parties} onCustomerClick={(id) => { if (id && canAccessView(session, "customerLedger")) openView("customerLedger", id); }} onOrderClick={onOrderNumberClick} />;
       case "customerLedger":
         return <CustomerLedgerPage customers={customers} parties={parties.filter((item) => item.active).map((item) => item.name)} session={session} initialCustomerId={tab.recordId} onOrderClick={onOrderNumberClick} />;
       case "customerAccounts":

@@ -259,39 +259,12 @@ type PartySelectProps = {
  * additionally sees "أخرى" as the final option which opens the management popup
  * without changing the current selection.
  */
-export function PartySelect({ value, onChange, parties, canManage, onCreate, onUpdate, disabled, placeholder }: PartySelectProps) {
-  const [open, setOpen] = useState(false);
-  const names = activePartyNames(parties);
-  const legacy = value && !isOtherParty(value) && !names.includes(value) ? value : "";
-
-  const onSelectChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const next = event.target.value;
-    if (canManage && next === OTHER_PARTY_NAME) {
-      event.target.value = value;
-      setOpen(true);
-      return;
-    }
-    onChange(next);
-  };
-
-  return (
-    <>
-      <select value={value} onChange={onSelectChange} disabled={disabled}>
-        {(placeholder ?? !value) ? <option value="" disabled hidden>{placeholder ?? "اختر الطرف"}</option> : null}
-        {legacy ? <option value={legacy} disabled>{legacy}</option> : null}
-        {names.map((name) => <option key={name} value={name}>{name}</option>)}
-        {canManage ? <option value={OTHER_PARTY_NAME}>{OTHER_PARTY_NAME}</option> : null}
-      </select>
-      {/* Opening needs canManage; once open, the window stays until it is closed,
-          even if the hosting form switches to read-only after a save. */}
-      {open ? (
-        <PartyModal
-          parties={parties}
-          onCreate={onCreate}
-          onUpdate={onUpdate}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
-    </>
-  );
+export function PartySelect({ value, onChange, parties, disabled, placeholder }: PartySelectProps) {
+ const names = activePartyNames(parties);
+ const legacy = value && !names.includes(value) ? value : "";
+ return <select value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
+ <option value="">{placeholder ?? "اختر الطرف"}</option>
+ {legacy && <option value={legacy}>{legacy}</option>}
+ {names.map((name) => <option key={name} value={name}>{name}</option>)}
+ </select>;
 }

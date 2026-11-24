@@ -1,3 +1,4 @@
+import WorkerManager from "./WorkerManager";
 ﻿import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
@@ -86,7 +87,7 @@ export type SettingsParty = {
   active: boolean;
 };
 
-type SectionId = "overview" | "users" | "roles" | "overrides" | "departments" | "resources" | "parties" | "finance" | "security" | "adminMail";
+type SectionId = "overview" | "users" | "roles" | "departments" | "resources" | "parties" | "finance" | "security" | "adminMail";
 
 /** Minimal structural shapes the host app passes down for browser-only mode. */
 type LocalWorkerInput = { id: string; name: string; active: boolean; department: string; card_id?: string | null; phone?: string | null };
@@ -200,12 +201,10 @@ function localPeriodsFromAudit(entries: LocalAuditEntry[]): PeriodRow[] {
 
 const SECTIONS: Array<{ id: SectionId; label: string; description: string; icon: typeof Users }> = [
   { id: "overview", label: "نظرة عامة", description: "ملخص حالة النظام والإدارة", icon: LayoutDashboard },
-  { id: "users", label: "المستخدمون", description: "إنشاء الحسابات وتعديل البيانات والصلاحيات المخصصة", icon: Users },
+  { id: "users", label: "الأفراد", description: "إنشاء الحسابات وتعديل البيانات والصلاحيات المخصصة", icon: Users },
   { id: "roles", label: "الأدوار والصلاحيات", description: "الأدوار مقارنة بالإعدادات وأي مستخدم يمكنه الوصول", icon: ShieldCheck },
-  { id: "overrides", label: "صلاحيات المستخدمين", description: "منح أو منع صلاحية واحدة لمستخدم محدد", icon: UserCog },
   { id: "departments", label: "الأقسام وقنوات التشغيل", description: "أقسام العمال وقنوات الطابور المستخدمة في التشغيل", icon: Factory },
   { id: "resources", label: "العمال والماكينات", description: "سجل العمال المسجلين والماكينات المعتمدة", icon: Cpu },
-  { id: "parties", label: "إدارة الأطراف", description: "قائمة الأطراف المركزية المستخدمة في كل الشاشات", icon: Wrench },
   { id: "finance", label: "الإعدادات المالية", description: "طرق الدفع والفترات الشهرية المفتوحة", icon: WalletCards },
   { id: "security", label: "الأمان", description: "كلمة المرور، الحسابات النشطة، وسجل الأمان", icon: Lock },
   { id: "adminMail", label: "بريد المسؤول", description: "البريد الذي تصل إليه أكواد استعادة كلمة المرور", icon: Mail },
@@ -552,6 +551,7 @@ function StatusBadge({ status }: { status: "active" | "inactive" }) {
 }
 
 export default function SettingsPage({ username, role, isMaster, useRemoteSettings, permissionGroups, capabilities, accountPanel, localWorkers, localMachines, parties, onCreateParty, onUpdateParty, onAudit }: SettingsPageProps) {
+  const [individualTab, setIndividualTab] = useState("users");
   const [section, setSection] = useState<SectionId>("overview");
   const [query, setQuery] = useState("");
   const [users, setUsers] = useState<SettingsUser[]>(() => loadStoredUsers());
@@ -1239,7 +1239,6 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
       if (!needle) return -1;
       if (id === "users") return filteredUsers.length;
       if (id === "roles") return roles.filter((item) => `${item.name} ${item.description}`.toLowerCase().includes(needle)).length;
-      if (id === "overrides") return users.filter((item) => `${item.username} ${item.fullName}`.toLowerCase().includes(needle)).length;
       if (id === "departments") {
         return [...Object.entries(WORKER_DEPARTMENT_LABELS), ...QUEUE_CHANNELS.map((channel) => [channel.id, channel.label] as [string, string])].filter(([, label]) => label.toLowerCase().includes(needle)).length;
       }
@@ -1610,247 +1609,12 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
     </>
   );
 
-  const renderOverrides = () => {
-    const saving = busy === "override:save";
-    const canEdit = capabilities.managePermissions && !saving;
-    const inheritedSet = selectedOverrideUser ? rolePermissionSet(selectedOverrideUser) : new Set<PermissionKey>();
-    const overrideEffective = selectedOverrideUser ? effectivePermissionsFor({ ...selectedOverrideUser, permissionOverrides: overrideDraft }, roles) : new Set<PermissionKey>();
-    const matchCount = filteredModuleGroups.reduce((total, group) => total + group.rows.length, 0);
-    const selectedRole = roles.find((role) => role.name === selectedOverrideUser?.role) || null;
-
-    return (
-      <section className="settings-card settings-overrides">
-        <div className="settings-card-head settings-overrides-head">
-          <div>
-            <h2>صلاحيات المستخدمين</h2>
-            <p className="muted">صلاحيات مخصصة تطبّق على مستخدم واحد فوق صلاحيات دوره. المنع أقوى من المنح، و«حسب الدور» يرجّع الصلاحية إلى الدور.</p>
-          </div>
-          <div className="settings-overrides-user">
-            <label className="settings-field">
-              <span>اختر المستخدم</span>
-              <div className="settings-combo" ref={userPickerRef}>
-                <button
-                  type="button"
-                  className={`settings-combo-trigger${userPickerOpen ? " open" : ""}`}
-                  onClick={() => setUserPickerOpen((open) => !open)}
-                  aria-expanded={userPickerOpen}
-                  aria-haspopup="listbox"
-                  disabled={!users.length}
-                >
-                  <span className={selectedOverrideUser ? "" : "placeholder"}>
-                    {selectedOverrideUser ? `${selectedOverrideUser.fullName} — ${selectedOverrideUser.username}` : users.length ? "اختر المستخدم" : "لا يوجد مستخدمون"}
-                  </span>
-                  <ChevronDown size={18} />
-                </button>
-                {userPickerOpen ? (
-                  <div className="settings-combo-panel">
-                    <label className="settings-combo-search">
-                      <Search size={16} />
-                      <input autoFocus placeholder="ابحث بالاسم أو اسم المستخدم أو الدور" value={userPickerSearch} onChange={(event) => setUserPickerSearch(event.target.value)} />
-                    </label>
-                    <div className="settings-combo-list">
-                      {pickerUsers.map((item) => (
-                        <button
-                          type="button"
-                          key={item.id}
-                          className={`settings-combo-option${item.id === selectedOverrideUserId ? " active" : ""}`}
-                          onClick={() => switchOverrideUser(item.id)}
-                          role="option"
-                          aria-selected={item.id === selectedOverrideUserId}
-                        >
-                          <span className="settings-combo-option-name">{item.fullName}</span>
-                          <span className="muted">{item.username}</span>
-                          <span className="badge badge-gray">{item.role}</span>
-                        </button>
-                      ))}
-                      {pickerUsers.length === 0 ? <p className="muted settings-combo-empty">لا يوجد مستخدمون مطابقون.</p> : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </label>
-            {selectedOverrideUser ? (
-              <div className="settings-overrides-user-card">
-                <div>
-                  <strong>{selectedOverrideUser.fullName}</strong>
-                  <span className="muted">{selectedOverrideUser.username}</span>
-                </div>
-                <div className="settings-overrides-user-meta">
-                  <span className="badge badge-gray">الدور: {selectedOverrideUser.role}</span>
-                  {selectedRole && !selectedRole.isSystemRole ? <span className="muted">{selectedRole.description || "دور مخصص"}</span> : null}
-                  <span className={selectedOverrideUser.status === "active" ? "badge badge-green" : "badge badge-gray"}>
-                    {selectedOverrideUser.status === "active" ? "نشط" : "موقوف"}
-                  </span>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        {!selectedOverrideUser ? (
-          <EmptyState icon={UserCog} title="اختر مستخدمًا" hint="اختر مستخدمًا من القائمة أعلاه لعرض صلاحياته المخصصة وتعديلها." />
-        ) : (
-          <>
-            <div className="settings-overrides-toolbar">
-              <label className="settings-search settings-search-wide">
-                <Search size={18} />
-                <input
-                  placeholder="بحث عن صلاحية"
-                  value={overrideSearch}
-                  onChange={(event) => setOverrideSearch(event.target.value)}
-                  aria-label="بحث عن صلاحية"
-                />
-                {overrideSearch ? (
-                  <button type="button" className="settings-search-clear" onClick={() => setOverrideSearch("")} aria-label="مسح البحث">
-                    <X size={16} />
-                  </button>
-                ) : null}
-              </label>
-              <div className="settings-overrides-toolbar-meta">
-                <span className="muted">
-                  {overrideSearchActive ? `${matchCount} صلاحية مطابقة` : `${allPermissionKeys.length} صلاحية في ${MODULE_GROUPS.length} أقسام`}
-                </span>
-                {overrideDraft.allow.length || overrideDraft.deny.length ? (
-                  <button type="button" className="ghost-btn compact" onClick={() => { setOverrideDraft({ allow: [], deny: [] }); setOverrideDirty(true); }} disabled={!canEdit}>
-                    مسح كل التخصيصات
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="settings-overrides-table-wrap">
-              <table className="settings-overrides-table">
-                <thead>
-                  <tr>
-                    <th scope="col">الصلاحية</th>
-                    <th scope="col">صلاحية الدور</th>
-                    <th scope="col">التخصيص للمستخدم</th>
-                    <th scope="col">الصلاحية الفعلية</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredModuleGroups.map((group) => {
-                    const open = isOverrideGroupOpen(group.id);
-                    const governedBy = group.governedBy ? MODULE_GROUPS.find((item) => item.id === group.governedBy!.groupId) : null;
-                    return (
-                      <Fragment key={group.id}>
-                        <tr className="settings-overrides-group-row">
-                          <th colSpan={4} scope="colgroup">
-                            <button type="button" className="settings-overrides-group-toggle" onClick={() => toggleOverrideGroup(group.id)} aria-expanded={open}>
-                              <span className="settings-overrides-group-caret">{open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
-                              <span className="settings-overrides-group-name">{group.label}</span>
-                              <span className="settings-overrides-group-count">{group.rows.length} صلاحية</span>
-                            </button>
-                            <span className="settings-overrides-group-hint">{group.hint}</span>
-                          </th>
-                        </tr>
-                        {open ? (
-                          group.rows.length ? (
-                            group.rows.map((permission) => {
-                              const inherited = inheritedSet.has(permission);
-                              const allowed = overrideDraft.allow.includes(permission);
-                              const denied = overrideDraft.deny.includes(permission);
-                              const mode: "inherit" | "allow" | "deny" = denied ? "deny" : allowed ? "allow" : "inherit";
-                              const effective = denied ? false : allowed ? true : inherited;
-                              return (
-                                <tr key={permission} className="settings-overrides-row">
-                                  <th scope="row" className="settings-overrides-permission">
-                                    <span className="settings-overrides-permission-name">{PERMISSION_LABELS[permission] || permission}</span>
-                                    <span className="settings-overrides-permission-key">{permission}</span>
-                                  </th>
-                                  <td>
-                                    <span className={`settings-overrides-state ${inherited ? "is-allowed" : "is-denied"}`}>
-                                      {inherited ? <Check size={16} /> : <Ban size={16} />}
-                                      {inherited ? "مسموح" : "غير مسموح"}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    <select
-                                      className={`settings-overrides-select is-${mode}`}
-                                      value={mode}
-                                      disabled={!canEdit}
-                                      aria-label={`تخصيص صلاحية ${PERMISSION_LABELS[permission] || permission}`}
-                                      onChange={(event) => setOverrideMode(permission, event.target.value as "inherit" | "allow" | "deny")}
-                                    >
-                                      <option value="inherit">حسب الدور</option>
-                                      <option value="allow">سماح</option>
-                                      <option value="deny">منع</option>
-                                    </select>
-                                  </td>
-                                  <td>
-                                    <span className={`settings-overrides-state ${effective ? "is-allowed" : "is-denied"}`}>
-                                      {effective ? <Check size={16} /> : <Ban size={16} />}
-                                      {effective ? "مسموح" : "غير مسموح"}
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          ) : (
-                            <tr className="settings-overrides-row settings-overrides-row-note">
-                              <td colSpan={4}>
-                                <p className="muted">{group.hint}</p>
-                                {governedBy ? (
-                                  <button
-                                    type="button"
-                                    className="ghost-btn compact"
-                                    onClick={() => {
-                                      setOverrideSearch("");
-                                      setCollapsedGroups((current) => ({ ...current, [governedBy.id]: false }));
-                                    }}
-                                  >
-                                    عرض صلاحيات {governedBy.label}
-                                  </button>
-                                ) : null}
-                              </td>
-                            </tr>
-                          )
-                        ) : null}
-                      </Fragment>
-                    );
-                  })}
-                  {filteredModuleGroups.length === 0 ? (
-                    <tr className="settings-overrides-row">
-                      <td colSpan={4}>
-                        <EmptyState icon={Search} title="لا توجد صلاحيات مطابقة" hint="جرّب كلمة بحث أخرى أو امسح البحث لعرض كل الصلاحيات." />
-                      </td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="settings-overrides-actionbar">
-              <div className="settings-overrides-status">
-                <span className={`settings-overrides-flag ${overrideDirty ? "is-dirty" : "is-clean"}`}>
-                  {overrideDirty ? "لديك تغييرات غير محفوظة" : "كل التغييرات محفوظة"}
-                </span>
-                <span className="muted">
-                  منح {overrideDraft.allow.length} • منع {overrideDraft.deny.length} • الصلاحيات المتاحة لهذا المستخدم {overrideEffective.size} من {allPermissionKeys.length}
-                </span>
-              </div>
-              <div className="settings-row-actions">
-                <button type="button" className="primary-btn" onClick={resetOverrideDraft} disabled={!overrideDirty || saving}>
-                  <X size={18} />
-                  إلغاء
-                </button>
-                <button type="button" className="primary-btn" onClick={saveOverrides} disabled={!overrideDirty || !canEdit || saving}>
-                  {saving ? <Loader2 size={18} className="spin" /> : <Check size={18} />}
-                  حفظ التغييرات
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-      </section>
-    );
-  };
   const renderParties = () => (
     <section className="settings-card">
       <div className="settings-card-head">
         <div>
           <h2>إدارة الأطراف</h2>
-          <p className="muted">قائمة واحدة للطرف تظهر في كل قوائم الاختيار داخل النظام. «أخرى» إجراء يفتح هذه الإدارة من داخل النماذج ولا يُخزَّن كقيمة. الاسم الفارغ أو المكرر غير مسموح، وإعادة التسمية تُحدّث الطرف في كل الأوردرات والعملاء المرتبطين.</p>
+          <p className="muted">قائمة واحدة للطرف تظهر في كل قوائم الاختيار داخل النظام. الاسم الفارغ أو المكرر غير مسموح، وإعادة التسمية تُحدّث الطرف في كل الأوردرات والعملاء المرتبطين.</p>
         </div>
       </div>
       <PartyManagerPanel
@@ -1934,7 +1698,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
         <div className="settings-card-head">
           <div>
             <h2>العمال والماكينات</h2>
-            <p className="muted">سجلات النظام الفعلية. الإضافة والتعديل تتم من شاشات التشغيل والعمالة.</p>
+            <p className="muted">سجلات النظام الفعلية. إدارة العمال من الأفراد ← العمال.</p>
           </div>
           <button
             type="button"
@@ -2206,12 +1970,12 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
 
   const renderSection = (id: SectionId): ReactNode => {
     if (id === "overview") return renderOverview();
-    if (id === "users") return renderUsers();
+    if (id === "users") return <><div className="settings-row-actions" role="tablist" aria-label="الأفراد">{[["users", "المستخدمون"], ["parties", "الأطراف"], ["workers", "العمال"]].map(([key, label]) => <button key={key} role="tab" aria-selected={individualTab === key} className={individualTab === key ? "primary-btn" : "ghost-btn"} onClick={() => setIndividualTab(key)}>{label}</button>)}</div>{individualTab === "users" ? renderUsers() : individualTab === "parties" ? (isMaster ? renderParties() : <p>إدارة الأطراف متاحة للمسؤول فقط</p>) : <WorkerManager canManage={isMaster} />}</>;
     if (id === "roles") return renderRoles();
-    if (id === "overrides") return renderOverrides();
+
     if (id === "departments") return renderDepartments();
     if (id === "resources") return renderResources();
-    if (id === "parties") return renderParties();
+
     if (id === "finance") return renderFinance();
     if (id === "adminMail") return renderAdminMail();
     return renderSecurity();

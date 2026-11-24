@@ -1,3 +1,4 @@
+import { PRODUCTION_DDL } from "./productionCompletion.js";
 import { query, databaseAvailable } from "./db.js";
 import { schemaSql } from "./schema.js";
 import { PERIOD_DDL } from "./periodStore.js";
@@ -614,6 +615,7 @@ export async function ensureSchema(log: (msg: string) => void = console.log) {
       }
     }
     await syncSchemaDrift(log);
+    await query(PRODUCTION_DDL);
     await reloadPostgrestSchema(log);
   } catch (error) {
     log(`[schema] bootstrap failed: ${error instanceof Error ? error.message : error}`);

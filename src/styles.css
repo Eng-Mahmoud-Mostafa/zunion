@@ -10510,3 +10510,23 @@ a.cl-pill.red:hover { background: #b80f19; }
 .cl-page .cl-pill.sys { white-space: normal; text-align: center; line-height: 1.4; padding: 4px 14px; max-width: 190px; }
 @media (max-width: 900px) { .cl-closing dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .cl-closing dl { grid-template-columns: 1fr; } .cl-transfer-box strong { font-size: 22px; } }
+
+/* Content-driven financial columns; long values remain readable within a scroll area. */
+.cl-page { min-width: 0; max-width: 100%; }
+.cl-page .cl-table { table-layout: auto; min-width: 0; width: 100%; }
+.cl-page .cl-table th, .cl-page .cl-table td { width: auto; min-width: 0; }
+.cl-page .cl-table th { white-space: nowrap; }
+.cl-page .cl-table th:nth-child(1), .cl-page .cl-table th:nth-child(2), .cl-page .cl-table th:nth-child(3),
+.cl-page .cl-table th:nth-child(n+7) { width: 1%; }
+.cl-page .cl-table .cl-user { white-space: normal; overflow-wrap: anywhere; max-width: 14ch; }
+.cl-page .cl-table .cl-num, .cl-page .cl-table .cl-nowrap { white-space: nowrap; }
+.cl-page .cl-table .cl-pill { max-width: none; }
+.production-overlay { position: fixed; inset: 0; z-index: 1300; background: #11182780; display: grid; place-items: center; padding: 1rem; }
+.production-panel { background: white; color: #172033; border-radius: 12px; padding: 1.25rem; width: min(76rem, 100%); max-height: 90vh; overflow: auto; }
+.production-panel .table-wrap { overflow: auto; }
+.production-panel td, .production-panel th { padding: .65em; }
+.production-panel tr[draggable] { cursor: grab; }
+.production-panel a { color: #c41420; white-space: nowrap; }
+.ws-lower { flex-wrap: wrap; gap: .5rem; }
+.ws-priority { white-space: nowrap; font-weight: 700; }
+.ws-priority small { display: block; color: #087044; }
