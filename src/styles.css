@@ -10537,3 +10537,5 @@ a.cl-pill.red:hover { background: #b80f19; }
 .customers-filter-table table { table-layout: auto; }
 .customers-filter-table .cf-customer-link { text-decoration: underline; text-underline-offset: .18em; }
 .customers-filter-table .cf-customer-link:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+
+.settings-page .settings-individual-tabs { margin-block-start: 16px; flex-wrap: nowrap; }

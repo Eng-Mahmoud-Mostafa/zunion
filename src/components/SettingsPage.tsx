@@ -1970,7 +1970,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
 
   const renderSection = (id: SectionId): ReactNode => {
     if (id === "overview") return renderOverview();
-    if (id === "users") return <><div className="settings-row-actions" role="tablist" aria-label="الأفراد">{[["users", "المستخدمون"], ["parties", "الأطراف"], ["workers", "العمال"]].map(([key, label]) => <button key={key} role="tab" aria-selected={individualTab === key} className={individualTab === key ? "primary-btn" : "ghost-btn"} onClick={() => setIndividualTab(key)}>{label}</button>)}</div>{individualTab === "users" ? renderUsers() : individualTab === "parties" ? (isMaster ? renderParties() : <p>إدارة الأطراف متاحة للمسؤول فقط</p>) : <WorkerManager canManage={isMaster} />}</>;
+    if (id === "users") return <><div className="settings-row-actions settings-individual-tabs" role="tablist" aria-label="الأفراد">{[["users", "المستخدمون"], ["parties", "الأطراف"], ["workers", "العمال"]].map(([key, label]) => <button key={key} role="tab" aria-selected={individualTab === key} className={individualTab === key ? "primary-btn" : "ghost-btn"} onClick={() => setIndividualTab(key)}>{label}</button>)}</div>{individualTab === "users" ? renderUsers() : individualTab === "parties" ? (isMaster ? renderParties() : <p>إدارة الأطراف متاحة للمسؤول فقط</p>) : <WorkerManager canManage={isMaster} />}</>;
     if (id === "roles") return renderRoles();
 
     if (id === "departments") return renderDepartments();
