@@ -1816,7 +1816,8 @@ function requireProductionPermission(action: "operation.view" | "operation.updat
 app.get("/api/production/:stage/queue", requireAuth, requireProductionPermission("operation.view"), async(req,res)=>{
  const stage=param(req.params.stage);
  if(stage!=="printing" && stage!=="sewing") return res.sendStatus(400);
- res.json(await readProductionQueue(stage));
+ const queue = await readProductionQueue(stage);
+ res.json({...queue, orders:queue.orders.map(order => stripFinancial(order,req.user!.role))});
 });
 app.put("/api/production/:stage/queue", requireAuth, requireProductionPermission("operation.update"), async(req,res)=>{
  const stage=param(req.params.stage);
@@ -1825,7 +1826,8 @@ app.put("/api/production/:stage/queue", requireAuth, requireProductionPermission
  if(!parsed.success) return res.sendStatus(400);
  const saved=await saveProductionQueue(stage,parsed.data.ids,parsed.data.revision,req.user!);
  if(!saved) return res.status(409).json({message:"تغير الطابور بواسطة مستخدم آخر. أعد التحميل ثم رتب من جديد."});
- res.json(await readProductionQueue(stage));
+ const queue = await readProductionQueue(stage);
+ res.json({...queue, orders:queue.orders.map(order => stripFinancial(order,req.user!.role))});
 });
 app.get("/api/production/:stage/archive", requireAuth, requireProductionPermission("operation.view"), async(req,res)=>{
  const stage=param(req.params.stage);

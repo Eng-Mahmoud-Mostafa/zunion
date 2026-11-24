@@ -30,7 +30,7 @@ export async function lockQueue(client: PoolClient, stage: ProductionKind) {
  return rows[0];
 }
 export async function activeQueue(client: PoolClient, stage: ProductionKind, saved: string[]) {
- const { rows } = await client.query("select id, order_number, customer_name_snapshot, status, printing_worker, sewing_worker, printing_status, sewing_status from orders where type=any($1::text[]) and work_stage in ('new','operation') and draft=false order by created_at,id", [types[stage]]);
+ const { rows } = await client.query("select * from orders where type=any($1::text[]) and work_stage in ('new','operation') and draft=false order by created_at,id", [types[stage]]);
  const ranks = new Map(saved.map((id,i)=>[id,i]));
  return rows.sort((a,b)=>(ranks.get(a.id)??Number.MAX_SAFE_INTEGER)-(ranks.get(b.id)??Number.MAX_SAFE_INTEGER));
 }

@@ -7069,7 +7069,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     let active = true;
     setSewingLoading(true);
     setSewingError("");
-    backendJson<{ orders: Array<Record<string, unknown>> }>(`/api/orders?type=${encodeURIComponent("خياطه")}&draft=false`)
+    backendJson<{ orders: Array<Record<string, unknown>> }>("/api/production/sewing/queue")
       .then((payload) => { if (active) setSewingRows(payload.orders.filter((row) => !["finishing", "completed", "cancelled"].includes(String(row.work_stage ?? ""))).map(sewingRowFromRaw)); })
       .catch((error) => { if (active) setSewingError(error instanceof Error ? error.message : "تعذر تحميل أوردرات الخياطة."); })
       .finally(() => { if (active) setSewingLoading(false); });
@@ -7081,7 +7081,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     let active = true;
     setPrintingLoading(true);
     setPrintingError("");
-    backendJson<{ orders: Array<Record<string, unknown>> }>(`/api/orders?type=${encodeURIComponent("طباعه")}&draft=false`)
+    backendJson<{ orders: Array<Record<string, unknown>> }>("/api/production/printing/queue")
       .then((payload) => { if (active) setPrintingRows(payload.orders.filter((row) => !["finishing", "completed", "cancelled"].includes(String(row.work_stage ?? ""))).map(printingRowFromRaw)); })
       .catch((error) => { if (active) setPrintingError(error instanceof Error ? error.message : "تعذر تحميل أوردرات الطباعة."); })
       .finally(() => { if (active) setPrintingLoading(false); });
