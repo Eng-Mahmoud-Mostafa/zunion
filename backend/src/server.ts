@@ -28,6 +28,11 @@ import { financeChanged, notificationsFor, orderChanged, readAllNotifications, r
 import { readProductionQueue, saveProductionQueue, completeProductionOrder } from "./productionCompletion.js";
 
 const app = express();
+let ready: Promise<void> = Promise.resolve();
+// Export immediately for Vercel; requests wait for the same initialization.
+app.use(async (_req, _res, next) => {
+  try { await ready; next(); } catch (error) { next(error); }
+});
 fs.mkdirSync(config.uploadDir, { recursive: true });
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
@@ -3019,7 +3024,7 @@ app.use((error: unknown, req: express.Request, res: express.Response, _next: exp
   res.status(500).json({ message: config.nodeEnv === "production" ? "تعذر حفظ الأوردر حالياً. حاول مرة أخرى." : message });
 });
 
-async function start() {
+async function initialize() {
   try {
     await ensureSchema();
   } catch (error) {
@@ -3030,6 +3035,12 @@ async function start() {
   } catch (error) {
     console.error("User seeding failed; starting anyway.", error);
   }
-  app.listen(config.port, () => console.log(`Zunion API listening on ${config.port}`));
+}
+function start() {
+  ready = initialize();
+  if (!process.env.VERCEL) void ready.then(() => {
+    app.listen(config.port, () => console.log(`Zunion API listening on ${config.port}`));
+  });
 }
 void start();
+export default app;
