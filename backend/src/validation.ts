@@ -236,7 +236,7 @@ export const machineNameSchema = z.string().trim().min(1).max(120);
 export const machineAssignmentSchema = z.object({
   order_id: z.string().min(1),
   machine_name: machineNameSchema,
-  position: z.number().int().min(1).optional(),
+  position: z.number().int().min(1).max(10000).optional(),
 });
 
 export const machineMoveSchema = z.object({

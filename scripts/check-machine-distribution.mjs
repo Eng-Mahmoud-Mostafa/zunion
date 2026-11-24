@@ -12,7 +12,7 @@ await db.exec(`create table users(id uuid primary key default gen_random_uuid())
 create table orders(id uuid primary key default gen_random_uuid(),type text default 'تطريز',draft boolean default false,work_stage text default 'operation',status text default 'SENT_TO_WORKER',worker_name text default 'عامل الاختبار',printing_worker text,sewing_worker text,printing_status text,sewing_status text,order_number text,customer_name_snapshot text,source_party text,color text,quantity int,delivery_date date,product_name_snapshot text,updated_by uuid,created_at timestamptz default now());
 create table machine_assignments(id uuid primary key default gen_random_uuid(),order_id uuid unique,machine_name text,position int,created_by uuid,updated_by uuid,created_at timestamptz default now(),updated_at timestamptz default now());
 create table order_items(order_id uuid,logo_place text);create table audit_logs(user_id uuid,user_email text,user_role text,action text,entity_type text,entity_id uuid,new_value_json jsonb);`);
-await db.exec(api.PRODUCTION_DDL);
+await db.exec(api.PRODUCTION_DDL);await db.exec(api.MACHINE_SLOT_DDL);await db.exec(api.MACHINE_SLOT_DDL);
 const actor=(await db.query('insert into users default values returning id')).rows[0].id;
 async function order(number,stage='operation',status='SENT_TO_WORKER',type='تطريز',draft=false){return (await db.query('insert into orders(order_number,work_stage,status,type,draft) values($1,$2,$3,$4,$5) returning *',[number,stage,status,type,draft])).rows[0];}
 const first=await order('00041'),second=await order('00042'),waiting=await order('00043'),other=await order('00044');
@@ -46,6 +46,28 @@ const added=await api.appendMachineAssignment(other.id,'مكنة 1',actor,1);ass
 const reload=await api.machineDistributionSnapshot();assert.ok(!reload.orders.some(o=>o.id===first.id));assert.ok(!reload.assignments.some(a=>a.order_id===first.id));assert.equal((await api.readProductionQueue('embroidery')).orders.some(o=>o.id===first.id),false);
 const rows=(await db.query('select * from machine_assignments order by id')).rows;
 for(const old of historical)assert.deepEqual(rows.find(row=>row.id===old.id),old);
-assert.equal((await db.query('select count(*)::int n from orders')).rows[0].n,13);
+const beforeSlots=(await db.query('select * from machine_assignments order by id')).rows;
+const slotA=await order('slot-a'),slotB=await order('slot-b'),slotC=await order('slot-c'),raceA=await order('race-a'),raceB=await order('race-b');
+const explicit=await api.appendMachineAssignment(slotA.id,'swf',actor,2);assert.equal(explicit.position,2);
+await api.appendMachineAssignment(slotB.id,'tajima',actor,3);
+await api.appendMachineAssignment(slotC.id,'swf',actor,1);
+let slots=(await api.machineDistributionSnapshot()).assignments;
+assert.equal(slots.find(a=>a.order_id===slotA.id).position,2,'inserting into empty slot does not shift slot 2');
+assert.equal(slots.find(a=>a.order_id===slotB.id).position,3,'clicked later slot is retained on reload');
+const races=await Promise.allSettled([api.appendMachineAssignment(raceA.id,'swf',actor,3),api.appendMachineAssignment(raceB.id,'swf',actor,3)]);
+assert.equal(races.filter(r=>r.status==='fulfilled').length,1);
+assert.equal(races.find(r=>r.status==='rejected').reason.code,'ZUNION_SLOT_OCCUPIED');
+const loser=races[0].status==='rejected'?raceA:raceB;
+await assert.rejects(api.appendMachineAssignment(loser.id,'swf',actor,0),{code:'ZUNION_BAD_POSITION'});
+await api.appendMachineAssignment(loser.id,'tajima',actor,2);
+slots=(await api.machineDistributionSnapshot()).assignments;
+assert.equal(slots.find(a=>a.order_id===slotB.id).position,3,'retry at another empty slot preserves existing assignments');
+for(const row of beforeSlots)assert.deepEqual((await db.query('select * from machine_assignments where id=$1',[row.id])).rows[0],row,'other machines unchanged');
+await api.completeProductionOrder(slotC.id,'embroidery',actor);
+slots=(await api.machineDistributionSnapshot()).assignments;
+assert.deepEqual(slots.filter(a=>a.machine_name==='swf').map(a=>a.position),[1,2],'completion still compacts its machine');
+assert.deepEqual(slots.filter(a=>a.machine_name==='tajima').map(a=>a.position),[2,3],'completion does not shift other machines');
+assert.equal((await db.query('select count(*)::int n from orders')).rows[0].n,18);
+console.log('PASS exact clicked slots across machines, intentional gaps, no shifting, concurrent slot conflict, safe retry and completion compaction.');
 console.log('PASS eligibility across stages/statuses/history; safe reconciliation; atomic duplicate prevention; completion/archive/finishing; retained assignments; compact positions; stale write rejection; movement; new slots; cross-session persisted refresh.');
 } finally {await db.close();}

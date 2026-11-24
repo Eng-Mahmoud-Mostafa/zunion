@@ -1,3 +1,4 @@
+import { MACHINE_SLOT_DDL } from "./machineAssignments.js";
 import { PRODUCTION_DDL } from "./productionCompletion.js";
 import { query, databaseAvailable } from "./db.js";
 import { schemaSql } from "./schema.js";
@@ -616,6 +617,7 @@ export async function ensureSchema(log: (msg: string) => void = console.log) {
     }
     await syncSchemaDrift(log);
     await query(PRODUCTION_DDL);
+    await query(MACHINE_SLOT_DDL);
     await reloadPostgrestSchema(log);
   } catch (error) {
     log(`[schema] bootstrap failed: ${error instanceof Error ? error.message : error}`);

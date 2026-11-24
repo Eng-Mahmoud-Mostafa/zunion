@@ -1,5 +1,5 @@
 import { ACTIVE_EMBROIDERY_SQL } from "./embroideryEligibility.js";
-import { activeMachineAssignments } from "./machineAssignments.js";
+import { activeMachineAssignments, compactMachineQueue } from "./machineAssignments.js";
 import { tx } from "./db.js";
 import type { PoolClient } from "pg";
 import type { OrderRecord } from "./notifications.js";
@@ -68,13 +68,15 @@ export async function completeProductionOrder(id: string, stage: ProductionKind,
   const worker=String(previous[stage==="embroidery"?"worker_name":`${stage}_worker`]??"");
   const snapshot: Record<string,unknown>=Object.fromEntries(["order_number","customer_name_snapshot","source_party","type","color","quantity","delivery_date","product_name_snapshot"].map(key=>[key,previous[key]]));
   const logos=await client.query("select logo_place from order_items where order_id=$1",[id]);
+  let completedMachine: string | undefined;
   if (stage === "embroidery") {
     const assignment = (await activeMachineAssignments(client)).find(a=>a.order_id===id);
-    if (assignment) snapshot.machine_assignment = assignment;
+    if (assignment) {snapshot.machine_assignment = assignment;completedMachine=assignment.machine_name;}
   }
   snapshot.logo=logos.rows.map(r=>r.logo_place).filter(Boolean).join("، ");
   await client.query("insert into production_stage_completions(order_id,stage,completed_by,worker_name,priority,snapshot) values($1,$2,$3,$4,$5,$6::jsonb)",[id,stage,userId,worker,active.findIndex(o=>o.id===id)+1,JSON.stringify(snapshot)]);
   const current=(await client.query<OrderRecord>(`update orders set ${stage==="embroidery"?"":""+statusColumn+"='done',"} status='WORKER_DONE',work_stage='finishing',updated_by=$2 where id=$1 returning *`,[id,userId])).rows[0];
+  if (completedMachine) await compactMachineQueue(client,completedMachine);
   await client.query("update production_queues set order_ids=$2::jsonb,revision=revision+1 where stage=$1",[stage,JSON.stringify(active.filter(o=>o.id!==id).map(o=>o.id))]);
   await client.query("insert into audit_logs(user_id,action,entity_type,entity_id,new_value_json) values($1,'PRODUCTION_COMPLETED','orders',$2,$3::jsonb)",[userId,id,JSON.stringify({stage,work_stage:"finishing",worker})]);
   return {outcome:"transferred" as const,previous,current,statusColumn};

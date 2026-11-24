@@ -75,12 +75,14 @@ app.use((req, _res, next) => {
 app.get("/api/health", async (_req, res) => {
   let dbStatus: string;
   let productionSchema = "unavailable";
+  let machineSlots = false;
   if (!config.databaseConfigured) {
     dbStatus = "not_configured";
   } else {
     try {
-      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready");
+      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready, exists(select 1 from information_schema.columns where table_schema='public' and table_name='machine_assignments' and column_name='queue_position') as machine_slots");
       productionSchema = schema.rows[0]?.ready ? "ready" : "pending";
+      machineSlots = schema.rows[0]?.machine_slots === true;
       dbStatus = "ok";
     } catch (error) {
       dbStatus = error instanceof Error ? error.message : "error";
@@ -90,6 +92,7 @@ app.get("/api/health", async (_req, res) => {
     ok: true,
     db: dbStatus,
     productionSchema,
+    machineSlots,
     email: config.resend.apiKey ? "configured" : "not_configured",
     time: new Date().toISOString(),
   });
@@ -2080,16 +2083,19 @@ app.get("/api/machine-assignments", requireAuth, requireProductionPermission("op
 app.post("/api/machine-assignments", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
   const parsed = machineAssignmentSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid machine assignment", issues: parsed.error.issues });
-  const machineIssue = await assertMachineActive(parsed.data.machine_name);
-  if (machineIssue) return res.status(400).json({ message: machineIssue });
+  const targetMachine = await findMachineByName(parsed.data.machine_name);
+  if (!targetMachine) return res.status(400).json({message:"هذه المكنة غير مسجلة"});
+  if (!targetMachine.active) return res.status(400).json({message:"هذه المكنة معطّلة ولا يمكن التوزيع عليها"});
   const order = await loadOrder(parsed.data.order_id);
   if (!order) return res.status(404).json({ message: "الأوردر غير موجود" });
   try {
-    const assignment = await appendMachineAssignment(parsed.data.order_id, parsed.data.machine_name, req.user!.id, parsed.data.position);
+    const assignment = await appendMachineAssignment(parsed.data.order_id, targetMachine.name, req.user!.id, parsed.data.position);
     await audit(req.user!, "MACHINE_ASSIGNED", "machine_assignments", assignment.id, undefined, { order_id: assignment.order_id, machine_name: assignment.machine_name, position: assignment.position });
     res.status(201).json({ assignment });
   } catch (error) {
     const code = (error as { code?: string })?.code;
+    if (code === "ZUNION_SLOT_OCCUPIED") return res.status(409).json({message:(error as Error).message});
+    if (code === "ZUNION_BAD_POSITION") return res.status(400).json({message:(error as Error).message});
     if (code === "23505" || code === "ZUNION_ASSIGNED") return res.status(409).json({ message: "هذا الأوردر مخصص لمكنة بالفعل" });
     throw error;
   }

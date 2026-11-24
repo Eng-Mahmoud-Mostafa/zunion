@@ -2,6 +2,8 @@ import { query, tx } from "./db.js";
 import type { PoolClient } from "pg";
 import { ACTIVE_EMBROIDERY_SQL } from "./embroideryEligibility.js";
 
+export const MACHINE_SLOT_DDL = `alter table machine_assignments add column if not exists queue_position integer check (queue_position > 0);`;
+
 export type MachineAssignmentRow = {
   id: string; order_id: string; machine_name: string; position: number;
   created_by: string | null; updated_by: string | null; created_at: string; updated_at: string;
@@ -22,11 +24,11 @@ export async function loadMachineAssignment(id: string): Promise<MachineAssignme
 }
 
 export async function activeMachineAssignments(client: Pick<PoolClient, "query">): Promise<MachineAssignmentRow[]> {
-  // Reconcile stale historical assignments at read time. Nothing is deleted or
-  // rewritten, and gaps left by completed work become sequential active slots.
+  // Legacy rows retain their previous compact queue. Explicit slots preserve the
+  // clicked cell, including intentional gaps. Finished rows remain historical.
   return (await client.query<MachineAssignmentRow>(`
     select a.id,a.order_id,a.machine_name,
-      (row_number() over(partition by a.machine_name order by a.position,a.created_at,a.id))::int as position,
+      coalesce(a.queue_position,(row_number() over(partition by a.machine_name order by a.position,a.created_at,a.id))::int) as position,
       a.created_by,a.updated_by,a.created_at,a.updated_at
     from machine_assignments a join orders o on o.id=a.order_id
     where ${ACTIVE_EMBROIDERY_SQL}
@@ -44,7 +46,18 @@ export async function machineDistributionSnapshot() {
   });
 }
 async function setPositions(client: PoolClient, ids: string[]) {
-  for (let i=0;i<ids.length;i++) await client.query("update machine_assignments set position=$1 where id=$2", [i+1,ids[i]]);
+  for (let i=0;i<ids.length;i++) await client.query("update machine_assignments set position=$1,queue_position=$1 where id=$2", [i+1,ids[i]]);
+}
+
+async function materializeSlots(client: PoolClient, rows: MachineAssignmentRow[]) {
+  // Pin legacy display slots before adding an explicit slot so their positions
+  // cannot change when the fallback window function sees another assignment.
+  for (const row of rows) await client.query("update machine_assignments set queue_position=$1 where id=$2 and queue_position is null",[row.position,row.id]);
+}
+export async function compactMachineQueue(client: PoolClient, machineName: string) {
+  const rows=(await activeMachineAssignments(client)).filter(a=>a.machine_name===machineName);
+  rows.sort((a,b)=>a.position-b.position);
+  await setPositions(client,rows.map(a=>a.id));
 }
 
 export async function appendMachineAssignment(orderId: string, machineName: string, userId: string, position?: number): Promise<MachineAssignmentRow> {
@@ -53,10 +66,15 @@ export async function appendMachineAssignment(orderId: string, machineName: stri
     await assertEligible(client,orderId);
     if ((await client.query("select id from machine_assignments where order_id=$1 limit 1", [orderId])).rows.length)
       throw Object.assign(new Error("هذا الأوردر مخصص لمكنة بالفعل"), { code:"ZUNION_ASSIGNED" });
-    const ids = (await activeMachineAssignments(client)).filter(a=>a.machine_name===machineName).map(a=>a.id);
-    const target = Number.isInteger(position) && position!>=1 && position!<=ids.length+1 ? position! : ids.length+1;
-    const row = (await client.query<MachineAssignmentRow>(`insert into machine_assignments(order_id,machine_name,position,created_by,updated_by) values($1,$2,$3,$4,$4) returning *`,[orderId,machineName,target,userId])).rows[0];
-    ids.splice(target-1,0,row.id); await setPositions(client,ids);
+    const active=(await activeMachineAssignments(client)).filter(a=>a.machine_name===machineName);
+    const next=Math.max(0,...active.map(a=>a.position))+1;
+    const target=position ?? next;
+    if(!Number.isSafeInteger(target) || target<1 || target>10000)
+      throw Object.assign(new Error("موقع الطابور غير صالح"),{code:"ZUNION_BAD_POSITION"});
+    if(active.some(a=>a.position===target))
+      throw Object.assign(new Error("هذا الموقع أصبح مشغولاً. اختر خانة إضافة أخرى ثم أعد الحفظ."),{code:"ZUNION_SLOT_OCCUPIED"});
+    await materializeSlots(client,active);
+    const row = (await client.query<MachineAssignmentRow>(`insert into machine_assignments(order_id,machine_name,position,queue_position,created_by,updated_by) values($1,$2,$3,$3,$4,$4) returning *`,[orderId,machineName,target,userId])).rows[0];
     return row;
   });
 }
@@ -69,9 +87,11 @@ export async function moveMachineAssignment(id: string, machineName: string, use
     const active = await activeMachineAssignments(client);
     if (row.machine_name===machineName) return active.find(a=>a.id===id) ?? null;
     const source = active.filter(a=>a.machine_name===row.machine_name && a.id!==id).map(a=>a.id);
-    const target = active.filter(a=>a.machine_name===machineName).map(a=>a.id);
-    const updated = (await client.query<MachineAssignmentRow>("update machine_assignments set machine_name=$1,position=$2,updated_by=$3 where id=$4 returning *",[machineName,target.length+1,userId,id])).rows[0];
-    await setPositions(client,source); await setPositions(client,[...target,id]);
+    const target = active.filter(a=>a.machine_name===machineName);
+    const position = Math.max(0,...target.map(a=>a.position))+1;
+    await materializeSlots(client,target);
+    const updated = (await client.query<MachineAssignmentRow>("update machine_assignments set machine_name=$1,position=$2,queue_position=$2,updated_by=$3 where id=$4 returning *",[machineName,position,userId,id])).rows[0];
+    await setPositions(client,source);
     return updated;
   });
 }

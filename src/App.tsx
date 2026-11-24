@@ -6384,8 +6384,9 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const unsubscribe = subscribeProductionChanges(({completedOrderId}) => {
       if(completedOrderId) {
         setAssignments(current=>{
-          const counters=new Map<string,number>();
-          return current.filter(a=>a.order_id!==completedOrderId).sort((a,b)=>a.position-b.position).map(a=>{const position=(counters.get(a.machine_name)||0)+1;counters.set(a.machine_name,position);return {...a,position};});
+          const machine=current.find(a=>a.order_id===completedOrderId)?.machine_name;
+          let position=0;
+          return current.filter(a=>a.order_id!==completedOrderId).sort((a,b)=>a.position-b.position).map(a=>a.machine_name===machine?{...a,position:++position}:a);
         });
         setDistributionOrders(current=>current.filter(o=>o.id!==completedOrderId));
         setSelectedOrderId(current=>current===completedOrderId?null:current);
@@ -6406,7 +6407,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const bucket = byMachine[assignment.machine_name];
     if (bucket) bucket.set(Number(assignment.position || 0), assignment);
   }
-  const rowCount = Math.max(3, ...boardMachines.map((machine) => (byMachine[machine]?.size ?? 0)));
+  const rowCount = Math.max(3, ...assignments.map(assignment => Number(assignment.position) + 1));
   const assignedOrderIds = useMemo(() => new Set(assignments.map((a) => a.order_id)), [assignments]);
   const orderById = useMemo(() => new Map(distributionOrders.map((o) => [o.id, o])), [distributionOrders]);
   useEffect(()=>{
@@ -6462,18 +6463,18 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     setErr("");
     setMsg("");
     try {
-      await backendJson<{ assignment: MachineAssignment }>("/api/machine-assignments", {
+      const {assignment} = await backendJson<{ assignment: MachineAssignment }>("/api/machine-assignments", {
         method: "POST",
         body: JSON.stringify({ order_id: selectedOrderId, machine_name: modal.machine, position: modal.position }),
       });
-      const fresh = await backendJson<{ assignments: MachineAssignment[] }>("/api/machine-assignments");
-      setAssignments(fresh.assignments);
+      setAssignments(current => [...current.filter(a=>a.id!==assignment.id),assignment]);
       publishProductionChange();
       setMsg(`تم توزيع الأوردر على ${modal.machine}`);
       setAddModal(null);
       return true;
     } catch (error) {
       setErr(error instanceof Error ? error.message : "تعذر حفظ التوزيع");
+      publishProductionChange();
       return false;
     } finally {
       setBusy(false);
@@ -6724,19 +6725,18 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const eligible = distributionOrders.filter(order => !assignedOrderIds.has(order.id));
     const matches = eligible.filter((order) => !query || order.order_number.includes(query)).slice(0, 20);
     const selectedOrder = eligible.find(order => order.id === selectedOrderId);
-    const positionOptions = modal.machine ? Array.from({ length: (byMachine[modal.machine]?.size ?? 0) + 1 }, (_, index) => index + 1) : [];
     return (
       <DraggableDialog
-        dialogClassName="md-modal"
+        dialogClassName="md-modal md-add-modal"
         headClassName="md-modal-head"
         closeClassName="ws-modal-close md-modal-close"
-        ariaLabel={modal.machine ? `إضافة أوردر إلى ${modal.machine}` : "توزيع أوردر على المكن"}
+        ariaLabel="إضافة أوردر"
         onClose={closeAddModal}
         dirty={Boolean(selectedOrderId)}
         onSave={confirmAdd}
-        title={<h3 className="md-modal-title">{modal.machine ? `إضافة أوردر إلى ${modal.machine}` : "توزيع أوردر على المكن"}</h3>}
+        title={<h3 className="md-modal-title">إضافة أوردر</h3>}
       >
-          <input className="md-search-input" autoFocus placeholder="ابحث برقم الأوردر…" value={searchQuery}
+          <input className="md-search-input" autoFocus aria-label="ابحث برقم الأوردر" placeholder="ابحث برقم الأوردر" value={searchQuery}
             onChange={(e) => { setSearchQuery(e.target.value); setSelectedOrderId(null); }} />
           <div className="md-search-list">
             {matches.length === 0 ? (
@@ -6749,26 +6749,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
               </button>
             ))}
           </div>
-          {selectedOrder && (
-            <div className="md-details">
-              <div>رقم الأوردر: <strong>{selectedOrder.order_number}</strong></div>
-              <div>النوع: <strong>{selectedOrder.order_type || selectedOrder.productName || ""}</strong></div>
-              <div>اسم العميل: <strong>{selectedOrder.client_name}</strong></div>
-            </div>
-          )}
-          <div className="md-field">
-            <label>المكنة:</label>
-            <select value={modal.machine} onChange={(event) => setAddModal((current) => current && current.kind === "add" ? { kind: "add", machine: event.target.value, position: (byMachine[event.target.value]?.size ?? 0) + 1 } : current)}>
-              <option value="">— اختر المكنة —</option>
-              {boardMachines.map((machine) => <option key={machine} value={machine}>{machine}</option>)}
-            </select>
-          </div>
-          <div className="md-field">
-            <label>موقع في الطابور:</label>
-            <select value={String(modal.position)} disabled={!modal.machine} onChange={(event) => setAddModal((current) => current && current.kind === "add" ? { ...current, position: Number(event.target.value) } : current)}>
-              {positionOptions.map((position) => (<option key={position} value={String(position)}>{position}</option>))}
-            </select>
-          </div>
+          {err && <div className="md-status-err" role="alert">{err}</div>}
           <div className="md-modal-actions">
             <button type="button" className="md-btn md-btn-primary" disabled={!selectedOrder || !modal.machine || busy} onClick={confirmAdd}>حفظ</button>
             <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeAddModal}>إلغاء</button>
@@ -6859,7 +6840,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
                     const order = assignment ? orderById.get(assignment.order_id) : undefined;
                     if (assignment && order) {
                       return (
-                        <td key={machine} className="md-cell md-cell-filled" data-assignment-order-id={order.id} onClick={() => openEdit(assignment.id, machine)}>
+                        <td key={machine} className="md-cell md-cell-filled" data-assignment-order-id={order.id} data-machine-name={machine} data-queue-position={position} onClick={() => openEdit(assignment.id, machine)}>
                           <div className="md-cell-lines">
                             <div className="md-line md-line-num">{order.order_number}</div>
                             <div className="md-line">{order.order_type || order.productName || ""}</div>
@@ -6873,7 +6854,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
                       return <td key={machine} className="md-cell md-cell-orphan">—</td>;
                     }
                     return (
-                      <td key={machine} className="md-cell md-cell-empty" onClick={() => openAdd(machine, position)}>
+                      <td key={machine} className="md-cell md-cell-empty" data-machine-name={machine} data-queue-position={position} onClick={() => openAdd(machine, position)}>
                         <span className="md-add-hint">+ إضافة</span>
                       </td>
                     );
