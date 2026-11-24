@@ -1,3 +1,5 @@
+import { ACTIVE_EMBROIDERY_SQL } from "./embroideryEligibility.js";
+import { activeMachineAssignments } from "./machineAssignments.js";
 import { tx } from "./db.js";
 import type { PoolClient } from "pg";
 import type { OrderRecord } from "./notifications.js";
@@ -30,7 +32,9 @@ export async function lockQueue(client: PoolClient, stage: ProductionKind) {
  return rows[0];
 }
 export async function activeQueue(client: PoolClient, stage: ProductionKind, saved: string[]) {
- const { rows } = await client.query("select * from orders where type=any($1::text[]) and work_stage in ('new','operation') and draft=false order by created_at,id", [types[stage]]);
+ const { rows } = stage === "embroidery"
+   ? await client.query(`select o.* from orders o where ${ACTIVE_EMBROIDERY_SQL} order by o.created_at,o.id`)
+   : await client.query("select * from orders where type=any($1::text[]) and work_stage in ('new','operation') and draft=false order by created_at,id", [types[stage]]);
  const ranks = new Map(saved.map((id,i)=>[id,i]));
  return rows.sort((a,b)=>(ranks.get(a.id)??Number.MAX_SAFE_INTEGER)-(ranks.get(b.id)??Number.MAX_SAFE_INTEGER));
 }
@@ -59,10 +63,15 @@ export async function completeProductionOrder(id: string, stage: ProductionKind,
   if(previous.draft) return {outcome:"draft" as const};
   if(!["new","operation"].includes(String(previous.work_stage))) return {outcome:"ineligible" as const};
   const active=await activeQueue(client,stage,queue.order_ids);
+  if (stage === "embroidery" && !active.some(o=>o.id===id)) return {outcome:"ineligible" as const};
   const statusColumn=stage==="embroidery" ? "status" : `${stage}_status`;
   const worker=String(previous[stage==="embroidery"?"worker_name":`${stage}_worker`]??"");
-  const snapshot=Object.fromEntries(["order_number","customer_name_snapshot","source_party","type","color","quantity","delivery_date","product_name_snapshot"].map(key=>[key,previous[key]]));
+  const snapshot: Record<string,unknown>=Object.fromEntries(["order_number","customer_name_snapshot","source_party","type","color","quantity","delivery_date","product_name_snapshot"].map(key=>[key,previous[key]]));
   const logos=await client.query("select logo_place from order_items where order_id=$1",[id]);
+  if (stage === "embroidery") {
+    const assignment = (await activeMachineAssignments(client)).find(a=>a.order_id===id);
+    if (assignment) snapshot.machine_assignment = assignment;
+  }
   snapshot.logo=logos.rows.map(r=>r.logo_place).filter(Boolean).join("، ");
   await client.query("insert into production_stage_completions(order_id,stage,completed_by,worker_name,priority,snapshot) values($1,$2,$3,$4,$5,$6::jsonb)",[id,stage,userId,worker,active.findIndex(o=>o.id===id)+1,JSON.stringify(snapshot)]);
   const current=(await client.query<OrderRecord>(`update orders set ${stage==="embroidery"?"":""+statusColumn+"='done',"} status='WORKER_DONE',work_stage='finishing',updated_by=$2 where id=$1 returning *`,[id,userId])).rows[0];

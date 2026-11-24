@@ -1,114 +1,97 @@
 import { query, tx } from "./db.js";
+import type { PoolClient } from "pg";
+import { ACTIVE_EMBROIDERY_SQL } from "./embroideryEligibility.js";
 
 export type MachineAssignmentRow = {
-  id: string;
-  order_id: string;
-  machine_name: string;
-  position: number;
-  created_by: string | null;
-  updated_by: string | null;
-  created_at: string;
-  updated_at: string;
+  id: string; order_id: string; machine_name: string; position: number;
+  created_by: string | null; updated_by: string | null; created_at: string; updated_at: string;
 };
 
-export async function loadMachineAssignment(id: string): Promise<MachineAssignmentRow | null> {
-  const { rows } = await query<MachineAssignmentRow>("select * from machine_assignments where id=$1", [id]);
-  return rows[0] ?? null;
+// Completion takes the same lock before touching an order. This serializes
+// assignment, movement, ordering and completion across machines and sessions.
+async function lockEmbroidery(client: PoolClient) {
+  await client.query("select stage from production_queues where stage='embroidery' for update");
+}
+async function assertEligible(client: PoolClient, orderId: string) {
+  const { rows } = await client.query(`select o.id from orders o where o.id=$1 and ${ACTIVE_EMBROIDERY_SQL} for update of o`, [orderId]);
+  if (!rows.length) throw Object.assign(new Error("الأوردر لم يعد متاحاً في تشغيل التطريز. حدّث الطابور."), { code: "ZUNION_INELIGIBLE" });
 }
 
-export async function listMachineAssignments(): Promise<MachineAssignmentRow[]> {
-  const { rows } = await query<MachineAssignmentRow>(
-    `select a.id, a.order_id, a.machine_name, a.position, a.created_by, a.updated_by, a.created_at, a.updated_at
-     from machine_assignments a
-     join orders o on o.id = a.order_id
-     order by a.machine_name, a.position`,
-  );
-  return rows;
+export async function loadMachineAssignment(id: string): Promise<MachineAssignmentRow | null> {
+  return (await query<MachineAssignmentRow>("select * from machine_assignments where id=$1", [id])).rows[0] ?? null;
+}
+
+export async function activeMachineAssignments(client: Pick<PoolClient, "query">): Promise<MachineAssignmentRow[]> {
+  // Reconcile stale historical assignments at read time. Nothing is deleted or
+  // rewritten, and gaps left by completed work become sequential active slots.
+  return (await client.query<MachineAssignmentRow>(`
+    select a.id,a.order_id,a.machine_name,
+      (row_number() over(partition by a.machine_name order by a.position,a.created_at,a.id))::int as position,
+      a.created_by,a.updated_by,a.created_at,a.updated_at
+    from machine_assignments a join orders o on o.id=a.order_id
+    where ${ACTIVE_EMBROIDERY_SQL}
+    order by a.machine_name,position`)).rows;
+}
+export async function listMachineAssignments() {
+  return activeMachineAssignments({ query } as Pick<PoolClient, "query">);
+}
+export async function machineDistributionSnapshot() {
+  return tx(async client => {
+    await lockEmbroidery(client);
+    const assignments = await activeMachineAssignments(client);
+    const { rows: orders } = await client.query(`select o.* from orders o where ${ACTIVE_EMBROIDERY_SQL} order by o.created_at,o.id`);
+    return { assignments, orders };
+  });
+}
+async function setPositions(client: PoolClient, ids: string[]) {
+  for (let i=0;i<ids.length;i++) await client.query("update machine_assignments set position=$1 where id=$2", [i+1,ids[i]]);
 }
 
 export async function appendMachineAssignment(orderId: string, machineName: string, userId: string, position?: number): Promise<MachineAssignmentRow> {
-  return tx(async (client) => {
-    const dup = await client.query<{ id: string }>("select id from machine_assignments where order_id=$1 limit 1", [orderId]);
-    if (dup.rows[0]) {
-      throw Object.assign(new Error("هذا الأوردر مخصص لمكنة بالفعل"), { code: "ZUNION_ASSIGNED" });
-    }
-    const max = await client.query<{ max: string | null }>(
-      "select max(position) as max from machine_assignments where machine_name=$1",
-      [machineName],
-    );
-    const next = Math.max(1, Number(max.rows[0]?.max ?? 0) + 1);
-    const target = Number.isInteger(position) && (position as number) >= 1 && (position as number) <= next ? position as number : next;
-    if (target < next) {
-      await client.query(
-        `update machine_assignments set position = position + 1
-         where machine_name=$1 and position >= $2`,
-        [machineName, target],
-      );
-    }
-    const inserted = await client.query<MachineAssignmentRow>(
-      `insert into machine_assignments (order_id, machine_name, position, created_by, updated_by)
-       values ($1,$2,$3,$4,$4) returning *`,
-      [orderId, machineName, target, userId],
-    );
-    return inserted.rows[0];
-  });
-}
-
-export async function moveMachineAssignment(id: string, machineName: string, userId: string): Promise<MachineAssignmentRow | null> {
-  return tx(async (client) => {
-    const current = await client.query<MachineAssignmentRow>("select * from machine_assignments where id=$1", [id]);
-    const row = current.rows[0];
-    if (!row) return null;
-    if (row.machine_name === machineName) return row;
-    await client.query(
-      `update machine_assignments set position = position - 1
-       where machine_name=$1 and position > $2`,
-      [row.machine_name, row.position],
-    );
-    const max = await client.query<{ max: string | null }>(
-      "select max(position) as max from machine_assignments where machine_name=$1",
-      [machineName],
-    );
-    const position = Math.max(1, Number(max.rows[0]?.max ?? 0) + 1);
-    const updated = await client.query<MachineAssignmentRow>(
-      `update machine_assignments set machine_name=$1, position=$2, updated_by=$3 where id=$4 returning *`,
-      [machineName, position, userId, id],
-    );
-    return updated.rows[0] ?? null;
-  });
-}
-
-export async function reorderMachineAssignments(machineName: string, ids: string[]): Promise<number> {
-  return tx(async (client) => {
-    const current = await client.query<{ id: string }>(
-      "select id from machine_assignments where machine_name=$1",
-      [machineName],
-    );
-    const currentIds = new Set(current.rows.map((item) => item.id));
-    if (new Set(ids).size !== ids.length) {
-      throw Object.assign(new Error("لا يمكن تكرار نفس العنصر في الترتيب"), { code: "ZUNION_BAD_REORDER" });
-    }
-    if (ids.length !== currentIds.size || !ids.every((id) => currentIds.has(id))) {
-      throw Object.assign(new Error("بيانات الترتيب غير متطابقة"), { code: "ZUNION_BAD_REORDER" });
-    }
-    for (let index = 0; index < ids.length; index += 1) {
-      await client.query("update machine_assignments set position=$1 where id=$2", [index + 1, ids[index]]);
-    }
-    return ids.length;
-  });
-}
-
-export async function removeMachineAssignment(id: string): Promise<MachineAssignmentRow | null> {
-  return tx(async (client) => {
-    const current = await client.query<MachineAssignmentRow>("select * from machine_assignments where id=$1", [id]);
-    if (!current.rows[0]) return null;
-    const row = current.rows[0];
-    await client.query("delete from machine_assignments where id=$1", [id]);
-    await client.query(
-      `update machine_assignments set position = position - 1
-       where machine_name=$1 and position > $2`,
-      [row.machine_name, row.position],
-    );
+  return tx(async client => {
+    await lockEmbroidery(client);
+    await assertEligible(client,orderId);
+    if ((await client.query("select id from machine_assignments where order_id=$1 limit 1", [orderId])).rows.length)
+      throw Object.assign(new Error("هذا الأوردر مخصص لمكنة بالفعل"), { code:"ZUNION_ASSIGNED" });
+    const ids = (await activeMachineAssignments(client)).filter(a=>a.machine_name===machineName).map(a=>a.id);
+    const target = Number.isInteger(position) && position!>=1 && position!<=ids.length+1 ? position! : ids.length+1;
+    const row = (await client.query<MachineAssignmentRow>(`insert into machine_assignments(order_id,machine_name,position,created_by,updated_by) values($1,$2,$3,$4,$4) returning *`,[orderId,machineName,target,userId])).rows[0];
+    ids.splice(target-1,0,row.id); await setPositions(client,ids);
     return row;
+  });
+}
+export async function moveMachineAssignment(id: string, machineName: string, userId: string): Promise<MachineAssignmentRow | null> {
+  return tx(async client => {
+    await lockEmbroidery(client);
+    const row = (await client.query<MachineAssignmentRow>("select * from machine_assignments where id=$1",[id])).rows[0];
+    if (!row) return null;
+    await assertEligible(client,row.order_id);
+    const active = await activeMachineAssignments(client);
+    if (row.machine_name===machineName) return active.find(a=>a.id===id) ?? null;
+    const source = active.filter(a=>a.machine_name===row.machine_name && a.id!==id).map(a=>a.id);
+    const target = active.filter(a=>a.machine_name===machineName).map(a=>a.id);
+    const updated = (await client.query<MachineAssignmentRow>("update machine_assignments set machine_name=$1,position=$2,updated_by=$3 where id=$4 returning *",[machineName,target.length+1,userId,id])).rows[0];
+    await setPositions(client,source); await setPositions(client,[...target,id]);
+    return updated;
+  });
+}
+export async function reorderMachineAssignments(machineName: string, ids: string[]): Promise<number> {
+  return tx(async client => {
+    await lockEmbroidery(client);
+    const current = (await activeMachineAssignments(client)).filter(a=>a.machine_name===machineName);
+    if(new Set(ids).size!==ids.length || current.length!==ids.length || current.some(a=>!ids.includes(a.id)))
+      throw Object.assign(new Error("تغير طابور المكنة. حدّث البيانات قبل الترتيب."),{code:"ZUNION_BAD_REORDER"});
+    await setPositions(client,ids); return ids.length;
+  });
+}
+export async function removeMachineAssignment(id: string): Promise<MachineAssignmentRow | null> {
+  return tx(async client => {
+    await lockEmbroidery(client);
+    const row = (await client.query<MachineAssignmentRow>("select * from machine_assignments where id=$1",[id])).rows[0];
+    if (!row) return null;
+    await assertEligible(client,row.order_id);
+    const ids = (await activeMachineAssignments(client)).filter(a=>a.machine_name===row.machine_name && a.id!==id).map(a=>a.id);
+    await client.query("delete from machine_assignments where id=$1",[id]);
+    await setPositions(client,ids); return row;
   });
 }

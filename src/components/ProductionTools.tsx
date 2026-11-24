@@ -1,3 +1,4 @@
+import { subscribeProductionChanges } from "../lib/productionSync";
 import { useEffect, useState } from "react";
 type Stage = "embroidery" | "printing" | "sewing";
 type QueueRow = { id:string; order_number:string; customer_name_snapshot:string; printing_status?:string; sewing_status?:string; status?:string; printing_worker?:string; sewing_worker?:string };
@@ -32,6 +33,11 @@ export default function ProductionTools({stage,canReorder,onOrderClick,onSaved}:
    if(next==="archive") setArchive(data.completions);else {setRows(data.orders);setRevision(data.revision);}
   } catch(e){setError(e instanceof Error?e.message:"تعذر التحميل");} finally{setBusy(false);}
  }
+ useEffect(()=>{if(panel!=="archive")return;let active=true;let generation=0;
+  const refresh=async()=>{const requestId=++generation;try{const data=await request(`/api/production/${stage}/archive`);if(active&&requestId===generation)setArchive(data.completions);}catch{/* Keep current archive and retry on next refresh. */}};
+  const unsubscribe=subscribeProductionChanges(()=>{void refresh();});const timer=window.setInterval(refresh,5000);
+  return()=>{active=false;generation++;unsubscribe();window.clearInterval(timer);};
+ },[panel,stage]);
  function move(from:number,to:number){if(to<0||to>=rows.length||busy)return;setRows(current=>{const next=[...current];const [row]=next.splice(from,1);next.splice(to,0,row);return next;});}
  async function save(){setBusy(true);setError("");try {await request(`/api/production/${stage}/queue`,"PUT",{ids:rows.map(r=>r.id),revision});onSaved();setPanel(null);}catch(e){setError(e instanceof Error?e.message:"تعذر الحفظ");}finally{setBusy(false);}}
  const columns=[['customer_name_snapshot','اسم العميل'],['source_party','طرف'],['type','النوع'],['color','اللون'],['logo','اللوجو'],['quantity','العدد'],['delivery_date','تاريخ التسليم']];

@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import {PGlite} from '@electric-sql/pglite';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);const {build}=require('../backend/node_modules/esbuild');
+const db=new PGlite();
+globalThis.__machineQuery=(...args)=>db.query(...args);
+globalThis.__machineTx=fn=>db.transaction(c=>fn({query:(...args)=>c.query(...args)}));
+const bundle=await build({stdin:{contents:'export * from "./backend/src/machineAssignments.ts";export * from "./backend/src/productionCompletion.ts";',resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',write:false,plugins:[{name:'db',setup(b){b.onResolve({filter:/^\.\/db\.js$/},()=>({path:'db',namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:'export const query=(...a)=>globalThis.__machineQuery(...a);export const tx=(...a)=>globalThis.__machineTx(...a);'}));}}]});
+const api=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+try {
+await db.exec(`create table users(id uuid primary key default gen_random_uuid());
+create table orders(id uuid primary key default gen_random_uuid(),type text default 'تطريز',draft boolean default false,work_stage text default 'operation',status text default 'SENT_TO_WORKER',worker_name text default 'عامل الاختبار',printing_worker text,sewing_worker text,printing_status text,sewing_status text,order_number text,customer_name_snapshot text,source_party text,color text,quantity int,delivery_date date,product_name_snapshot text,updated_by uuid,created_at timestamptz default now());
+create table machine_assignments(id uuid primary key default gen_random_uuid(),order_id uuid unique,machine_name text,position int,created_by uuid,updated_by uuid,created_at timestamptz default now(),updated_at timestamptz default now());
+create table order_items(order_id uuid,logo_place text);create table audit_logs(user_id uuid,user_email text,user_role text,action text,entity_type text,entity_id uuid,new_value_json jsonb);`);
+await db.exec(api.PRODUCTION_DDL);
+const actor=(await db.query('insert into users default values returning id')).rows[0].id;
+async function order(number,stage='operation',status='SENT_TO_WORKER',type='تطريز',draft=false){return (await db.query('insert into orders(order_number,work_stage,status,type,draft) values($1,$2,$3,$4,$5) returning *',[number,stage,status,type,draft])).rows[0];}
+const first=await order('00041'),second=await order('00042'),waiting=await order('00043'),other=await order('00044');
+const ineligible=[await order('old-finished','finishing','WORKER_DONE'),await order('delivered','completed','DELIVERED'),await order('cancelled','cancelled','CANCELLED'),await order('printing','operation','SENT_TO_WORKER','طباعة'),await order('draft','operation','SENT_TO_WORKER','تطريز',true),await order('new','new','NEW'),await order('inconsistent-done','operation','WORKER_DONE'),await order('inconsistent-ready','operation','READY')];
+const historyOnly=await order('history-completed');
+await db.query("insert into production_stage_completions(order_id,stage,completed_by,snapshot) values($1,'embroidery',$2,'{}')",[historyOnly.id,actor]);
+ineligible.push(historyOnly);
+const historical=[];for(const o of ineligible) historical.push((await db.query("insert into machine_assignments(order_id,machine_name,position) values($1,'مكنة 1',1) returning *",[o.id])).rows[0]);
+let snapshot=await api.machineDistributionSnapshot();assert.equal(snapshot.assignments.length,0);assert.deepEqual(new Set(snapshot.orders.map(o=>o.id)),new Set([first.id,second.id,waiting.id,other.id]));
+for(const o of ineligible)await assert.rejects(api.appendMachineAssignment(o.id,'مكنة 1',actor),{code:'ZUNION_INELIGIBLE'});
+assert.deepEqual((await db.query('select * from machine_assignments order by id')).rows,historical.sort((a,b)=>a.id.localeCompare(b.id)),'read-only reconciliation preserves every old assignment');
+const a=await api.appendMachineAssignment(first.id,'مكنة 1',actor),b=await api.appendMachineAssignment(second.id,'مكنة 1',actor);
+assert.equal(a.position,1);assert.equal(b.position,2);
+const attempts=await Promise.allSettled([api.appendMachineAssignment(waiting.id,'مكنة 2',actor),api.appendMachineAssignment(waiting.id,'مكنة 1',actor)]);
+assert.equal(attempts.filter(r=>r.status==='fulfilled').length,1);assert.equal(attempts.filter(r=>r.status==='rejected')[0].reason.code,'ZUNION_ASSIGNED');
+snapshot=await api.machineDistributionSnapshot();assert.equal(snapshot.assignments.length,3);
+const rawBefore=(await db.query('select * from machine_assignments where id=$1',[a.id])).rows[0];
+assert.equal((await api.completeProductionOrder(first.id,'embroidery',actor)).outcome,'transferred');
+assert.equal((await api.completeProductionOrder(first.id,'embroidery',actor)).outcome,'already-transferred');
+const after=await api.machineDistributionSnapshot();assert.ok(!after.orders.some(o=>o.id===first.id));assert.ok(!after.assignments.some(o=>o.order_id===first.id));
+assert.equal(after.assignments.find(r=>r.id===b.id).position,1);
+assert.deepEqual((await db.query('select * from machine_assignments where id=$1',[a.id])).rows[0],rawBefore);
+assert.equal((await db.query('select work_stage from orders where id=$1',[first.id])).rows[0].work_stage,'finishing');
+const completed=(await db.query("select * from production_stage_completions where order_id=$1 and stage='embroidery'",[first.id])).rows[0];assert.equal(completed.snapshot.machine_assignment.machine_name,'مكنة 1');assert.equal(completed.snapshot.machine_assignment.position,1);assert.ok(completed.completed_at);
+for(const fn of [()=>api.appendMachineAssignment(first.id,'مكنة 1',actor),()=>api.moveMachineAssignment(a.id,'مكنة 2',actor),()=>api.removeMachineAssignment(a.id)])await assert.rejects(fn(),{code:'ZUNION_INELIGIBLE'});
+await assert.rejects(api.reorderMachineAssignments('مكنة 1',[a.id,b.id]),{code:'ZUNION_BAD_REORDER'});
+await api.reorderMachineAssignments('مكنة 1',[b.id]);
+await api.moveMachineAssignment(b.id,'مكنة 2',actor);
+const added=await api.appendMachineAssignment(other.id,'مكنة 1',actor,1);assert.equal(added.position,1);
+// Simulate a separate user's reload: results derive from persisted stages, never a local cache.
+const reload=await api.machineDistributionSnapshot();assert.ok(!reload.orders.some(o=>o.id===first.id));assert.ok(!reload.assignments.some(a=>a.order_id===first.id));assert.equal((await api.readProductionQueue('embroidery')).orders.some(o=>o.id===first.id),false);
+const rows=(await db.query('select * from machine_assignments order by id')).rows;
+for(const old of historical)assert.deepEqual(rows.find(row=>row.id===old.id),old);
+assert.equal((await db.query('select count(*)::int n from orders')).rows[0].n,13);
+console.log('PASS eligibility across stages/statuses/history; safe reconciliation; atomic duplicate prevention; completion/archive/finishing; retained assignments; compact positions; stale write rejection; movement; new slots; cross-session persisted refresh.');
+} finally {await db.close();}

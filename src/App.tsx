@@ -1,3 +1,4 @@
+import { publishProductionChange, subscribeProductionChanges } from "./lib/productionSync";
 import ProductionTools, { useProductionQueue } from "./components/ProductionTools";
 ﻿import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -1759,6 +1760,7 @@ function productToApi(product: Product) {
 }
 
 function useOrders(session: Session | null) {
+  const refreshGeneration=useRef(0);
   const [orders, setLocalOrders] = useState<Order[]>(() => {
     try {
       const stored = localStorage.getItem(storageKey);
@@ -1788,9 +1790,10 @@ function useOrders(session: Session | null) {
 
   async function refreshOrders() {
     if (!session) return;
+    const request=++refreshGeneration.current;
     try {
       const result = await backendJson<{ orders: Record<string, unknown>[] }>("/api/orders");
-      setLocalOrders(result.orders.map(orderFromApi));
+      if(request===refreshGeneration.current) setLocalOrders(result.orders.map(orderFromApi));
     } catch (error) {
       console.warn("[Zunion] Shared orders fetch failed; keeping local cache.", error);
     }
@@ -1852,7 +1855,8 @@ function useOrders(session: Session | null) {
     if (!session) return;
     refreshOrders();
     const timer = window.setInterval(refreshOrders, 5000);
-    return () => window.clearInterval(timer);
+    const unsubscribe = subscribeProductionChanges(() => { void refreshOrders(); });
+    return () => { window.clearInterval(timer); unsubscribe(); };
   }, [session?.username, session?.email]);
 
   const setOrders: React.Dispatch<React.SetStateAction<Order[]>> = (action) => {
@@ -6361,22 +6365,35 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   const [machinesSaving, setMachinesSaving] = useState(false);
   const [machinesError, setMachinesError] = useState("");
 
+  const [distributionOrders, setDistributionOrders] = useState<Order[]>([]);
   useEffect(() => {
     let active = true;
-    backendJson<{ assignments: MachineAssignment[] }>("/api/machine-assignments")
-      .then((data) => { if (active) { setAssignments(data.assignments); setLoadError(""); } })
-      .catch((error) => { if (active) setLoadError(error instanceof Error ? error.message : "تعذر تحميل توزيع المكن"); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      backendJson<{ assignments: MachineAssignment[] }>("/api/machine-assignments")
-        .then((data) => setAssignments(data.assignments))
-        .catch(() => undefined);
-    }, 15000);
-    return () => window.clearInterval(timer);
+    let generation = 0;
+    const refresh = async () => {
+      const request = ++generation;
+      try {
+        const data = await backendJson<{assignments:MachineAssignment[];orders:Record<string,unknown>[]}> ("/api/machine-assignments");
+        if (!active || request !== generation) return;
+        setAssignments(data.assignments);
+        setDistributionOrders(data.orders.map(orderFromApi));
+        setLoadError("");
+      } catch(error) { if(active && request===generation) setLoadError(error instanceof Error ? error.message : "تعذر تحميل توزيع المكن"); }
+      finally {if(active) setLoading(false);}
+    };
+    void refresh();
+    const unsubscribe = subscribeProductionChanges(({completedOrderId}) => {
+      if(completedOrderId) {
+        setAssignments(current=>{
+          const counters=new Map<string,number>();
+          return current.filter(a=>a.order_id!==completedOrderId).sort((a,b)=>a.position-b.position).map(a=>{const position=(counters.get(a.machine_name)||0)+1;counters.set(a.machine_name,position);return {...a,position};});
+        });
+        setDistributionOrders(current=>current.filter(o=>o.id!==completedOrderId));
+        setSelectedOrderId(current=>current===completedOrderId?null:current);
+      }
+      void refresh();
+    });
+    const timer = window.setInterval(refresh,2000);
+    return () => {active=false;generation++;unsubscribe();window.clearInterval(timer);};
   }, []);
 
   const boardMachines = useMemo(() => {
@@ -6391,7 +6408,11 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   }
   const rowCount = Math.max(3, ...boardMachines.map((machine) => (byMachine[machine]?.size ?? 0)));
   const assignedOrderIds = useMemo(() => new Set(assignments.map((a) => a.order_id)), [assignments]);
-  const orderById = useMemo(() => new Map(orders.map((o) => [o.id, o])), [orders]);
+  const orderById = useMemo(() => new Map(distributionOrders.map((o) => [o.id, o])), [distributionOrders]);
+  useEffect(()=>{
+    if(selectedOrderId && (!distributionOrders.some(o=>o.id===selectedOrderId) || assignments.some(a=>a.order_id===selectedOrderId))) setSelectedOrderId(null);
+    if(editModal && !assignments.some(a=>a.id===editModal.assignmentId)){setEditModal(null);setMoveTarget("");setConfirmRemoveMode(false);}
+  },[distributionOrders,assignments,selectedOrderId,editModal]);
 
   function machineQueue(machine: string): MachineAssignment[] {
     return assignments
@@ -6436,7 +6457,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
 
   async function confirmAdd(): Promise<boolean> {
     const modal = addModal;
-    if (!modal || modal.kind !== "add" || !selectedOrderId || !modal.machine || busy) return false;
+    if (!modal || modal.kind !== "add" || !selectedOrderId || !modal.machine || busy || !distributionOrders.some(o=>o.id===selectedOrderId) || assignedOrderIds.has(selectedOrderId)) return false;
     setBusy(true);
     setErr("");
     setMsg("");
@@ -6447,6 +6468,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
       });
       const fresh = await backendJson<{ assignments: MachineAssignment[] }>("/api/machine-assignments");
       setAssignments(fresh.assignments);
+      publishProductionChange();
       setMsg(`تم توزيع الأوردر على ${modal.machine}`);
       setAddModal(null);
       return true;
@@ -6471,6 +6493,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
         body: JSON.stringify({ machine_name: moveTarget }),
       });
       setAssignments((current) => current.map((a) => (a.id === data.assignment.id ? data.assignment : a)));
+      publishProductionChange();
       setEditModal({ kind: "edit", assignmentId: data.assignment.id, machine: data.assignment.machine_name });
       setMoveTarget(data.assignment.machine_name);
       setMsg(`تم نقل الأوردر إلى ${data.assignment.machine_name}`);
@@ -6524,6 +6547,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     try {
       await backendJson(`/api/machine-assignments/${encodeURIComponent(modal.assignmentId)}`, { method: "DELETE" });
       setAssignments((current) => current.filter((a) => a.id !== modal.assignmentId));
+      publishProductionChange();
       setMsg("تمت إزالة الأوردر من الجدول (الأوردر نفسه لم يُحذف)");
       setEditModal(null);
     } catch (error) {
@@ -6697,9 +6721,9 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const modal = addModal;
     if (!modal) return null;
     const query = searchQuery.trim();
-    const eligible = orders.filter((order) => !assignedOrderIds.has(order.id) && !order.draft && order.workStage !== "cancelled");
+    const eligible = distributionOrders.filter(order => !assignedOrderIds.has(order.id));
     const matches = eligible.filter((order) => !query || order.order_number.includes(query)).slice(0, 20);
-    const selectedOrder = selectedOrderId ? orderById.get(selectedOrderId) : undefined;
+    const selectedOrder = eligible.find(order => order.id === selectedOrderId);
     const positionOptions = modal.machine ? Array.from({ length: (byMachine[modal.machine]?.size ?? 0) + 1 }, (_, index) => index + 1) : [];
     return (
       <DraggableDialog
@@ -6746,7 +6770,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
             </select>
           </div>
           <div className="md-modal-actions">
-            <button type="button" className="md-btn md-btn-primary" disabled={!selectedOrderId || !modal.machine || busy} onClick={confirmAdd}>حفظ</button>
+            <button type="button" className="md-btn md-btn-primary" disabled={!selectedOrder || !modal.machine || busy} onClick={confirmAdd}>حفظ</button>
             <button type="button" className="md-btn md-btn-flat" disabled={busy} onClick={closeAddModal}>إلغاء</button>
           </div>
           {busy && <div className="md-modal-status">جارِ الحفظ…</div>}
@@ -6937,6 +6961,20 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [cellSaving, setCellSaving] = useState<Record<string, boolean>>({});
   const completingProductionRef = useRef<Set<string>>(new Set());
   const [cellError, setCellError] = useState<Record<string, string>>({});
+  const [embroideryOrders, setEmbroideryOrders] = useState<Order[] | null>(null);
+  const [embroideryError, setEmbroideryError] = useState("");
+  useEffect(() => {
+    if(queue !== "worker") return;
+    let active=true; let generation=0;
+    const refresh=async()=>{const request=++generation;try {
+      const data=await backendJson<{orders:Record<string,unknown>[]}> ("/api/production/embroidery/queue");
+      if(active && request===generation){setEmbroideryOrders(data.orders.map(orderFromApi));setEmbroideryError("");}
+    } catch(error){if(active && request===generation)setEmbroideryError(error instanceof Error?error.message:"تعذر تحميل التطريز");}};
+    void refresh();
+    const unsubscribe=subscribeProductionChanges(({completedOrderId})=>{if(completedOrderId)setEmbroideryOrders(current=>current?.filter(o=>o.id!==completedOrderId)??null);void refresh();});
+    const timer=window.setInterval(refresh,2000);
+    return ()=>{active=false;generation++;unsubscribe();window.clearInterval(timer);};
+  },[queue]);
   const [queueRefresh, setQueueRefresh] = useState(0);
   const productionStage = queue === "worker" ? "embroidery" : queue === "printing" || queue === "sewing" ? queue : undefined;
   const savedQueue = useProductionQueue(productionStage, queueRefresh);
@@ -6997,6 +7035,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       setOrders((current) => current.map((order) => order.id === id
         ? { ...applyBackendStatus(order, "WORKER_DONE"), [stage === "sewing" ? "sewing_status" : "printing_status"]: "done" }
         : order));
+      publishProductionChange(id);
       setQueueRefresh(value => value + 1);
       onFinished?.(id);
       setToast("تم إنهاء التشغيل وتحويل الأوردر إلى التشطيب بنجاح");
@@ -7093,11 +7132,14 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     let active = true;
     setFinishingLoading(true);
     setFinishingError("");
-    backendJson<{ orders: Array<Record<string, unknown>> }>("/api/orders?workStage=finishing&draft=false")
+    const refresh = () => backendJson<{ orders: Array<Record<string, unknown>> }>("/api/orders?workStage=finishing&draft=false")
       .then((payload) => { if (active) setFinishingRows(payload.orders.map(finishingRowFromRaw)); })
       .catch((error) => { if (active) setFinishingError(error instanceof Error ? error.message : "تعذر تحميل أوردرات التشطيب."); })
       .finally(() => { if (active) setFinishingLoading(false); });
-    return () => { active = false; };
+    void refresh();
+    const unsubscribe=subscribeProductionChanges(()=>{void refresh();});
+    const timer=window.setInterval(refresh,5000);
+    return () => {active=false;unsubscribe();window.clearInterval(timer);};
   }, [queue]);
 
   useEffect(() => {
@@ -7773,27 +7815,10 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   }
 
   function renderWorkerSpread() {
-    if (remoteLoading && !remoteOps) return <LoadingPanel />;
-    if (remoteError && !remoteOps && orders.length === 0) return <ErrorPanel message={remoteError || "تعذر تحميل البيانات."} />;
-
-    const stageMatch = (stageValue: string, statusValue: string) => {
-      const stage = stageValue.trim();
-      const status = statusValue.trim();
-      return stage === "operation" || ["SENT_TO_WORKER", "WORKER_STARTED"].includes(status);
-    };
-    const localRows = orders.filter((order) => {
-      const stage = String(order.workStage ?? "").trim();
-      const status = String(order.order_status ?? "").trim();
-      return stageMatch(stage, status);
-    });
-    const dbRows = (remoteOps?.orders ?? []).filter((row) => {
-      const stage = String(row.work_stage ?? row.workStage ?? "").trim();
-      const status = String(row.status ?? "").trim();
-      return stageMatch(stage, status);
-    });
-    const baseRows: WorkerSpreadRow[] = localRows.length > 0
-      ? localRows.map(workerRowFromOrder)
-      : dbRows.map((row) => workerRowFromDb(row));
+    if (embroideryOrders === null && !embroideryError) return <LoadingPanel />;
+    if (embroideryOrders === null) return <ErrorPanel message={embroideryError} />;
+    const localRows = embroideryOrders;
+    const baseRows: WorkerSpreadRow[] = localRows.map(workerRowFromOrder);
 
     // One consistent source: اللون/طرف come from the shared order record when it is
     // loaded, so edits made in متابعة أوردرات show here too.
@@ -7923,6 +7948,8 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           setStatusOverrides((current) => ({ ...current, [id]: { ...current[id], [field]: desired } }));
           setOrders((current) => current.map((order) => order.id === id ? applyBackendStatus(order, nextStatus) : order));
           if (nextStatus === "WORKER_DONE") {
+            setEmbroideryOrders(current=>current?.filter(order=>order.id!==id)??null);
+            publishProductionChange(id);
             // The order moves to the finishing stage (applyBackendStatus), so it
             // leaves this list and shows in التشطيب on its own. Stay on التشغيل and
             // confirm with a non-blocking toast instead of navigating away.

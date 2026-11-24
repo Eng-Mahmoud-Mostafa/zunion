@@ -15,7 +15,9 @@
     "check:role-guards": "D=$(mktemp -d); tsc backend/src/permissions.ts scripts/check-role-guards.ts --outDir \"$D\" --module commonjs --target es2020 --esModuleInterop --skipLibCheck --strict && node \"$D/scripts/check-role-guards.js\"; rc=$?; rm -rf \"$D\"; exit $rc",
     "check:production-workflows": "node scripts/check-production-workflows.mjs",
     "check:workflow-api": "node scripts/check-workflow-api.mjs",
-    "check:workflow-ui": "node scripts/verify-workflow-controls.mjs"
+    "check:workflow-ui": "node scripts/verify-workflow-controls.mjs",
+    "check:machine-distribution": "node scripts/check-machine-distribution.mjs",
+    "check:machine-distribution-ui": "node scripts/verify-machine-distribution.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.88.0",

@@ -15,7 +15,7 @@ import { attendanceImportSchema, customerSchema, customerTransactionSchema, cust
 import { analyzeImport, applyImport, type ExistingEmployee } from "./attendance.js";
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { ORDER_EDIT_SUMMARY_JOIN, ORDER_EDIT_SUMMARY_SELECT, diffOrder, loadOrderHistory, queryWithEditSummary, recordOrderEdit } from "./orderEdits.js";
-import { appendMachineAssignment, listMachineAssignments, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
+import { machineDistributionSnapshot, appendMachineAssignment, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
 import { activateMachine, createOrReactivateMachine, deactivateMachine, findMachineByName, listMachines, loadMachine, removeMachine, renameMachine } from "./machines.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions, updateTransaction } from "./customerAccounts.js";
 import { getBalances, getLedger, getCustomerPaymentReceipts, openNewPeriod, PAYMENT_METHOD_KEYS, recordPayment } from "./accountLedger.js";
@@ -43,6 +43,7 @@ const serviceRoutedPrefixes = [
   "/auth",
   "/orders",
   "/production",
+  "/machine-assignments",
   "/workers",
   "/settings",
   "/account-ledger",
@@ -1815,7 +1816,7 @@ function requireProductionPermission(action: "operation.view" | "operation.updat
 }
 app.get("/api/production/:stage/queue", requireAuth, requireProductionPermission("operation.view"), async(req,res)=>{
  const stage=param(req.params.stage);
- if(stage!=="printing" && stage!=="sewing") return res.sendStatus(400);
+ if(stage!=="printing" && stage!=="sewing" && stage!=="embroidery") return res.sendStatus(400);
  const queue = await readProductionQueue(stage);
  res.json({...queue, orders:queue.orders.map(order => stripFinancial(order,req.user!.role))});
 });
@@ -2071,12 +2072,12 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/machine-assignments", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (_req, res) => {
-  const assignments = await listMachineAssignments();
-  res.json({ assignments });
+app.get("/api/machine-assignments", requireAuth, requireProductionPermission("operation.view"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (req, res) => {
+  const snapshot = await machineDistributionSnapshot();
+  res.json({...snapshot, orders:snapshot.orders.map(order=>stripFinancial(order,req.user!.role))});
 });
 
-app.post("/api/machine-assignments", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+app.post("/api/machine-assignments", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
   const parsed = machineAssignmentSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid machine assignment", issues: parsed.error.issues });
   const machineIssue = await assertMachineActive(parsed.data.machine_name);
@@ -2094,7 +2095,7 @@ app.post("/api/machine-assignments", requireAuth, requireRole("Master", "Helper"
   }
 });
 
-app.patch("/api/machine-assignments/reorder", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+app.patch("/api/machine-assignments/reorder", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
   const parsed = machineReorderSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid reorder", issues: parsed.error.issues });
   try {
@@ -2108,7 +2109,7 @@ app.patch("/api/machine-assignments/reorder", requireAuth, requireRole("Master",
   }
 });
 
-app.patch("/api/machine-assignments/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+app.patch("/api/machine-assignments/:id", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
   const id = param(req.params.id);
   const parsed = machineMoveSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Invalid machine move", issues: parsed.error.issues });
@@ -2121,7 +2122,7 @@ app.patch("/api/machine-assignments/:id", requireAuth, requireRole("Master", "He
   res.json({ assignment });
 });
 
-app.delete("/api/machine-assignments/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
+app.delete("/api/machine-assignments/:id", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
   const id = param(req.params.id);
   const removed = await removeMachineAssignment(id);
   if (!removed) return res.status(404).json({ message: "Assignment not found" });
@@ -3005,6 +3006,7 @@ app.post("/api/finance/transactions", requireFinanceSession, async (req, res) =>
 });
 
 app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if ((error as {code?:string})?.code === "ZUNION_INELIGIBLE") return res.status(409).json({message:(error as Error).message});
   const detail = error instanceof Error ? (error.stack || error.message) : String(error);
   console.error(`[500] ${req.method} ${req.path}`, detail);
   const message = error instanceof Error ? error.message : "Internal server error";
