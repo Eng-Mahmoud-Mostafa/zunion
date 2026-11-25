@@ -10539,3 +10539,16 @@ a.cl-pill.red:hover { background: #b80f19; }
 .customers-filter-table .cf-customer-link:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
 
 .settings-page .settings-individual-tabs { margin-block-start: 16px; flex-wrap: nowrap; }
+
+/* Production archives reuse Zunion's movable window chrome. */
+.production-archive-window.dd-floating { padding: 0; max-height: calc(100dvh - 16px); overflow: hidden; direction: rtl; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+.production-archive-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+.production-archive-title { display: flex; flex: 1 1 16rem; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.production-archive-title h2 { margin: 0; font-size: 1.2rem; }
+.production-archive-head .dd-controls { flex-shrink: 0; }
+.production-archive-body { display: flex; flex: 1 1 auto; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; padding: 16px; overflow: hidden; }
+.production-archive-body > .table-wrap { flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.production-archive-body table { width: 100%; table-layout: auto; }
+.production-archive-body th { white-space: nowrap; }
+.production-archive-body td { overflow-wrap: anywhere; }
+.production-archive-body td:first-child, .production-archive-body td:nth-child(8), .production-archive-body td:last-child { white-space: nowrap; overflow-wrap: normal; }
