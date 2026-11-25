@@ -10,9 +10,10 @@ const api=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputF
 try {
 await db.exec(`create table users(id uuid primary key default gen_random_uuid());
 create table orders(id uuid primary key default gen_random_uuid(),type text default 'تطريز',draft boolean default false,work_stage text default 'operation',status text default 'SENT_TO_WORKER',worker_name text default 'عامل الاختبار',printing_worker text,sewing_worker text,printing_status text,sewing_status text,order_number text,customer_name_snapshot text,source_party text,color text,quantity int,delivery_date date,product_name_snapshot text,updated_by uuid,created_at timestamptz default now());
-create table machine_assignments(id uuid primary key default gen_random_uuid(),order_id uuid unique,machine_name text,position int,created_by uuid,updated_by uuid,created_at timestamptz default now(),updated_at timestamptz default now());
+create table machines(id uuid primary key default gen_random_uuid(),name text unique,position int default 0,active boolean default true,created_by uuid,updated_by uuid,created_at timestamptz default now(),updated_at timestamptz default now());create table machine_assignments(id uuid primary key default gen_random_uuid(),order_id uuid unique,machine_name text,position int,created_by uuid,updated_by uuid,created_at timestamptz default now(),updated_at timestamptz default now());
 create table order_items(order_id uuid,logo_place text);create table audit_logs(user_id uuid,user_email text,user_role text,action text,entity_type text,entity_id uuid,new_value_json jsonb);`);
 await db.exec(api.PRODUCTION_DDL);await db.exec(api.MACHINE_SLOT_DDL);await db.exec(api.MACHINE_SLOT_DDL);
+await db.query("insert into machines(name,position) select name,ord::int from unnest($1::text[]) with ordinality as t(name,ord)",[['مكنة 1','مكنة 2','swf','tajima']]);
 const actor=(await db.query('insert into users default values returning id')).rows[0].id;
 async function order(number,stage='operation',status='SENT_TO_WORKER',type='تطريز',draft=false){return (await db.query('insert into orders(order_number,work_stage,status,type,draft) values($1,$2,$3,$4,$5) returning *',[number,stage,status,type,draft])).rows[0];}
 const first=await order('00041'),second=await order('00042'),waiting=await order('00043'),other=await order('00044');

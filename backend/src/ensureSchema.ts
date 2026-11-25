@@ -1,3 +1,4 @@
+import { reconcileMachineAssignments } from "./machines.js";
 import { MACHINE_SLOT_DDL } from "./machineAssignments.js";
 import { PRODUCTION_DDL } from "./productionCompletion.js";
 import { query, databaseAvailable } from "./db.js";
@@ -395,18 +396,7 @@ async function syncMachinesTable(log: (msg: string) => void) {
     log,
     "machines table drift",
   );
-  const { rows } = await query<{ count: string }>(`select count(*) as count from machines`);
-  if (Number(rows[0]?.count ?? 0) === 0) {
-    const names = ["تاجيما 2015", "تاجيما 2007", "الجلوبال", "swf", "تاجيما 2005", "فيا الي جوا", "فيا الي برا"];
-    await guarded(
-      () => query(
-        `insert into machines (name, position, active) select * from unnest($1::text[], $2::int[], $3::boolean[])`,
-        [names, names.map((_, index) => index + 1), names.map(() => true)],
-      ),
-      log,
-      "machines default seed",
-    );
-  }
+
 }
 
 /**
@@ -618,6 +608,7 @@ export async function ensureSchema(log: (msg: string) => void = console.log) {
     await syncSchemaDrift(log);
     await query(PRODUCTION_DDL);
     await query(MACHINE_SLOT_DDL);
+    await reconcileMachineAssignments(log);
     await reloadPostgrestSchema(log);
   } catch (error) {
     log(`[schema] bootstrap failed: ${error instanceof Error ? error.message : error}`);

@@ -10552,3 +10552,6 @@ a.cl-pill.red:hover { background: #b80f19; }
 .production-archive-body th { white-space: nowrap; }
 .production-archive-body td { overflow-wrap: anywhere; }
 .production-archive-body td:first-child, .production-archive-body td:nth-child(8), .production-archive-body td:last-child { white-space: nowrap; overflow-wrap: normal; }
+
+.ws-machines-modal .ws-worker-inactive { opacity: 1; }
+.ws-machines-modal .ws-worker-inactive > td:not(.ws-worker-actions-cell) { opacity: .6; }

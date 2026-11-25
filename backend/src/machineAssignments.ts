@@ -1,6 +1,7 @@
+import { listMachines } from "./machines.js";
 import { query, tx } from "./db.js";
 import type { PoolClient } from "pg";
-import { ACTIVE_EMBROIDERY_SQL } from "./embroideryEligibility.js";
+import { ACTIVE_EMBROIDERY_SQL, lockEmbroidery } from "./embroideryEligibility.js";
 
 export const MACHINE_SLOT_DDL = `alter table machine_assignments add column if not exists queue_position integer check (queue_position > 0);`;
 
@@ -11,9 +12,6 @@ export type MachineAssignmentRow = {
 
 // Completion takes the same lock before touching an order. This serializes
 // assignment, movement, ordering and completion across machines and sessions.
-async function lockEmbroidery(client: PoolClient) {
-  await client.query("select stage from production_queues where stage='embroidery' for update");
-}
 async function assertEligible(client: PoolClient, orderId: string) {
   const { rows } = await client.query(`select o.id from orders o where o.id=$1 and ${ACTIVE_EMBROIDERY_SQL} for update of o`, [orderId]);
   if (!rows.length) throw Object.assign(new Error("الأوردر لم يعد متاحاً في تشغيل التطريز. حدّث الطابور."), { code: "ZUNION_INELIGIBLE" });
@@ -27,12 +25,13 @@ export async function activeMachineAssignments(client: Pick<PoolClient, "query">
   // Legacy rows retain their previous compact queue. Explicit slots preserve the
   // clicked cell, including intentional gaps. Finished rows remain historical.
   return (await client.query<MachineAssignmentRow>(`
-    select a.id,a.order_id,a.machine_name,
-      coalesce(a.queue_position,(row_number() over(partition by a.machine_name order by a.position,a.created_at,a.id))::int) as position,
+    select a.id,a.order_id,coalesce(m.name,a.machine_name) as machine_name,
+      coalesce(a.queue_position,(row_number() over(partition by lower(btrim(a.machine_name)) order by a.position,a.created_at,a.id))::int) as position,
       a.created_by,a.updated_by,a.created_at,a.updated_at
     from machine_assignments a join orders o on o.id=a.order_id
+    left join machines m on lower(btrim(m.name))=lower(btrim(a.machine_name))
     where ${ACTIVE_EMBROIDERY_SQL}
-    order by a.machine_name,position`)).rows;
+    order by machine_name,position`)).rows;
 }
 export async function listMachineAssignments() {
   return activeMachineAssignments({ query } as Pick<PoolClient, "query">);
@@ -42,7 +41,8 @@ export async function machineDistributionSnapshot() {
     await lockEmbroidery(client);
     const assignments = await activeMachineAssignments(client);
     const { rows: orders } = await client.query(`select o.* from orders o where ${ACTIVE_EMBROIDERY_SQL} order by o.created_at,o.id`);
-    return { assignments, orders };
+    const machines=await listMachines(client);
+    return { assignments, orders, machines };
   });
 }
 async function setPositions(client: PoolClient, ids: string[]) {
@@ -60,9 +60,15 @@ export async function compactMachineQueue(client: PoolClient, machineName: strin
   await setPositions(client,rows.map(a=>a.id));
 }
 
+async function requireAvailableMachine(client: PoolClient, name: string) {
+ const row=(await client.query<{name:string;active:boolean}>("select name,active from machines where lower(btrim(name))=lower(btrim($1)) for update",[name])).rows[0];
+ if(!row?.active)throw Object.assign(new Error("هذه المكنة غير متاحة للتوزيع. حدّث قائمة الماكينات."),{code:"ZUNION_MACHINE_UNAVAILABLE"});
+ return row.name;
+}
 export async function appendMachineAssignment(orderId: string, machineName: string, userId: string, position?: number): Promise<MachineAssignmentRow> {
   return tx(async client => {
     await lockEmbroidery(client);
+    machineName=await requireAvailableMachine(client,machineName);
     await assertEligible(client,orderId);
     if ((await client.query("select id from machine_assignments where order_id=$1 limit 1", [orderId])).rows.length)
       throw Object.assign(new Error("هذا الأوردر مخصص لمكنة بالفعل"), { code:"ZUNION_ASSIGNED" });
@@ -83,6 +89,7 @@ export async function moveMachineAssignment(id: string, machineName: string, use
     await lockEmbroidery(client);
     const row = (await client.query<MachineAssignmentRow>("select * from machine_assignments where id=$1",[id])).rows[0];
     if (!row) return null;
+    machineName=await requireAvailableMachine(client,machineName);
     await assertEligible(client,row.order_id);
     const active = await activeMachineAssignments(client);
     if (row.machine_name===machineName) return active.find(a=>a.id===id) ?? null;

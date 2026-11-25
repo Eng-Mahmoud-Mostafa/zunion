@@ -49,6 +49,7 @@ const serviceRoutedPrefixes = [
   "/orders",
   "/production",
   "/machine-assignments",
+  "/machines",
   "/workers",
   "/settings",
   "/account-ledger",
@@ -2157,7 +2158,7 @@ app.get("/api/machines", requireAuth, requireRole("Master", "Helper", "Operator"
   }
 });
 
-app.post("/api/machines", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.post("/api/machines", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const parsed = machineCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "اسم المكنة مطلوب", issues: parsed.error.issues });
   try {
@@ -2171,7 +2172,7 @@ app.post("/api/machines", requireAuth, requireRole("Master", "Helper", "Operator
   }
 });
 
-app.patch("/api/machines/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.patch("/api/machines/:id", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const id = param(req.params.id);
   const parsed = machineUpdateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "بيانات المكنة غير صالحة", issues: parsed.error.issues });
@@ -2193,7 +2194,7 @@ app.patch("/api/machines/:id", requireAuth, requireRole("Master", "Helper", "Ope
   res.json({ machine });
 });
 
-app.delete("/api/machines/:id", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.delete("/api/machines/:id", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
   const id = param(req.params.id);
   try {
     const result = await removeMachine(id, req.user!.id);
@@ -3017,6 +3018,7 @@ app.post("/api/finance/transactions", requireFinanceSession, async (req, res) =>
 });
 
 app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (["ZUNION_MACHINE_UNAVAILABLE","ZUNION_MACHINE_QUEUED"].includes((error as {code?:string})?.code||"")) return res.status(409).json({message:(error as Error).message});
   if ((error as {code?:string})?.code === "ZUNION_INELIGIBLE") return res.status(409).json({message:(error as Error).message});
   const detail = error instanceof Error ? (error.stack || error.message) : String(error);
   console.error(`[500] ${req.method} ${req.path}`, detail);
