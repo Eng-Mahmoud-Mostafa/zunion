@@ -964,11 +964,15 @@ app.post("/api/auth/logout", requireAuth, async (_req, res) => {
 });
 
 app.get("/api/auth/me", requireAuth, async (req, res) => {
+  res.set("Cache-Control", "no-store");
   const user = req.user as { id?: string; email: string; role: string };
   try {
     const profile = await findProfileByEmail(user.email);
     if (profile) {
       const session = (await makeSession(profile, true)).session;
+      const previous = loadAppSessionCookie(req);
+      if (previous) { session.expiresAt = previous.expiresAt ?? session.expiresAt; session.loggedInAt = previous.loggedInAt ?? session.loggedInAt; }
+      setAppSessionCookie(res, session, Math.max(0, new Date(session.expiresAt).getTime() - Date.now()));
       return res.json({ user, session });
     }
   } catch (error) {

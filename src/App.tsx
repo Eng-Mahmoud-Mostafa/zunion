@@ -103,7 +103,7 @@ type WorkflowStage = "أوردر جديد" | "يروح للتشغيل" | "الت
 type WorkStage = "new" | "operation" | "finishing" | "completed" | "cancelled";
 type View = "dashboard" | "orders" | "new" | "editOrder" | "drafts" | "draftEdit" | "addCustomer" | "addProduct" | "products" | "search" | "worker" | "machineDist" | "finish" | "print" | "sewing" | "archive" | "customers" | "customerAccounts" | "customerLedger" | "finance" | "reports" | "audit" | "import" | "attendance" | "alerts" | "settings" | "menu" | "image";
 type Role = string;
-type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number };
+type Session = { email: string; username?: string; fullName?: string; role: Role; expiresAt: string; loggedInAt: string; mustChangePassword?: boolean; tokenVersion?: number; permissions?: PermissionKey[] };
 type AppNotification = { id: string; kind: string; title: string; body: string; target_kind: string; target_id: string | null; created_at: string; read_at: string | null };
 type NotificationFeed = { notifications: AppNotification[]; unreadCount: number };
 type OrderItem = {
@@ -567,6 +567,8 @@ function localUsernameByEmail(email: string) {
 
 function resolvePermissionsForSession(session: Session | null, roles = loadManagedRoles(), users = loadManagedUsers()): Set<PermissionKey> {
   if (!session) return new Set();
+  if (Array.isArray(session.permissions)) return new Set(session.permissions);
+  if (useServerAuth) return new Set();
   if (session.role === "Master") return new Set(allPermissionKeys);
   const user = users.find((item) => item.username === session.username);
   const roleName = user?.role || session.role;
@@ -593,6 +595,9 @@ const routePermissions: Partial<Record<View, PermissionKey>> = {
   products: "products.view",
   search: "orders.view",
   worker: "operation.view",
+  print: "operation.view",
+  sewing: "operation.view",
+  archive: "operation.view",
   machineDist: "operation.view",
   finish: "finishing.view",
   customers: "customers.view",
@@ -9770,33 +9775,33 @@ function ZunionApp() {
   useEffect(() => {
     if (!useServerAuth) return;
     let cancelled = false;
-    fetch("/api/auth/me", { credentials: "include" })
-      .then((response) => {
-        if (response.status === 401) {
-          if (!cancelled) {
-            localStorage.removeItem(sessionKey);
-            setSession(null);
-          }
-          return null;
-        }
-        return response.json().catch(() => null);
-      })
-      .then((payload) => {
-        if (!payload || cancelled) return;
-        if (payload?.session?.email && payload?.session?.role) {
-          const nextSession = payload.session as Session;
-          localStorage.setItem(sessionKey, JSON.stringify(nextSession));
-          setSession(nextSession);
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setSessionReady(true);
-      });
-    return () => {
-      cancelled = true;
+    let inFlight = false;
+    let verified = false;
+    const refresh = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+        if (cancelled) return;
+        if (response.status === 401) { localStorage.removeItem(sessionKey); setSession(null); return; }
+        if (!response.ok) throw new Error("Session refresh failed");
+        const payload = await response.json();
+        if (cancelled) return;
+        if (!payload?.session?.email || !payload?.session?.role || !Array.isArray(payload.session.permissions)) throw new Error("Effective permissions unavailable");
+        const nextSession = payload.session as Session;
+        verified = true;
+        localStorage.setItem(sessionKey, JSON.stringify(nextSession));
+        setSession(current => JSON.stringify(current) === JSON.stringify(nextSession) ? current : nextSession);
+      } catch {
+        // Never display a cached role's navigation before server verification.
+        if (!cancelled && !verified) setSession(null);
+      } finally { inFlight = false; if (!cancelled) setSessionReady(true); }
     };
-  }, []);
+    void refresh();
+    const timer = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [session?.username, session?.email]);
 
   // Navigation model: the sidebar is the only navigator and exactly one page is
   // mounted at a time. "push" adds a browser-history entry (so Back/Forward work),
@@ -10250,11 +10255,8 @@ function ZunionApp() {
     ];
     return all
       .filter((item) => item.visible)
-      .map((item) =>
-        item.children
-          ? { ...item, children: item.children.filter((c) => c.visible) }
-          : item
-      );
+      .map(item => item.children ? {...item, children: item.children.filter(child => child.visible && canAccessView(session, child.id as View))} : item)
+      .filter(item => item.children ? item.children.length > 0 : canAccessView(session, item.id as View));
   }, [session]);
 
   function selectSidebarView(nextView: View) {
@@ -10515,7 +10517,7 @@ function ZunionApp() {
           </>}
         </section>
       </main>
-      {distWindowOpen && session && (
+      {distWindowOpen && session && canAccessView(session, "machineDist") && (
         <DraggableDialog
           dialogClassName="dist-window"
           headClassName="dist-window-head"
