@@ -1,3 +1,4 @@
+import { WORKER_DEPARTMENTS, WORKER_DEPARTMENT_LABELS } from "./workerProfile.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -82,13 +83,15 @@ app.get("/api/health", async (_req, res) => {
   let dbStatus: string;
   let productionSchema = "unavailable";
   let machineSlots = false;
+  let workerProfiles = false;
   if (!config.databaseConfigured) {
     dbStatus = "not_configured";
   } else {
     try {
-      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready, exists(select 1 from information_schema.columns where table_schema='public' and table_name='machine_assignments' and column_name='queue_position') as machine_slots");
+      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready, exists(select 1 from information_schema.columns where table_schema='public' and table_name='machine_assignments' and column_name='queue_position') as machine_slots, exists(select 1 from information_schema.columns where table_schema='public' and table_name='workers' and column_name='payment_method') as worker_profiles");
       productionSchema = schema.rows[0]?.ready ? "ready" : "pending";
       machineSlots = schema.rows[0]?.machine_slots === true;
+      workerProfiles = schema.rows[0]?.worker_profiles === true;
       dbStatus = "ok";
     } catch (error) {
       dbStatus = error instanceof Error ? error.message : "error";
@@ -99,6 +102,7 @@ app.get("/api/health", async (_req, res) => {
     db: dbStatus,
     productionSchema,
     machineSlots,
+    workerProfiles,
     email: config.resend.apiKey ? "configured" : "not_configured",
     time: new Date().toISOString(),
   });
@@ -1890,13 +1894,6 @@ app.patch("/api/orders/:id/finishing", requireAuth, requireRole("Master", "Helpe
   res.json({ order: saved ? stripFinancial(saved, req.user!.role) : null });
 });
 
-const WORKER_DEPARTMENTS = new Set(["operation", "sewing", "printing", "finishing"]);
-const WORKER_DEPARTMENT_LABELS: Record<string, string> = {
-  operation: "تشغيل تطريز",
-  sewing: "الخياطه",
-  printing: "الطباعه",
-  finishing: "التشطيب",
-};
 
 async function assertWorkerDepartment(name: string, department: string): Promise<string | null> {
   const trimmed = String(name ?? "").trim();
@@ -1920,8 +1917,8 @@ app.get("/api/workers", requireAuth, async (req, res) => {
       return res.status(400).json({ message: "قسم غير معروف" });
     }
     const { rows } = department
-      ? await query(`select id, name, active, department, card_id, phone, created_at from workers where department = $1 order by name asc`, [department])
-      : await query(`select id, name, active, department, card_id, phone, created_at from workers order by name asc`);
+      ? await query(`select id, name, active, department, card_id, phone, payment_method, created_at from workers where (department = $1 or department = '') order by name asc`, [department])
+      : await query(`select id, name, active, department, card_id, phone, payment_method, created_at from workers order by name asc`);
     res.json({ workers: rows });
   } catch (error) {
     res.status(500).json({ message: "Failed to load workers", details: error instanceof Error ? error.message : String(error) });
@@ -1931,21 +1928,21 @@ app.get("/api/workers", requireAuth, async (req, res) => {
 app.post("/api/workers", requireAuth, requireRole("Master"), async (req, res) => {
   const parsed = workerCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "بيانات العامل غير صالحة", issues: parsed.error.issues });
-  const { name, department, card_id, phone } = parsed.data;
-  if (!WORKER_DEPARTMENTS.has(department)) return res.status(400).json({ message: "قسم غير معروف" });
+  const { name, department, card_id, phone, payment_method } = parsed.data;
+  if (department && !WORKER_DEPARTMENTS.has(department)) return res.status(400).json({ message: "قسم غير معروف" });
   const existing = await query<{ id: string; active: boolean }>(`select id, active from workers where lower(name) = lower($1)`, [name]);
   if (existing.rows[0]) {
     if (existing.rows[0].active) return res.status(409).json({ message: "هذا العامل موجود مسبقًا" });
     const { rows } = await query(
-      `update workers set active = true, department = $1, card_id = $2, phone = $3, updated_by = $4 where id = $5 returning id, name, active, department, card_id, phone, created_at`,
-      [department, card_id, phone, req.user!.id, existing.rows[0].id],
+      `update workers set active = true, department = $1, card_id = $2, phone = $3, payment_method = $4, updated_by = $5 where id = $6 returning id, name, active, department, card_id, phone, payment_method, created_at`,
+      [department, card_id, phone, payment_method, req.user!.id, existing.rows[0].id],
     );
     await audit(req.user!, "WORKER_REACTIVATED", "workers", existing.rows[0].id, { active: false }, rows[0]);
     return res.json({ worker: rows[0] });
   }
   const { rows } = await query(
-    `insert into workers (name, department, card_id, phone, active, created_by, updated_by) values ($1, $2, $3, $4, true, $5, $5) returning id, name, active, department, card_id, phone, created_at`,
-    [name, department, card_id, phone, req.user!.id],
+    `insert into workers (name, department, card_id, phone, payment_method, active, created_by, updated_by) values ($1, $2, $3, $4, $5, true, $6, $6) returning id, name, active, department, card_id, phone, payment_method, created_at`,
+    [name, department, card_id, phone, payment_method, req.user!.id],
   );
   await audit(req.user!, "WORKER_CREATED", "workers", rows[0].id, undefined, rows[0]);
   res.json({ worker: rows[0] });
@@ -1959,7 +1956,7 @@ app.patch("/api/workers/:id", requireAuth, requireRole("Master"), async (req, re
   if (payload.department !== undefined && payload.department !== "" && !WORKER_DEPARTMENTS.has(payload.department)) {
     return res.status(400).json({ message: "قسم غير معروف" });
   }
-  const current = await query<{ name: string; active: boolean }>(`select name, active from workers where id = $1`, [id]);
+  const current = await query<{ name: string; active: boolean }>(`select * from workers where id = $1`, [id]);
   if (!current.rows[0]) return res.status(404).json({ message: "Worker not found" });
   const name = payload.name ?? current.rows[0].name;
   if (String(name).toLowerCase() !== current.rows[0].name.toLowerCase()) {
@@ -1967,8 +1964,8 @@ app.patch("/api/workers/:id", requireAuth, requireRole("Master"), async (req, re
     if (duplicate.rows[0]) return res.status(409).json({ message: "هذا العامل موجود مسبقًا" });
   }
   const { rows } = await query(
-    `update workers set name = $1, department = coalesce($2, department), card_id = coalesce($3, card_id), phone = coalesce($4, phone), active = coalesce($5, active), updated_by = $6 where id = $7 returning id, name, active, department, card_id, phone, created_at`,
-    [name, payload.department && payload.department.trim() !== "" ? payload.department : null, payload.card_id ?? null, payload.phone ?? null, payload.active ?? null, req.user!.id, id],
+    `update workers set name = $1, department = coalesce($2, department), card_id = coalesce($3, card_id), phone = coalesce($4, phone), active = coalesce($5, active), payment_method = case when $6::boolean then $7::text else payment_method end, updated_by = $8 where id = $9 returning id, name, active, department, card_id, phone, payment_method, created_at`,
+    [name, payload.department ?? null, payload.card_id ?? null, payload.phone ?? null, payload.active ?? null, payload.payment_method !== undefined, payload.payment_method ?? null, req.user!.id, id],
   );
   await audit(req.user!, "WORKER_UPDATED", "workers", id, current.rows[0], rows[0]);
   res.json({ worker: rows[0] });

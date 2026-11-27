@@ -165,7 +165,8 @@ export const partyUpdateSchema = z.object({
 
 export const workerCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  department: z.string().trim().min(1).max(40),
+  department: z.string().trim().max(40).default(""),
+  payment_method: z.enum(["hourly", "daily", "monthly"]).nullable().default(null),
   card_id: z.string().trim().max(60).default(""),
   phone: z.string().trim().max(60).default(""),
 });
@@ -173,6 +174,7 @@ export const workerCreateSchema = z.object({
 export const workerUpdateSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   department: z.string().trim().max(40).optional(),
+  payment_method: z.enum(["hourly", "daily", "monthly"]).nullable().optional(),
   card_id: z.string().trim().max(60).optional(),
   phone: z.string().trim().max(60).optional(),
   active: z.boolean().optional(),

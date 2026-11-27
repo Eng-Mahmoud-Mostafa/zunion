@@ -1,3 +1,4 @@
+import { WORKER_PROFILE_DDL } from "./workerProfile.js";
 import { reconcileMachineAssignments } from "./machines.js";
 import { MACHINE_SLOT_DDL } from "./machineAssignments.js";
 import { PRODUCTION_DDL } from "./productionCompletion.js";
@@ -341,40 +342,7 @@ async function syncWorkersTable(log: (msg: string) => void) {
     log,
     "workers table drift",
   );
-  await guarded(
-    () => query(`
-      update workers
-      set department = case
-        when
-          exists (select 1 from orders o where o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o where o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o where o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o, jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) wn where trim(coalesce(wn, '')) <> '' and lower(wn) = lower(workers.name))
-        then 'sewing'
-        when
-          exists (select 1 from orders o where o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o where o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o where o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o, jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) wn where trim(coalesce(wn, '')) <> '' and lower(wn) = lower(workers.name))
-        then 'printing'
-        when
-          exists (select 1 from orders o where o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o where o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o where o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o, jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) wn where trim(coalesce(wn, '')) <> '' and lower(wn) = lower(workers.name))
-        then 'finishing'
-        when
-          exists (select 1 from orders o, jsonb_array_elements_text(coalesce(o.operation_workers, '[]'::jsonb)) wn where trim(coalesce(wn, '')) <> '' and lower(wn) = lower(workers.name))
-          and not exists (select 1 from orders o where o.sewing_worker is not null and trim(coalesce(o.sewing_worker, '')) <> '' and lower(o.sewing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o where o.printing_worker is not null and trim(coalesce(o.printing_worker, '')) <> '' and lower(o.printing_worker) = lower(workers.name))
-          and not exists (select 1 from orders o where o.finishing_worker is not null and trim(coalesce(o.finishing_worker, '')) <> '' and lower(o.finishing_worker) = lower(workers.name))
-        then 'operation'
-        else department
-      end
-      where department = '';`),
-    log,
-    "workers department migration",
-  );
+  await query(WORKER_PROFILE_DDL);
 }
 
 async function syncMachinesTable(log: (msg: string) => void) {
