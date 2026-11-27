@@ -398,6 +398,8 @@ const permissionGroups: Array<{ group: string; permissions: Array<{ key: Permiss
     { key: "reports.print", label: "التقارير", action: "طباعة" },
     { key: "import.export", label: "الاستيراد والتصدير", action: "تصدير" },
     { key: "settings.view", label: "الإعدادات", action: "عرض" },
+    { key: "machines.create", label: "الماكينات", action: "إضافة" },
+    { key: "machines.edit", label: "الماكينات", action: "تعديل وتفعيل وإيقاف" },
     { key: "audit.view", label: "سجل العمليات", action: "عرض" },
     { key: "users.view", label: "إدارة المستخدمين", action: "عرض" },
     { key: "users.create", label: "المستخدمين", action: "إضافة" },
@@ -6277,13 +6279,11 @@ type MachineDistModal =
   | { kind: "add"; machine: string; position: number }
   | { kind: "edit"; assignmentId: string; machine: string };
 
-type MachineDraftRow = { id: string | null; name: string; active: boolean; isNew: boolean; remove: boolean };
 
 function MachineDistributionPage({ orders, session, machines, onMachinesChanged, onOrderClick, onDirtyChange }: { orders: Order[]; session: Session; machines: MachineRecord[]; onMachinesChanged?: () => void; onOrderClick?: (orderId: string) => void; onDirtyChange?: (dirty: boolean) => void }) {
   const [assignments, setAssignments] = useState<MachineAssignment[]>([]);
   const [savedMachines, setSavedMachines] = useState<MachineRecord[] | null>(null);
   const knownMachines = savedMachines ?? machines;
-  const canManageMachines = ["Master","Helper","Operator","Supervisor"].includes(session.role) && hasPermission(session,"operation.update");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [addModal, setAddModal] = useState<Extract<MachineDistModal, { kind: "add" }> | null>(null);
@@ -6295,15 +6295,6 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
   const [confirmRemoveMode, setConfirmRemoveMode] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
-  const [machinesModalOpen, setMachinesModalOpen] = useState(false);
-  const [machinesDraft, setMachinesDraft] = useState<MachineDraftRow[]>([]);
-  const [machinesAddOpen, setMachinesAddOpen] = useState(false);
-  const [machinesAddName, setMachinesAddName] = useState("");
-  const [machinesSaving, setMachinesSaving] = useState(false);
-  const [machinesError, setMachinesError] = useState("");
-  const machinesBlockedNameRef=useRef<string|null>(null);
-
-  useEffect(()=>{const name=machinesBlockedNameRef.current;if(name&&!assignments.some(a=>a.machine_name.trim().toLowerCase()===name.trim().toLowerCase()))setMachinesError(error=>error.includes("أوردرات تطريز نشطة")?"":error);},[assignments]);
   const [distributionOrders, setDistributionOrders] = useState<Order[]>([]);
   useEffect(() => {
     let active = true;
@@ -6341,16 +6332,6 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     const displayed = knownMachines.filter(m=>m.active || assignments.some(a=>a.machine_name.trim().toLowerCase()===m.name.trim().toLowerCase()));
     return [...displayed].sort((a,b)=>a.position-b.position).map(m=>m.name).reverse();
   }, [knownMachines,assignments]);
-  useEffect(()=>{
-    if(!machinesModalOpen)return;
-    setMachinesDraft(current=>{
-      const existing=new Map(knownMachines.map(m=>[m.id,m]));
-      const kept=current.filter(row=>row.isNew||existing.has(row.id||""));
-      const merged=kept.map(row=>{const saved=row.id?existing.get(row.id):null;return saved?{...row,name:saved.name,active:saved.active}:row;});
-      const ids=new Set(merged.map(row=>row.id));
-      return [...merged,...knownMachines.filter(m=>!ids.has(m.id)).map(m=>({...m,isNew:false,remove:false}))];
-    });
-  },[knownMachines,machinesModalOpen]);
   const byMachine: Partial<Record<string, Map<number, MachineAssignment>>> = {};
   for (const machine of boardMachines) byMachine[machine] = new Map();
   for (const assignment of assignments) {
@@ -6508,177 +6489,8 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
     }
   }
 
-  function openMachinesModal() {
-    // Already open: keep the unsaved draft instead of reloading it.
-    if (machinesModalOpen) return;
-    setMachinesError("");
-    setMachinesAddName("");
-    setMachinesAddOpen(false);
-    setMachinesDraft(knownMachines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active, isNew: false, remove: false })));
-    setMachinesModalOpen(true);
-  }
-
-  function closeMachinesModal() {
-    if (machinesSaving) return;
-    setMachinesModalOpen(false);
-    setMachinesDraft([]);
-    setMachinesAddOpen(false);
-    setMachinesAddName("");
-    setMachinesError("");
-  }
-
-  function stageAddMachine() {
-    const name = machinesAddName.trim();
-    if (!name) return;
-    const duplicated = machinesDraft.some((row) => row.name.trim().toLowerCase() === name.toLowerCase() && row.active && !row.remove);
-    if (duplicated) {
-      setMachinesError("هذه المكنة موجودة بالفعل");
-      return;
-    }
-    setMachinesError("");
-    setMachinesDraft((current) => [...current, { id: null, name, active: true, isNew: true, remove: false }]);
-    setMachinesAddName("");
-    setMachinesAddOpen(false);
-  }
-
-  function toggleRemoveMachine(machineName: string) {
-    if(!canManageMachines)return;
-    const selected=machinesDraft.find(row=>row.name===machineName);
-    if(selected?.remove){setMachinesError("");setMachinesDraft(current=>current.map(row=>row.name===machineName?{...row,remove:false}:row));return;}
-    const hasJobs = assignments.some((assignment) => assignment.machine_name.trim().toLowerCase() === machineName.trim().toLowerCase());
-    if (hasJobs) {
-      machinesBlockedNameRef.current=machineName;
-      setMachinesError("لا يمكن مسح المكنة: بها أوردرات تطريز نشطة في جدول التوزيع. انقل الأوردرات أو أنهِ تشغيلها أولاً.");
-      return;
-    }
-    setMachinesError("");
-    setMachinesDraft((current) => current.map((row) => row.name === machineName ? { ...row, remove: !row.remove } : row));
-  }
-
-  const machinesDirty = machinesModalOpen && (Boolean(machinesAddName.trim()) || machinesDraft.some((row) => (row.isNew && !row.remove) || (!row.isNew && row.remove)));
-  // Unsaved edits in any editor opened from the board (reported to the floating board window).
-  const boardDirty = machinesDirty || Boolean(addModal && selectedOrderId) || Boolean(editModal && moveTarget && moveTarget !== editModal.machine);
+  const boardDirty = Boolean(addModal && selectedOrderId) || Boolean(editModal && moveTarget && moveTarget !== editModal.machine);
   useEffect(() => { onDirtyChange?.(boardDirty); }, [boardDirty, onDirtyChange]);
-
-  async function saveMachines(): Promise<boolean> {
-    if (machinesSaving || !canManageMachines) return false;
-    setMachinesSaving(true);
-    setMachinesError("");
-    try {
-      let retainedHistory=false;
-      for (const row of machinesDraft) {
-        machinesBlockedNameRef.current=row.name;
-        if (row.isNew && !row.remove) {
-          const {machine}=await backendJson<{machine:MachineRecord}>("/api/machines",{method:"POST",body:JSON.stringify({name:row.name})});
-          setSavedMachines(current=>[...(current??knownMachines).filter(m=>m.id!==machine.id),machine]);
-          setMachinesDraft(current=>current.filter(d=>d.id!==machine.id||d.isNew).map(d=>d.isNew&&d.name===row.name?{...machine,isNew:false,remove:false}:d));
-        } else if (!row.isNew && row.remove && row.id) {
-          const result=await backendJson<{machine:MachineRecord;deactivated?:boolean;deleted?:boolean}>(`/api/machines/${encodeURIComponent(row.id)}`,{method:"DELETE"});
-          retainedHistory ||= Boolean(result.deactivated);
-          setSavedMachines(current=>result.deactivated?(current??knownMachines).map(m=>m.id===row.id?result.machine:m):(current??knownMachines).filter(m=>m.id!==row.id));
-          setMachinesDraft(current=>result.deactivated?current.map(d=>d.id===row.id?{...d,active:false,remove:false}:d):current.filter(d=>d.id!==row.id));
-        }
-      }
-      setMachinesSaving(false);
-      setMachinesModalOpen(false);
-      setMachinesDraft([]);
-      setMachinesAddOpen(false);
-      setMachinesAddName("");
-      setMsg(retainedHistory?"تمت إزالة المكنة من التوزيع مع الاحتفاظ بسجلها التاريخي":"تم حفظ المكن");
-      publishProductionChange();
-      onMachinesChanged?.();
-      return true;
-    } catch (error) {
-      setMachinesSaving(false);
-      setMachinesError(error instanceof Error ? error.message : "تعذر حفظ المكن");
-      publishProductionChange();
-      onMachinesChanged?.();
-      return false;
-    }
-  }
-
-  function renderMachinesModal() {
-    if (!machinesModalOpen) return null;
-    const sorted = [...machinesDraft].sort((a, b) => {
-      if (a.isNew !== b.isNew) return a.isNew ? 1 : -1;
-      return String(a.active ? 0 : 1).localeCompare(String(b.active ? 0 : 1));
-    });
-    return (
-      <DraggableDialog
-        dialogClassName="ws-modal ws-management-modal ws-machines-modal"
-        headClassName="ws-modal-head"
-        closeDisabled={machinesSaving}
-        ariaLabel="الماكينات"
-        onClose={closeMachinesModal}
-        title={<h2>الماكينات</h2>}
-        dirty={machinesDirty}
-        onSave={saveMachines}
-      >
-        <div className="ws-modal-feedback">
-          {machinesError && <div className="ws-modal-error">{machinesError}</div>}
-        </div>
-        {!canManageMachines && <p className="muted">عرض فقط — إدارة الماكينات متاحة للمستخدمين المصرح لهم.</p>}
-        {canManageMachines && !machinesAddOpen && (
-          <div className="ws-workers-toolbar">
-            <button type="button" className="ws-workers-add-btn" disabled={machinesSaving} onClick={() => { setMachinesError(""); setMachinesAddOpen(true); }}>
-              إضافة مكنه
-            </button>
-          </div>
-        )}
-        {machinesAddOpen && (
-          <div className="ws-worker-form">
-            <div className="ws-worker-field">
-              <label>اسم المكنة</label>
-              <input autoFocus value={machinesAddName} onChange={(event) => setMachinesAddName(event.target.value)}
-                onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); stageAddMachine(); } }} />
-            </div>
-            <div className="ws-worker-form-actions">
-              <button type="button" className="ws-btn-save" disabled={machinesSaving} onClick={stageAddMachine}>إضافة</button>
-              <button type="button" className="ws-btn-cancel" disabled={machinesSaving} onClick={() => { setMachinesAddOpen(false); setMachinesAddName(""); setMachinesError(""); }}>إلغاء</button>
-            </div>
-          </div>
-        )}
-        <div className="ws-workers-table-wrap">
-          <table className="ws-workers-table">
-            <thead>
-              <tr>
-                <th>الاسم</th>
-                <th>الحالة</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.length === 0 && (
-                <tr><td colSpan={3} className="ws-workers-empty">لا توجد ماكينات بعد</td></tr>
-              )}
-              {sorted.map((row) => (
-                <tr key={row.id ?? row.name} className={row.remove ? "ws-worker-inactive" : !row.active && !row.isNew ? "ws-worker-inactive" : undefined}>
-                  <td>
-                    {row.name}
-                    {row.remove && <span className="ws-worker-disabled-badge">سيتم مسحها</span>}
-                    {!row.active && !row.isNew && !row.remove && <span className="ws-worker-disabled-badge">معطّلة</span>}
-                    {row.isNew && <span className="ws-worker-disabled-badge">جديدة</span>}
-                  </td>
-                  <td>{row.isNew ? "جديدة (لم تُحفظ بعد)" : row.active ? "فعالة" : "معطّلة — محفوظة للسجل"}{assignments.some(a=>a.machine_name.trim().toLowerCase()===row.name.trim().toLowerCase()) && <span> — بها {assignments.filter(a=>a.machine_name.trim().toLowerCase()===row.name.trim().toLowerCase()).length} أوردر نشط</span>}</td>
-                  <td className="ws-worker-actions-cell">
-                    <button type="button" className="ws-workers-remove" disabled={machinesSaving || !canManageMachines} onClick={() => toggleRemoveMachine(row.name)}>
-                      {row.remove ? "تراجع" : "مسح مكنه"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="ws-worker-form-actions ws-machines-actions">
-          <button type="button" className="ws-btn-save" disabled={machinesSaving || !canManageMachines} onClick={() => void saveMachines()}>
-            {machinesSaving ? "جارِ الحفظ…" : "حفظ"}
-          </button>
-          <button type="button" className="ws-btn-cancel" disabled={machinesSaving} onClick={closeMachinesModal}>إلغاء</button>
-        </div>
-      </DraggableDialog>
-    );
-  }
 
   function renderAddModal() {
     const modal = addModal;
@@ -6786,7 +6598,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
           {err && <div className="md-status-err">{err}</div>}
         </div>
       )}
-      {boardMachines.length===0 && <p className="notice">لا توجد ماكينات فعالة محفوظة. استخدم «الماكينات» لإضافة مكنة.</p>}
+      {boardMachines.length===0 && <p className="notice">لا توجد ماكينات فعالة محفوظة. يمكن للمستخدم المصرح له إضافة ماكينة من الإعدادات ← الماكينات.</p>}
       {assignments.some(a=>!knownMachines.some(m=>m.name.trim().toLowerCase()===a.machine_name.trim().toLowerCase())) && <p className="md-status-err" role="alert">توجد أوردرات نشطة مرتبطة بمكنة غير مسجلة. راجع سجل التوزيع قبل إدارة الماكينات.</p>}
       <div className="md-board-wrap">
         <table className="md-table" dir="rtl">
@@ -6831,12 +6643,8 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
           </tbody>
         </table>
       </div>
-      <div className="md-tools-bar">
-        <button type="button" className="md-machines-btn" onClick={openMachinesModal}>الماكينات</button>
-      </div>
       {renderAddModal()}
       {renderEditModal()}
-      {renderMachinesModal()}
     </div>
   );
 }
@@ -10317,6 +10125,8 @@ function ZunionApp() {
     editRoles: hasPermission(session, "roles.edit"),
     deleteRoles: hasPermission(session, "roles.delete"),
     managePermissions: hasPermission(session, "permissions.manage"),
+    createMachines: hasPermission(session,"machines.create"),
+    editMachines: hasPermission(session,"machines.edit"),
   };
 
   // Every رقم الأوردر link in every section opens the same shared order-details

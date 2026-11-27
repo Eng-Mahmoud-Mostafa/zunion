@@ -34,5 +34,22 @@ try {
  const race=await Promise.allSettled([api.appendMachineAssignment(raceOrder.id,'concurrent',other,1),api.removeMachine(raceMachine.id,actor)]);
  assert.equal(race.filter(r=>r.status==='fulfilled').length,1);assert.equal(race.find(r=>r.status==='rejected').reason.code,'ZUNION_MACHINE_QUEUED');assert.equal((await api.loadMachine(raceMachine.id)).active,true);
  const removed=(await api.createOrReactivateMachine('Removed',actor)).machine;await api.removeMachine(removed.id,other);await assert.rejects(api.appendMachineAssignment((await order('stale')).id,'Removed',actor),{code:'ZUNION_MACHINE_UNAVAILABLE'});
- console.log('PASS saved/empty configs, actual active occupancy, historical archive protection, case normalization, inactive queued jobs, audited orphan-only cleanup, repeatability, guarded deactivation, two-user deletion/assignment race, reactivation and stale requests.');
+
+ const managed=await api.createMachineConfiguration({name:'Configured',position:2,active:false},actor);
+ assert.equal(managed.active,false);assert.equal(managed.position,2);
+ await assert.rejects(api.createMachineConfiguration({name:' configured ',active:true},actor),{code:'ZUNION_MACHINE_EXISTS'});
+ await api.updateMachineConfiguration(managed.id,{active:true,position:1},actor);
+ const tracked=await order('rename-safe');await db.query('update orders set machine_name=$1 where id=$2',['Configured',tracked.id]);
+ const trackedAssignment=await api.appendMachineAssignment(tracked.id,'Configured',actor,2);
+ const archiveBefore=(await db.query('select * from production_stage_completions')).rows;
+ await api.updateMachineConfiguration(managed.id,{name:'Renamed',position:3},other);
+ const linked=(await db.query('select * from machine_assignments where id=$1',[trackedAssignment.id])).rows[0];
+ assert.equal(linked.machine_name,'Renamed');assert.equal(linked.queue_position,2);assert.equal(linked.order_id,tracked.id);
+ assert.equal((await db.query('select machine_name from orders where id=$1',[tracked.id])).rows[0].machine_name,'Renamed');
+ assert.deepEqual((await db.query('select * from production_stage_completions')).rows,archiveBefore);
+ await assert.rejects(api.updateMachineConfiguration(managed.id,{name:'Must rollback',active:false},other),{code:'ZUNION_MACHINE_QUEUED'});
+ assert.equal((await api.loadMachine(managed.id)).name,'Renamed','failed status/name edit is atomic');
+ await assert.rejects(api.updateMachineConfiguration(managed.id,{name:'History'},actor),{code:'ZUNION_MACHINE_EXISTS'});
+ const positions=(await api.listMachines()).map(m=>m.position);assert.equal(new Set(positions).size,positions.length);
+ console.log('PASS settings create/edit/order/status, duplicate names, atomic assignment-safe rename, rollback and immutable history; saved/empty configs, actual active occupancy, historical archive protection, case normalization, inactive queued jobs, audited orphan-only cleanup, repeatability, guarded deactivation, two-user deletion/assignment race, reactivation and stale requests.');
 }finally{await db.close();}

@@ -19,7 +19,7 @@ import { analyzeImport, applyImport, type ExistingEmployee } from "./attendance.
 import { ensureCustomer, loadOrder, nextOrderNumber } from "./orders.js";
 import { ORDER_EDIT_SUMMARY_JOIN, ORDER_EDIT_SUMMARY_SELECT, diffOrder, loadOrderHistory, queryWithEditSummary, recordOrderEdit } from "./orderEdits.js";
 import { machineDistributionSnapshot, appendMachineAssignment, loadMachineAssignment, moveMachineAssignment, reorderMachineAssignments, removeMachineAssignment } from "./machineAssignments.js";
-import { activateMachine, createOrReactivateMachine, deactivateMachine, findMachineByName, listMachines, loadMachine, removeMachine, renameMachine } from "./machines.js";
+import { createMachineConfiguration, updateMachineConfiguration, findMachineByName, listMachines, loadMachine, removeMachine } from "./machines.js";
 import { createTransaction, deleteTransaction, ensureCustomerAccount, listTransactions, updateTransaction } from "./customerAccounts.js";
 import { getBalances, getLedger, getCustomerPaymentReceipts, openNewPeriod, PAYMENT_METHOD_KEYS, recordPayment } from "./accountLedger.js";
 import { isAccountDate } from "./accountDates.js";
@@ -569,6 +569,19 @@ async function makeSession(user: AppUser, stayLoggedIn = true) {
       permissions = Array.from(configured);
     }
   } catch (error) { console.warn("Role permissions lookup failed", error); }
+  // Machine permissions are managed in the existing role editor (Supabase first).
+  // Resolve these new keys from that same store without changing other permission behavior.
+  if (config.supabaseUrl && config.supabaseServiceKey) {
+    try {
+      const rows = await supabaseRest<RoleRow[]>(`roles?name=eq.${encodeURIComponent(user.role)}&status=eq.active&select=id,name,status,permissions&limit=1`);
+      const machinePermissions = new Set(rows[0]?.permissions ?? []);
+      for (const value of user.permission_overrides?.allow ?? []) machinePermissions.add(value);
+      for (const value of user.permission_overrides?.deny ?? []) machinePermissions.delete(value);
+      permissions = permissions.filter(key => key !== "machines.create" && key !== "machines.edit");
+      for (const key of ["machines.create", "machines.edit"]) if (machinePermissions.has(key)) permissions.push(key);
+      if ((machinePermissions.has("machines.create") || machinePermissions.has("machines.edit")) && machinePermissions.has("settings.view") && !permissions.includes("settings.view")) permissions.push("settings.view");
+    } catch (error) { console.warn("Machine role permissions lookup failed; using local role permissions", error instanceof Error ? error.message : "unavailable"); }
+  }
   return {
     session: {
       sessionId: String(crypto.randomUUID()),
@@ -2170,7 +2183,9 @@ async function assertMachineActive(machineName: string): Promise<string | null> 
   return null;
 }
 
-app.get("/api/machines", requireAuth, requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (_req, res) => {
+app.get("/api/machines", requireAuth, async (req, res) => {
+  const session = loadAppSessionCookie(req);
+  if (!( ["settings.view", "operation.view", "finishing.view", "orders.view"] as PermissionKey[]).some(key => appSessionHasPermission(session,key))) return res.status(403).json({message:"ليست لديك صلاحية عرض الماكينات"});
   try {
     const machines = await listMachines();
     res.json({ machines });
@@ -2179,11 +2194,12 @@ app.get("/api/machines", requireAuth, requireRole("Master", "Helper", "Operator"
   }
 });
 
-app.post("/api/machines", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.post("/api/machines", requireAuth, requireAppPermission("settings.view"), requireAppPermission("machines.create"), async (req, res) => {
   const parsed = machineCreateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "اسم المكنة مطلوب", issues: parsed.error.issues });
   try {
-    const { machine, reactivated } = await createOrReactivateMachine(parsed.data.name, req.user!.id);
+    const machine = await createMachineConfiguration(parsed.data, req.user!.id);
+    const reactivated = false;
     await audit(req.user!, reactivated ? "MACHINE_REACTIVATED" : "MACHINE_CREATED", "machines", machine.id, reactivated ? { active: false } : undefined, machine);
     res.status(reactivated ? 200 : 201).json({ machine, reactivated });
   } catch (error) {
@@ -2193,29 +2209,24 @@ app.post("/api/machines", requireAuth, requireProductionPermission("operation.up
   }
 });
 
-app.patch("/api/machines/:id", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
-  const id = param(req.params.id);
-  const parsed = machineUpdateSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: "بيانات المكنة غير صالحة", issues: parsed.error.issues });
-  const current = await loadMachine(id);
-  if (!current) return res.status(404).json({ message: "Machine not found" });
-  let machine = current;
-  if (parsed.data.name !== undefined && parsed.data.name.trim() !== current.name) {
-    const name = parsed.data.name.trim();
-    const duplicate = await findMachineByName(name);
-    if (duplicate && duplicate.id !== id) return res.status(409).json({ message: "هذه المكنة موجودة بالفعل" });
-    machine = (await renameMachine(id, name, req.user!.id)) ?? current;
-  }
-  if (parsed.data.active !== undefined && parsed.data.active !== machine.active) {
-    machine = parsed.data.active
-      ? (await activateMachine(id, req.user!.id)) ?? machine
-      : (await deactivateMachine(id, req.user!.id)) ?? machine;
-  }
-  await audit(req.user!, "MACHINE_UPDATED", "machines", id, current, machine);
-  res.json({ machine });
+app.patch("/api/machines/:id", requireAuth, requireAppPermission("settings.view"), requireAppPermission("machines.edit"), async (req,res) => {
+ const parsed=machineUpdateSchema.safeParse(req.body);
+ if(!parsed.success)return res.status(400).json({message:"بيانات الماكينة غير صالحة",issues:parsed.error.issues});
+ const id=param(req.params.id);
+ try {
+  const current=await loadMachine(id);
+  const machine=await updateMachineConfiguration(id,parsed.data,req.user!.id);
+  if(!machine)return res.status(404).json({message:"الماكينة غير موجودة"});
+  await audit(req.user!,"MACHINE_UPDATED","machines",id,current,machine);
+  res.json({machine});
+ }catch(error){
+  const code=(error as {code?:string})?.code;
+  if(code==="ZUNION_MACHINE_EXISTS"||code==="ZUNION_MACHINE_QUEUED")return res.status(409).json({message:(error as Error).message});
+  throw error;
+ }
 });
 
-app.delete("/api/machines/:id", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor"), async (req, res) => {
+app.delete("/api/machines/:id", requireAuth, requireAppPermission("settings.view"), requireAppPermission("machines.edit"), async (req, res) => {
   const id = param(req.params.id);
   try {
     const result = await removeMachine(id, req.user!.id);

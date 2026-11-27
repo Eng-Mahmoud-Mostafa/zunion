@@ -147,10 +147,13 @@ export const workerSchema = z.object({
 
 export const machineCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  position: z.number().int().min(1).max(10000).optional(),
+  active: z.boolean().optional(),
 });
 
 export const machineUpdateSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
+  position: z.number().int().min(1).max(10000).optional(),
   active: z.boolean().optional(),
 });
 

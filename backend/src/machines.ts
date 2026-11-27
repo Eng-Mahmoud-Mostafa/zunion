@@ -67,11 +67,46 @@ export async function activateMachine(id: string, userId: string): Promise<Machi
 }
 
 export async function renameMachine(id: string, name: string, userId: string): Promise<MachineRow | null> {
-  const { rows } = await query<MachineRow>(
-    `update machines set name=$1, updated_by=$2 where id=$3 returning *`,
-    [name, userId, id],
-  );
-  return rows[0] ?? null;
+  return updateMachineConfiguration(id, {name}, userId);
+}
+
+/** Serialize configuration changes with queue assignments; names are legacy relationship keys. */
+export async function updateMachineConfiguration(id: string, changes: {name?: string; position?: number; active?: boolean}, userId: string): Promise<MachineRow | null> {
+ return tx(async client => {
+  await lockEmbroidery(client);
+  const current=(await client.query<MachineRow>('select * from machines where id=$1 for update',[id])).rows[0];
+  if(!current)return null;
+  const name=(changes.name ?? current.name).trim();
+  if((await client.query('select id from machines where lower(btrim(name))=lower(btrim($1)) and id<>$2',[name,id])).rowCount)
+   throw Object.assign(new Error('اسم الماكينة موجود بالفعل'),{code:'ZUNION_MACHINE_EXISTS'});
+  if(changes.active===false && (await machineHasQueuedJobs(current.name,client) || (await client.query<{has:boolean}>(`select exists(select 1 from orders o where lower(btrim(o.machine_name))=lower(btrim($1)) and ${ACTIVE_EMBROIDERY_SQL}) as has`,[current.name])).rows[0]?.has))
+   throw Object.assign(new Error('لا يمكن إيقاف الماكينة لوجود أوردرات تطريز نشطة. انقل الأوردرات إلى ماكينة أخرى أو أنهِ تشغيلها أولاً.'),{code:'ZUNION_MACHINE_QUEUED'});
+  if(name!==current.name){
+   await client.query('update machine_assignments set machine_name=$1 where lower(btrim(machine_name))=lower(btrim($2))',[name,current.name]);
+   await client.query('update orders set machine_name=$1 where lower(btrim(machine_name))=lower(btrim($2))',[name,current.name]);
+   // Archive snapshots retain the historical name; their machine configuration record/id is retained.
+  }
+  let position=current.position;
+  if(changes.position!==undefined){
+   const others=(await client.query<MachineRow>('select * from machines where id<>$1 order by position,created_at,id',[id])).rows;
+   const index=Math.min(changes.position-1,others.length);others.splice(index,0,current);
+   for(let i=0;i<others.length;i++)if(others[i].id!==id)await client.query('update machines set position=$1 where id=$2',[i+1,others[i].id]);
+   position=index+1;
+  }
+  return (await client.query<MachineRow>('update machines set name=$1,position=$2,active=$3,updated_by=$4 where id=$5 returning *',[name,position,changes.active??current.active,userId,id])).rows[0];
+ });
+}
+
+export async function createMachineConfiguration(input:{name:string;position?:number;active?:boolean},userId:string):Promise<MachineRow>{
+ return tx(async client=>{
+  await lockEmbroidery(client);
+  if((await client.query('select id from machines where lower(btrim(name))=lower(btrim($1))',[input.name])).rowCount)
+   throw Object.assign(new Error('اسم الماكينة موجود بالفعل، بما في ذلك الماكينات المتوقفة'),{code:'ZUNION_MACHINE_EXISTS'});
+  const others=(await client.query<MachineRow>('select * from machines order by position,created_at,id')).rows;
+  const position=Math.min(input.position??others.length+1,others.length+1);
+  for(let i=0;i<others.length;i++)await client.query('update machines set position=$1 where id=$2',[i>=position-1?i+2:i+1,others[i].id]);
+  return (await client.query<MachineRow>('insert into machines(name,position,active,created_by,updated_by) values($1,$2,$3,$4,$4) returning *',[input.name.trim(),position,input.active??true,userId])).rows[0];
+ });
 }
 
 /** Only current eligible embroidery assignments block removal, just like the board. */

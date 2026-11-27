@@ -1,4 +1,5 @@
 import WorkerManager from "./WorkerManager";
+import MachineManager from "./MachineManager";
 ﻿import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
@@ -78,6 +79,8 @@ export type SettingsCapabilities = {
   editRoles: boolean;
   deleteRoles: boolean;
   managePermissions: boolean;
+  createMachines?: boolean;
+  editMachines?: boolean;
 };
 
 export type SettingsParty = {
@@ -204,7 +207,7 @@ const SECTIONS: Array<{ id: SectionId; label: string; description: string; icon:
   { id: "users", label: "الأفراد", description: "إنشاء الحسابات وتعديل البيانات والصلاحيات المخصصة", icon: Users },
   { id: "roles", label: "الأدوار والصلاحيات", description: "الأدوار مقارنة بالإعدادات وأي مستخدم يمكنه الوصول", icon: ShieldCheck },
   { id: "departments", label: "الأقسام وقنوات التشغيل", description: "أقسام العمال وقنوات الطابور المستخدمة في التشغيل", icon: Factory },
-  { id: "resources", label: "العمال والماكينات", description: "سجل العمال المسجلين والماكينات المعتمدة", icon: Cpu },
+  { id: "resources", label: "الماكينات", description: "إضافة الماكينات وتعديل ترتيبها وحالتها", icon: Cpu },
   { id: "finance", label: "الإعدادات المالية", description: "طرق الدفع والفترات الشهرية المفتوحة", icon: WalletCards },
   { id: "security", label: "الأمان", description: "كلمة المرور، الحسابات النشطة، وسجل الأمان", icon: Lock },
   { id: "adminMail", label: "بريد المسؤول", description: "البريد الذي تصل إليه أكواد استعادة كلمة المرور", icon: Mail },
@@ -284,6 +287,8 @@ const PERMISSION_LABELS: Record<PermissionKey, string> = {
   "permissions.manage": "إدارة الصلاحيات",
   "audit.view": "عرض سجل التدقيق",
   "settings.view": "عرض الإعدادات",
+  "machines.create": "إضافة ماكينة",
+  "machines.edit": "تعديل وتفعيل وإيقاف الماكينات",
 };
 
 const MODULE_GROUPS: ModuleGroup[] = [
@@ -318,9 +323,8 @@ const MODULE_GROUPS: ModuleGroup[] = [
   {
     id: "machines",
     label: "الماكينات",
-    hint: "لا توجد صلاحيات مستقلة للماكينات في النظام.",
-    keys: [],
-    governedBy: { groupId: "operation", keys: ["operation.view"], note: "توزيع الماكينات محكوم بصلاحية عرض تشغيل تطريز." },
+    hint: "إدارة الماكينات من الإعدادات. تتطلب صلاحية عرض الإعدادات أيضاً. توزيع الأوردرات يبقى بصلاحيات التشغيل.",
+    keys: ["machines.create", "machines.edit"],
   },
   { id: "reports", label: "التقارير", hint: "التقارير وطباعتها والاستيراد والتصدير.", keys: ["reports.view", "reports.print", "import.export"] },
   { id: "settings", label: "الإعدادات", hint: "المستخدمون والأدوار وإدارة الصلاحيات وسجل التدقيق.", keys: ["users.view", "users.create", "users.edit", "users.deactivate", "users.delete", "users.resetPassword", "users.resetAllPasswords", "roles.view", "roles.create", "roles.edit", "roles.delete", "permissions.manage", "audit.view", "settings.view"] },
@@ -1242,7 +1246,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
       if (id === "departments") {
         return [...Object.entries(WORKER_DEPARTMENT_LABELS), ...QUEUE_CHANNELS.map((channel) => [channel.id, channel.label] as [string, string])].filter(([, label]) => label.toLowerCase().includes(needle)).length;
       }
-      if (id === "resources") return (workers || []).filter((item) => item.name.toLowerCase().includes(needle)).length + (machines || []).filter((item) => item.name.toLowerCase().includes(needle)).length;
+      if (id === "resources") return (machines || []).filter((item) => item.name.toLowerCase().includes(needle)).length;
       if (id === "parties") return (parties || []).filter((item) => item.name.toLowerCase().includes(needle)).length;
       if (id === "finance") return PAYMENT_METHODS.filter((item) => item.label.toLowerCase().includes(needle)).length;
       if (id === "security") return (auditRows || []).filter((item) => `${AUDIT_ACTION_LABELS[item.action] || item.action} ${item.entity_type || ""}`.toLowerCase().includes(needle)).length;
@@ -1262,6 +1266,8 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
             <p className="muted">تعديل كلمة المرور والحساب الخاص بك</p>
           </div>
         </header>
+        <button type="button" className="primary-btn" onClick={()=>setSection("resources")}>الماكينات</button>
+        {section === "resources" && <MachineManager canCreate={Boolean(capabilities.createMachines)} canEdit={Boolean(capabilities.editMachines)} />}
         <section className="settings-card">
           <div className="settings-card-head">
             <h2>حسابي</h2>
@@ -1691,99 +1697,7 @@ export default function SettingsPage({ username, role, isMaster, useRemoteSettin
     </section>
   );
 
-  const renderResources = () => {
-    const error = resourceError.workers || resourceError.machines;
-    return (
-      <section className="settings-card">
-        <div className="settings-card-head">
-          <div>
-            <h2>العمال والماكينات</h2>
-            <p className="muted">سجلات النظام الفعلية. إدارة العمال من الأفراد ← العمال.</p>
-          </div>
-          <button
-            type="button"
-            className="ghost-btn compact"
-            onClick={() => {
-              reloadResources();
-              void loadResource("workers", true);
-              void loadResource("machines", true);
-            }}
-          >
-            <RefreshCw size={16} />
-            تحديث
-          </button>
-        </div>
-        {error ? (
-          <div className="settings-alert error">
-            <CircleAlert size={18} />
-            <span>{error}</span>
-          </div>
-        ) : null}
-        <h3 className="settings-subtitle">العمال</h3>
-        {workers === null ? (
-          <div className="settings-loading">
-            <Loader2 size={20} className="spin" />
-            <span>جارٍ تحميل العمال...</span>
-          </div>
-        ) : workers.length === 0 ? (
-          <EmptyState icon={Factory} title="لا يوجد عمال مسجلون" />
-        ) : (
-          <div className="table-wrap settings-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>الاسم</th>
-                  <th>القسم</th>
-                  <th>الكارت</th>
-                  <th>الهاتف</th>
-                  <th>الحالة</th>
-                </tr>
-              </thead>
-              <tbody>
-                {workers
-                  .filter((item) => !query || item.name.toLowerCase().includes(normalizeText(query)))
-                  .map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.name}</td>
-                      <td>{WORKER_DEPARTMENT_LABELS[item.department] || item.department}</td>
-                      <td className="muted">{item.card_id || "-"}</td>
-                      <td className="muted">{item.phone || "-"}</td>
-                      <td>
-                        <StatusBadge status={item.active ? "active" : "inactive"} />
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <h3 className="settings-subtitle">الماكينات</h3>
-        {machines === null ? (
-          <div className="settings-loading">
-            <Loader2 size={20} className="spin" />
-            <span>جارٍ تحميل الماكينات...</span>
-          </div>
-        ) : machines.length === 0 ? (
-          <EmptyState icon={Cpu} title="لا توجد ماكينات مسجلة" />
-        ) : (
-          <div className="settings-grid-cards">
-            {machines
-              .filter((item) => !query || item.name.toLowerCase().includes(normalizeText(query)))
-              .map((item) => (
-                <div className="settings-mini-card" key={item.id}>
-                  <div className="settings-mini-head">
-                    <Cpu size={18} />
-                    <strong>{item.name}</strong>
-                    <StatusBadge status={item.active ? "active" : "inactive"} />
-                  </div>
-                  <p className="muted">الترتيب: {item.position}</p>
-                </div>
-              ))}
-          </div>
-        )}
-      </section>
-    );
-  };
+  const renderResources = () => <MachineManager canCreate={Boolean(capabilities.createMachines)} canEdit={Boolean(capabilities.editMachines)} />;
 
   const renderFinance = () => (
     <section className="settings-card">

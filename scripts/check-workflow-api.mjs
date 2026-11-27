@@ -11,7 +11,7 @@ const file=path.resolve('backend/node_modules/.workflow-api-check.cjs');writeFil
 let server;
 try {
  const {app,signAppSession}=require(file);server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
- const cookie=role=>`zunion_app_session=${signAppSession({role,email:'isolated@test.local',username:'isolated',permissions:[],expiresAt:new Date(Date.now()+60000).toISOString()})}`;
+ const cookie=(role,permissions=[])=>`zunion_app_session=${signAppSession({role,email:'isolated@test.local',username:'isolated',permissions,expiresAt:new Date(Date.now()+60000).toISOString()})}`;
  for(const role of ['Worker','Helper','Operator','Supervisor','Finish']){
   for(const [method,url] of [['POST','/api/machines'],['POST','/machines'],['PATCH','/api/machines/11111111-1111-4111-8111-111111111111'],['DELETE','/api/machines/11111111-1111-4111-8111-111111111111'],['POST','/api/machine-assignments'],['POST','/machine-assignments'],['PATCH','/api/machine-assignments/reorder'],['PATCH','/api/machine-assignments/11111111-1111-4111-8111-111111111111'],['DELETE','/api/machine-assignments/11111111-1111-4111-8111-111111111111'],['POST','/api/workers'],['PATCH','/api/workers/11111111-1111-4111-8111-111111111111'],['DELETE','/api/workers/11111111-1111-4111-8111-111111111111'],['POST','/api/parties'],['PATCH','/api/parties/11111111-1111-4111-8111-111111111111'],['POST','/api/users'],['PUT','/api/production/printing/queue'],['PUT','/api/production/sewing/queue'],['PATCH','/api/orders/11111111-1111-4111-8111-111111111111/complete-production']]){
    const response=await fetch(base+url,{method,headers:{Cookie:cookie(role),'Content-Type':'application/json'},body:JSON.stringify({name:'forbidden',stage:'printing',ids:[],revision:0})});assert.equal(response.status,403,`${role} ${method} ${url}`);
@@ -19,5 +19,13 @@ try {
  }
  assert.equal((await fetch(base+'/api/production/printing/queue')).status,401);
  for(const url of ['/api/workers','/api/parties','/api/machines','/api/production/printing/queue']) assert.equal((await fetch(base+url,{method:url.includes('queue')?'PUT':'POST',headers:{Cookie:cookie('Master'),'Content-Type':'application/json'},body:'{}'})).status,400);
+
+ for(const [method,url,key] of [['POST','/api/machines','machines.create'],['PATCH','/api/machines/11111111-1111-4111-8111-111111111111','machines.edit']]){
+  const send=permissions=>fetch(base+url,{method,headers:{Cookie:cookie('CustomMachineAdmin',permissions),'Content-Type':'application/json'},body:JSON.stringify({name:''})});
+  assert.equal((await send(['operation.update'])).status,403,'production permissions do not grant machine administration');
+  assert.equal((await send([key])).status,403,'settings permission is also required');
+  assert.equal((await send(['settings.view',key])).status,400,'custom permitted role reaches input validation');
+  assert.equal((await send(['settings.view',key==='machines.create'?'machines.edit':'machines.create'])).status,403,'create and edit permissions are separate');
+ }
  console.log('PASS: 90 unauthorized direct/legacy master-data and production mutation requests rejected; unauthenticated request rejected; Master reaches validation. No database/business writes.');
 }finally{if(server)await new Promise(r=>server.close(r));rmSync(file,{force:true});}

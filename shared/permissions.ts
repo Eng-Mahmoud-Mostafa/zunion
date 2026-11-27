@@ -8,7 +8,7 @@ export const permissionKeys = [
   "finishing.view", "finishing.update", "finishing.upload", "finishing.print",
   "reports.view", "reports.print", "import.export",
   "users.view", "users.create", "users.edit", "users.deactivate", "users.delete", "users.resetPassword", "users.resetAllPasswords",
-  "roles.view", "roles.create", "roles.edit", "roles.delete", "permissions.manage", "audit.view", "settings.view",
+  "roles.view", "roles.create", "roles.edit", "roles.delete", "permissions.manage", "audit.view", "settings.view", "machines.create", "machines.edit",
 ] as const;
 
 export type PermissionKey = typeof permissionKeys[number];
