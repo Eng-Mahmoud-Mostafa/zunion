@@ -113,6 +113,10 @@ export function LoginShell({ children, onSubmit, compact }: LoginShellProps) {
           <span className="zl-footer-line" />
         </div>
       </form>
+      <div className="zl-powered-by" dir="ltr" aria-label="Powered by Interlace">
+        <span>Powered by</span>
+        <img src="/interlace-logo.png" alt="Interlace" width="100" height="33" />
+      </div>
     </main>
   );
 }

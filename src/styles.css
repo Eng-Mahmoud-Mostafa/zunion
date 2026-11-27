@@ -10115,6 +10115,21 @@ th {
   color: #0b2545;
 }
 .zl-backdrop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.zl-page { padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+.zl-powered-by {
+  position: absolute;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #6b7280;
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.zl-powered-by img { display: block; width: 100px; height: auto; object-fit: contain; }
 .zl-wave { position: absolute; display: block; height: auto; }
 .zl-wave-tl { top: 0; left: 0; width: clamp(240px, 32vw, 500px); }
 .zl-wave-br { bottom: 0; right: 0; width: clamp(240px, 32vw, 500px); }
@@ -10256,7 +10271,7 @@ th {
   .zl-art { display: none; }
 }
 @media (max-width: 600px) {
-  .zl-page { padding: 20px 12px; place-items: start center; }
+  .zl-page { padding: 20px 12px calc(80px + env(safe-area-inset-bottom, 0px)); place-items: start center; }
   .zl-card { padding: 28px 20px 22px; border-radius: 26px; border-top-width: 4px; margin-top: 8px; }
   .zl-logo { width: 176px; margin-bottom: 20px; border-radius: 16px; }
   .zl-sub { margin-bottom: 22px; }
