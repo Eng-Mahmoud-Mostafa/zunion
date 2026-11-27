@@ -10555,3 +10555,14 @@ a.cl-pill.red:hover { background: #b80f19; }
 
 .ws-machines-modal .ws-worker-inactive { opacity: 1; }
 .ws-machines-modal .ws-worker-inactive > td:not(.ws-worker-actions-cell) { opacity: .6; }
+
+/* Keep each RTL dropdown control within the existing sidebar width. */
+.sidebar, .sidebar-menu { overflow-x: hidden !important; }
+.sidebar-menu, .sidebar-section, .sidebar-parent, .sidebar-submenu, .sidebar-submenu-inner { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.sidebar .sidebar-parent { padding: 0 !important; }
+.sidebar .sidebar-parent-nav { display: flex !important; flex: 1 1 0; width: 100% !important; min-width: 0 !important; max-width: 100%; box-sizing: border-box; padding: 0 16px !important; justify-content: space-between; gap: 10px; border-radius: inherit; }
+.sidebar .sidebar-parent-copy { flex: 1 1 0; min-width: 0; }
+.sidebar .sidebar-parent-copy > span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.sidebar .sidebar-toggle { flex: 0 0 28px; min-width: 28px !important; max-width: 28px; color: inherit !important; }
+.sidebar .sidebar-submenu[aria-hidden="true"] { display: none !important; }
+.sidebar .sidebar-subitem { width: 100% !important; min-width: 0 !important; max-width: 100%; box-sizing: border-box; }

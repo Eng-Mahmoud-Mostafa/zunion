@@ -9538,7 +9538,7 @@ function SidebarItemButton({ item, active, onSelect }: { item: SidebarItemConfig
   );
 }
 
-function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLogout, onCloseDrawer }: {
+function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDrawer }: {
   items: SidebarItemConfig[];
   activeView: View;
   drawerOpen: boolean;
@@ -9563,19 +9563,6 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLog
     try { localStorage.setItem(sidebarOpenKey, JSON.stringify(openSections)); } catch { /* storage unavailable */ }
   }, [openSections]);
 
-  // Flip the *effective* open state (so a −/+ click always does the obvious thing,
-  // even when the section is only auto-open because a subpage is active).
-  const setSectionOpen = (id: string, open: boolean) => {
-    setOpenSections((prev) => ({ ...prev, [id]: open }));
-  };
-
-  // Clicking the section label opens its in-content menu AND expands the dropdown;
-  // the +/- button toggles it independently.
-  const openSection = (item: SidebarItemConfig) => {
-    setOpenSections((prev) => ({ ...prev, [item.id]: true }));
-    onOpenSection?.(item);
-  };
-
   const hasActiveChild = (item: SidebarItemConfig): boolean => {
     return item.children?.some((child) => child.id === activeView) ?? false;
   };
@@ -9598,18 +9585,16 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onOpenSection, onLog
               return (
                 <div key={item.id} className={`sidebar-section${isOpen ? " open" : ""}${isActive ? " has-active" : ""}`}>
                   <div className={`sidebar-parent${isActive ? " active" : ""}`}>
-                    <button type="button" className="sidebar-parent-nav" onClick={() => openSection(item)}>
+                    <button type="button" className="sidebar-parent-nav" aria-expanded={isOpen} aria-controls={`sidebar-submenu-${item.id}`} onClick={() => setOpenSections(prev => ({...prev, [item.id]: !(prev[item.id] ?? (childActive || item.id === activeView))}))}>
                       <span className="sidebar-parent-copy">
                         <item.icon size={22} />
                         <span>{item.label}</span>
                       </span>
-                    </button>
-                    <button type="button" className="sidebar-toggle" aria-expanded={isOpen} aria-label={isOpen ? "طيّ القائمة الفرعية" : "فتح القائمة الفرعية"} onClick={() => setSectionOpen(item.id, !isOpen)}>
-                      <ToggleIcon size={18} />
+                      <span className="sidebar-toggle" aria-hidden="true"><ToggleIcon size={18} /></span>
                     </button>
                   </div>
-                  {/* Always rendered so expand/collapse animates both ways (CSS grid-rows). */}
-                  <div className="sidebar-submenu" aria-hidden={!isOpen}>
+                  {/* Keep submenu content mounted while collapsed and inaccessible. */}
+                  <div id={`sidebar-submenu-${item.id}`} className="sidebar-submenu" aria-hidden={!isOpen} inert={!isOpen}>
                       <div className="sidebar-submenu-inner">
                         {item.children.map((child, index) => (
                           <button key={`${item.id}-${index}`} type="button" tabIndex={isOpen ? 0 : -1} className={`sidebar-subitem${child.id === activeView ? " active" : ""}`} onClick={() => onSelect(child.id as View)}>
