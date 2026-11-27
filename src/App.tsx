@@ -1,3 +1,4 @@
+import { creatorName as orderCreatedBy } from "./lib/creatorName";
 import { logoutKey, clearAuthCaches } from "./lib/authLifecycle";
 import { publishProductionChange, subscribeProductionChanges } from "./lib/productionSync";
 import ProductionTools, { useProductionQueue } from "./components/ProductionTools";
@@ -2559,7 +2560,7 @@ function orderPieces(order: DbOrder) {
 type OrdersListRecord = Partial<Record<keyof Order | keyof DbOrder | "added_by" | "creator_name_snapshot" | "creator_name" | "username" | "user_email" | "product_name_snapshot" | "message_text", unknown>>;
 
 const ordersListHeaders = [
-  "اكتب بواسطة",
+  "أُضيف بواسطة",
   "تاريخ التسليم",
   "رقم الأوردر",
   "اسم العميل",
@@ -2575,7 +2576,7 @@ const ordersListHeaders = [
 ] as const;
 
 const finishListHeaders = [
-  "اكتب بواسطة",
+  "أُضيف بواسطة",
   "رقم الاوردر",
   "تاريخ التسليم",
   "اسم العميل",
@@ -2963,11 +2964,6 @@ function valueText(value: unknown, fallback = "—") {
   return text || fallback;
 }
 
-function orderCreatedBy(order: OrdersListRecord) {
-  const uuid=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-  return [order.creator_name, order.creator_name_snapshot, order.created_by, order.added_by, order.username]
-    .map(value=>String(value??"").trim()).find(value=>value&&!uuid.test(value)) || "مستخدم غير معروف";
-}
 
 function orderDisplayNumber(order: OrdersListRecord) {
   return valueText(order.order_number);
@@ -3217,12 +3213,13 @@ function CustomerDrawer({ open, onClose, customerCode, customerName, customers, 
           <h3 className="cd-section-title"><ShoppingBag size={16} /> سجل الأوردرات ({filteredOrders.length})</h3>
           <div className="cd-orders-wrap">
             <table className="cd-orders-table">
-              <thead><tr><th>رقم الأوردر</th><th>التسليم</th><th>المنتج</th><th>العدد</th><th>الحالة</th><th>التشغيل</th><th>التشطيب</th></tr></thead>
+              <thead><tr><th>رقم الأوردر</th><th className="order-creator-cell">أُضيف بواسطة</th><th>التسليم</th><th>المنتج</th><th>العدد</th><th>الحالة</th><th>التشغيل</th><th>التشطيب</th></tr></thead>
               <tbody>
-                {filteredOrders.length === 0 && <tr><td colSpan={7} className="cd-empty">لا توجد أوردرات مطابقة</td></tr>}
+                {filteredOrders.length === 0 && <tr><td colSpan={8} className="cd-empty">لا توجد أوردرات مطابقة</td></tr>}
                 {filteredOrders.map((o) => (
                   <tr key={o.id}>
                     <td className="cd-order-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(o.id)}>{o.order_number}</button> : o.order_number}</td>
+                    <td className="order-creator-cell" title={orderCreatedBy(o)}>{orderCreatedBy(o)}</td>
                     <td>{formatDateArabic(o.delivery_date)}</td>
                     <td>{o.order_type || o.productName || "--"}</td>
                     <td>{o.quantity}</td>
@@ -3244,7 +3241,7 @@ function CustomerDrawer({ open, onClose, customerCode, customerName, customers, 
           {displayCode && <button className="cd-action-btn" onClick={() => copyText(`C-${displayCode}`)}><Copy size={14} /> نسخ الكود</button>}
           <button className="cd-action-btn" onClick={() => { printDocument(`بيانات العميل ${displayName}`, printableRecord([["اسم العميل", displayName], ["الكود", displayCode], ["الهاتف", displayPhone], ["البريد", displayEmail], ["العنوان", displayAddress], ["المصدر", displaySource], ["ملاحظات", displayNotes], ["إجمالي الأوردرات", stats.total], ["إجمالي الكمية", stats.totalQuantity], ["إجمالي الإيراد", stats.totalRevenue]]), session); }}><Printer size={14} /> طباعة</button>
           <button className="cd-action-btn" onClick={() => {
-            const csv = [["رقم الأوردر", "التسليم", "المنتج", "العدد", "الحالة"]].concat(filteredOrders.map((o) => [o.order_number, o.delivery_date, o.order_type || o.productName || "", String(o.quantity), o.order_status]));
+            const csv = [["رقم الأوردر", "أُضيف بواسطة", "التسليم", "المنتج", "العدد", "الحالة"]].concat(filteredOrders.map((o) => [o.order_number, orderCreatedBy(o), o.delivery_date, o.order_type || o.productName || "", String(o.quantity), o.order_status]));
             const blob = new Blob([csv.map((r) => r.join(",")).join("\n")], { type: "text/csv;charset=utf-8;" });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a"); a.href = url; a.download = `orders-${displayName}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -4323,9 +4320,9 @@ function Dashboard({ setView, canSeeFinancials }: { setView: (view: View) => voi
       <section className="dashboard-grid">
         <div className="panel">
           <div className="panel-head"><h2>آخر الأوردرات</h2><button className="ghost-btn compact" onClick={() => setView("search")}>عرض الكل</button></div>
-          <div className="table-wrap dashboard-table"><table><thead><tr>{["تاريخ التسليم", "أمر شغل رقم", "العميل", "الطرف", "إجمالي", "مدفوع", "متبقي", "الحالة"].map((head) => <th key={head}>{head}</th>)}</tr></thead><tbody>
-            {data.latestOrders.length === 0 && <EmptyRow colSpan={8} />}
-            {data.latestOrders.map((order) => <tr key={order.id}><td>{formatDateArabic(order.delivery_date)}</td><td>{order.order_number || "-"}</td><td>{orderClientName(order)}</td><td>{orderParty(order)}</td><td>{formatMoney(order.total)}</td><td>{formatMoney(order.paid)}</td><td>{formatMoney(order.remaining)}</td><td><span className="badge badge-blue">{orderDashboardStatus(order)}</span></td></tr>)}
+          <div className="table-wrap dashboard-table"><table><thead><tr>{["تاريخ التسليم", "أمر شغل رقم", "أُضيف بواسطة", "العميل", "الطرف", "إجمالي", "مدفوع", "متبقي", "الحالة"].map((head) => <th key={head}>{head}</th>)}</tr></thead><tbody>
+            {data.latestOrders.length === 0 && <EmptyRow colSpan={9} />}
+            {data.latestOrders.map((order) => <tr key={order.id}><td>{formatDateArabic(order.delivery_date)}</td><td>{order.order_number || "-"}</td><td className="order-creator-cell" title={orderCreatedBy(order)}>{orderCreatedBy(order)}</td><td>{orderClientName(order)}</td><td>{orderParty(order)}</td><td>{formatMoney(order.total)}</td><td>{formatMoney(order.paid)}</td><td>{formatMoney(order.remaining)}</td><td><span className="badge badge-blue">{orderDashboardStatus(order)}</span></td></tr>)}
           </tbody></table></div>
         </div>
         <div className="panel">
@@ -5648,6 +5645,7 @@ function DraftsPage({ orders, onResume, onDelete }: { orders: Order[]; onResume:
               <th>رقم الأوردر</th>
               <th>اسم العميل</th>
               <th>نوع الأوردر</th>
+              <th className="order-creator-cell">أُضيف بواسطة</th>
               <th>آخر حفظ</th>
               <th />
             </tr>
@@ -5655,7 +5653,7 @@ function DraftsPage({ orders, onResume, onDelete }: { orders: Order[]; onResume:
           <tbody>
             {drafts.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted">لا توجد أوردرات محفوظة مؤقتًا. اضغط "حفظ مؤقت" داخل أوردر جديد لإضافتها هنا.</td>
+                <td colSpan={6} className="muted">لا توجد أوردرات محفوظة مؤقتًا. اضغط "حفظ مؤقت" داخل أوردر جديد لإضافتها هنا.</td>
               </tr>
             )}
             {drafts.map((order) => (
@@ -5663,6 +5661,7 @@ function DraftsPage({ orders, onResume, onDelete }: { orders: Order[]; onResume:
                 <td className="data-value">{order.order_number || "-"}</td>
                 <td>{order.client_name || "-"}</td>
                 <td>{order.order_type || "-"}</td>
+                <td className="order-creator-cell" title={orderCreatedBy(order)}>{orderCreatedBy(order)}</td>
                 <td>{order.updated_at || order.created_at ? formatDateTimeCairo(order.updated_at || order.created_at) : "-"}</td>
                 <td>
                   <div className="drafts-row-actions">
@@ -6745,6 +6744,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
             <div className="md-line md-line-num">{order?.order_number ?? assignment.order_id}</div>
             <div className="md-line">{order?.order_type || order?.productName || ""}</div>
             <div className="md-line">{order?.client_name || ""}</div>
+            <div className="md-line order-creator-cell">أُضيف بواسطة: {order ? orderCreatedBy(order) : "مستخدم غير معروف"}</div>
           </div>
           <div className="md-field">
             <label>نقل إلى مكنة:</label>
@@ -6810,6 +6810,7 @@ function MachineDistributionPage({ orders, session, machines, onMachinesChanged,
                             <div className="md-line md-line-num">{order.order_number}</div>
                             <div className="md-line">{order.order_type || order.productName || ""}</div>
                             <div className="md-line">{order.client_name}</div>
+                            <div className="md-line order-creator-cell">أُضيف بواسطة: {orderCreatedBy(order)}</div>
                           </div>
                           <span className="md-open-hint">تعديل / نقل / إزالة</span>
                         </td>
@@ -7318,7 +7319,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number }> = [
       { key: "priority", label: "الترتيب", cls: "ws-hd", rowSpan: 2 },
-      { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
+      { key: "addedBy", label: "أُضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
@@ -7471,7 +7472,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number }> = [
       { key: "priority", label: "الترتيب", cls: "ws-hd", rowSpan: 2 },
-      { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
+      { key: "addedBy", label: "أُضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
@@ -7631,7 +7632,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     }
 
     const finishingHeaders = [
-      { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user" },
+      { key: "addedBy", label: "أُضيف بواسطة", cls: "ws-hd ws-hd-user" },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num" },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date" },
       { key: "client", label: "اسم العميل", cls: "ws-hd" },
@@ -7956,7 +7957,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     }
 
     const spreadHeaderRow1: Array<{ key: string; label: string; cls?: string; rowSpan?: number; colSpan?: number; onClick?: boolean }> = [
-      { key: "addedBy", label: "أضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
+      { key: "addedBy", label: "أُضيف بواسطة", cls: "ws-hd ws-hd-user", rowSpan: 2 },
       { key: "deliveryDate", label: "تاريخ التسليم", cls: "ws-hd ws-hd-date", rowSpan: 2 },
       { key: "orderNumber", label: "رقم الأوردر", cls: "ws-hd ws-hd-num", rowSpan: 2 },
       { key: "client", label: "اسم العميل", cls: "ws-hd", rowSpan: 2 },
@@ -9433,6 +9434,7 @@ function ArchivePage({ customers, setOrders, session, setView, onCustomerClick, 
           <thead>
             <tr>
               <th>رقم الأوردر</th>
+              <th className="order-creator-cell">أُضيف بواسطة</th>
               <th>اسم العميل</th>
               <th>طرف</th>
               <th>نوع الأوردر</th>
@@ -9445,14 +9447,15 @@ function ArchivePage({ customers, setOrders, session, setView, onCustomerClick, 
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={10} className="ar-state">جارٍ تحميل الأوردرات المؤرشفة…</td></tr>}
-            {!loading && error && <tr><td colSpan={10} className="ar-state ar-state-error">{error}</td></tr>}
+            {loading && <tr><td colSpan={11} className="ar-state">جارٍ تحميل الأوردرات المؤرشفة…</td></tr>}
+            {!loading && error && <tr><td colSpan={11} className="ar-state ar-state-error">{error}</td></tr>}
             {!loading && !error && rows.length === 0 && (
-              <tr><td colSpan={10} className="ar-state">{hasFilters ? "لا توجد أوردرات مطابقة للفلاتر المحددة" : "لا توجد أوردرات مؤرشفة حتى الآن"}</td></tr>
+              <tr><td colSpan={11} className="ar-state">{hasFilters ? "لا توجد أوردرات مطابقة للفلاتر المحددة" : "لا توجد أوردرات مؤرشفة حتى الآن"}</td></tr>
             )}
             {!loading && !error && rows.map((order) => (
               <tr key={order.id}>
                 <td className="ar-num">{onOrderClick ? <button type="button" className="cd-client-link" onClick={() => onOrderClick(order.id, order)}>{order.order_number}</button> : order.order_number}</td>
+                <td className="order-creator-cell" title={orderCreatedBy(order)}>{orderCreatedBy(order)}</td>
                 <td>{order.client_name}</td>
                 <td>{valueText(order.source_person)}</td>
                 <td>{orderDisplayType({ order_type: order.order_type } as OrdersListRecord)}</td>

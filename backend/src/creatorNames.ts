@@ -37,5 +37,12 @@ export async function resolveOrderCreators<T extends Record<string,unknown>>(ord
  const ids=[...new Set(orders.map(o=>o.id).filter((id):id is string=>typeof id==='string'&&/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)))];
  const names=ids.length?(await query<{id:string;creator_name:string}>(`select o.id,${CREATOR_NAME_SQL} as creator_name from orders o ${CREATOR_NAME_JOIN} where o.id=any($1::uuid[])`,[ids])).rows:[];
  const byId=new Map(names.map(row=>[row.id,row.creator_name]));
- return orders.map(o=>({...o,creator_name:byId.get(String(o.id))||String(o.creator_name||o.creator_name_snapshot||'مستخدم غير معروف')}));
+ return orders.map(o=>({...o,creator_name:[byId.get(String(o.id)),o.creator_name,o.creator_name_snapshot].map(v=>String(v??'').trim()).find(v=>v&&v!=='مستخدم غير معروف'&&!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(v))||'مستخدم غير معروف'}));
+}
+
+/** Archive payloads retain their original snapshots; only creator metadata is resolved. */
+export async function resolveArchivedCreators<T extends Record<string,unknown>>(completions:T[]) {
+ const snapshots=completions.map(row=>row.snapshot&&typeof row.snapshot==='object'?row.snapshot as Record<string,unknown>:{});
+ const resolved=await resolveOrderCreators(completions.map((row,index)=>({id:String(row.order_id),creator_name:snapshots[index].creator_name,creator_name_snapshot:snapshots[index].creator_name_snapshot})));
+ return completions.map((row,index)=>({...row,creator_name:resolved[index].creator_name,snapshot:{...snapshots[index],creator_name:resolved[index].creator_name}}));
 }

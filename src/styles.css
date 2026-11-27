@@ -10566,3 +10566,6 @@ a.cl-pill.red:hover { background: #b80f19; }
 .sidebar .sidebar-toggle { flex: 0 0 28px; min-width: 28px !important; max-width: 28px; color: inherit !important; }
 .sidebar .sidebar-submenu[aria-hidden="true"] { display: none !important; }
 .sidebar .sidebar-subitem { width: 100% !important; min-width: 0 !important; max-width: 100%; box-sizing: border-box; }
+
+/* Creator metadata stays readable and never changes column visibility by role. */
+.order-creator-cell { min-width: 130px; max-width: 230px; text-align: right; overflow-wrap: anywhere; white-space: normal; vertical-align: middle; }

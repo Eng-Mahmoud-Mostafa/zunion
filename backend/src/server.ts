@@ -1,4 +1,4 @@
-import { CREATOR_NAME_SQL, CREATOR_NAME_JOIN, resolveOrderCreators } from "./creatorNames.js";
+import { CREATOR_NAME_SQL, CREATOR_NAME_JOIN, resolveOrderCreators, resolveArchivedCreators } from "./creatorNames.js";
 import { checkSessionRevocation, revokeSession, sessionIdentity } from "./sessionRevocation.js";
 import { WORKER_DEPARTMENTS, WORKER_DEPARTMENT_LABELS } from "./workerProfile.js";
 import crypto from "node:crypto";
@@ -1865,7 +1865,7 @@ app.put("/api/production/:stage/queue", requireAuth, requireProductionPermission
  const saved=await saveProductionQueue(stage,parsed.data.ids,parsed.data.revision,req.user!);
  if(!saved) return res.status(409).json({message:"تغير الطابور بواسطة مستخدم آخر. أعد التحميل ثم رتب من جديد."});
  const queue = await readProductionQueue(stage);
- res.json({...queue, orders:queue.orders.map(order => stripFinancial(order,req.user!.role))});
+ res.json({...queue, orders:(await resolveOrderCreators(queue.orders)).map(order => stripFinancial(order,req.user!.role))});
 });
 app.get("/api/production/:stage/archive", requireAuth, requireProductionPermission("operation.view"), async(req,res)=>{
  const stage=param(req.params.stage);
@@ -1884,7 +1884,7 @@ app.get("/api/production/:stage/archive", requireAuth, requireProductionPermissi
           and a.entity_type='orders' and a.new_value_json->>'status'='WORKER_DONE')))
       and not exists(select 1 from production_stage_completions c where c.order_id=o.id and c.stage=$1)
     order by completed_at desc nulls last`,[stage]);
- res.json({completions:rows});
+ res.json({completions:await resolveArchivedCreators(rows)});
 });
 app.patch("/api/orders/:id/complete-production", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
   const id = param(req.params.id);
@@ -2104,7 +2104,7 @@ app.patch("/api/orders/:id/status", requireAuth, async (req, res) => {
 
 app.get("/api/machine-assignments", requireAuth, requireProductionPermission("operation.view"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker", "Finishing", "Finish"), async (req, res) => {
   const snapshot = await machineDistributionSnapshot();
-  res.json({...snapshot, orders:snapshot.orders.map(order=>stripFinancial(order,req.user!.role))});
+  res.json({...snapshot, orders:(await resolveOrderCreators(snapshot.orders)).map(order=>stripFinancial(order,req.user!.role))});
 });
 
 app.post("/api/machine-assignments", requireAuth, requireProductionPermission("operation.update"), requireRole("Master", "Helper", "Operator", "Supervisor", "Worker"), async (req, res) => {
@@ -2813,7 +2813,7 @@ app.get("/api/search/orders", requireAuth, async (req, res) => {
   const params = search ? [`%${search}%`] : [];
   const where = search ? "where o.order_number ilike $1 or o.customer_name_snapshot ilike $1 or o.customer_code_snapshot ilike $1 or o.phone_snapshot ilike $1 or o.source_party ilike $1 or i.product_name ilike $1" : "";
   const { rows } = await query(`select distinct o.* from orders o left join order_items i on i.order_id=o.id ${where} order by created_at desc`, params);
-  res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
+  res.json({ orders: (await resolveOrderCreators(rows)).map((row) => stripFinancial(row, req.user!.role)) });
 });
 
 app.get("/api/search", requireAuth, async (req, res) => {
@@ -2847,7 +2847,7 @@ app.get("/api/search", requireAuth, async (req, res) => {
   ]);
 
   res.json({
-    orders: orders.rows.map((row) => stripFinancial(row, role)),
+    orders: (await resolveOrderCreators(orders.rows)).map((row) => stripFinancial(row, role)),
     ordersTotal: orderCount.rows[0]?.n ?? 0,
     customers: customers.rows,
     customersTotal: customerCount.rows[0]?.n ?? 0,

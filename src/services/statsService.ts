@@ -36,6 +36,7 @@ export type DbOrder = {
   quality_notes?: string | null;
   created_by?: string | null;
   created_by_name?: string | null;
+  creator_name?: string | null;
   logo_place?: string | null;
   logo_status?: string | null;
   logo_image_url?: string | null;
@@ -205,7 +206,20 @@ function orderStage(row: DbOrder) {
   return String(row.workStage || row.work_stage || row.order_status || "").trim();
 }
 
+let backendOrdersPending: Promise<DbOrder[]> | null = null;
 async function queryOrders(limit?: number) {
+  const serverBacked = import.meta.env.VITE_USE_SERVER_AUTH === "true" || (typeof window !== "undefined" && !["localhost","127.0.0.1"].includes(window.location.hostname));
+  if(serverBacked){
+    // Use the same scoped feed/creator metadata as order tables, never a separate user directory.
+    if(!backendOrdersPending){
+      backendOrdersPending=fetch("/api/orders",{credentials:"include",cache:"no-store"}).then(async response=>{
+        if(!response.ok)throw new Error("تعذر تحميل الأوردرات");
+        const data=await response.json();return (data.orders??[]) as DbOrder[];
+      });
+      const pending=backendOrdersPending;void pending.finally(()=>{if(backendOrdersPending===pending)backendOrdersPending=null;}).catch(()=>undefined);
+    }
+    const rows=await backendOrdersPending;return limit?rows.slice(0,limit):rows;
+  }
   const localRows = loadLocalOrders();
   if (!supabase) return limit ? localRows.slice(0, limit) : localRows;
   if (localRows.length) return limit ? localRows.slice(0, limit) : localRows;
