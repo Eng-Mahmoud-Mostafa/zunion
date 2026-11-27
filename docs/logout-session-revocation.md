@@ -1,0 +1,15 @@
+# Logout and session revocation
+
+Zunion login uses the backend-signed `zunion_app_session` HttpOnly cookie, not Supabase Auth. Supabase is a data client; there are no frontend Supabase sign-in/auth-state listeners. Its unused automatic auth persistence/URL detection/token refresh is disabled, and matching legacy project auth cache entries are cleared on logout.
+
+The bug had three cooperating causes: fire-and-forget frontend logout, background `/auth/me` restoration after local state was cleared, and no server-side revocation of the signed cookie. `/auth/me` could also issue a replacement cookie after logout.
+
+New login sessions receive random IDs. Refreshes preserve the ID and original expiry. Cookies issued before IDs existed use a deterministic identity based on stable signed login metadata. Successful logout records that identity in `revoked_app_sessions` until its expiry, then clears cookies with matching host/path/HttpOnly/SameSite/Secure attributes. It is idempotent. Every request carrying a live signed session is checked against the indexed revocation table before existing auth guards. Backend-only guard styles also reject revoked sessions. No role/user/permission records or business data are changed.
+
+Scope: the current login session, including tabs sharing its cookie. Other independently logged-in devices are not revoked. Remember Me does not override explicit logout. A database failure prevents a false success response. The revocation-table migration is additive/idempotent; deployment must verify `sessionRevocations:true` in health before promotion. Revocation records can be retained; expiry is enforced in the query and an expiry index supports future retention maintenance.
+
+The frontend aborts and generation-guards session restoration before logout, waits for server success, then clears server-backed sensitive cache copies and signals other tabs through a storage event. It fully replaces the current document/hash to destroy per-user memory and dialogs. A persisted explicit-logout marker blocks automatic cookie restoration until a deliberate new login. Back/Forward cache restoration checks the marker. Failed logout keeps authenticated state and displays an Arabic retry message. Theme/sidebar preferences and database business records are preserved; browser-only business records are not cleared in local-only mode.
+
+Authenticated responses and photo responses are not stored in HTTP cache. Logout requests browser cache clearing through `Clear-Site-Data: "cache"`, without clearing unrelated preference storage.
+
+Validation: isolated real API login/logout tests for eight roles with Remember Me on/off, old-cookie replay and legacy-cookie migration, refreshed-cookie replay, in-flight cookie races, failures/idempotency, production cookie attributes, and three backend guard styles. Real browser tests cover multiple tabs, refresh, Back, protected hashes, sensitive-cache removal/preferences preservation, manual login, failure/retry, and graceful browser close/reopen. No fake users or business records are created in production.

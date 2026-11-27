@@ -1,3 +1,4 @@
+import { logoutKey, clearAuthCaches } from "./lib/authLifecycle";
 import { publishProductionChange, subscribeProductionChanges } from "./lib/productionSync";
 import ProductionTools, { useProductionQueue } from "./components/ProductionTools";
 ﻿import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -9543,13 +9544,14 @@ function SidebarItemButton({ item, active, onSelect }: { item: SidebarItemConfig
   );
 }
 
-function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDrawer }: {
+function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, logoutBusy, onCloseDrawer }: {
   items: SidebarItemConfig[];
   activeView: View;
   drawerOpen: boolean;
   onSelect: (view: View) => void;
   onOpenSection?: (item: SidebarItemConfig) => void;
   onLogout: () => void;
+  logoutBusy?: boolean;
   onCloseDrawer: () => void;
 }) {
   // Remembered per-section expand/collapse state. An explicit value always wins
@@ -9617,7 +9619,7 @@ function Sidebar({ items, activeView, drawerOpen, onSelect, onLogout, onCloseDra
             );
           })}
         </nav>
-        <button className="sidebar-logout" type="button" onClick={onLogout}><span>تسجيل الخروج</span><LogOut size={18} /></button>
+        <button className="sidebar-logout" type="button" disabled={logoutBusy} aria-busy={logoutBusy} onClick={onLogout}><span>تسجيل الخروج</span><LogOut size={18} /></button>
       </aside>
       <button type="button" className="sidebar-overlay" aria-label="إغلاق القائمة" onClick={onCloseDrawer} />
     </>
@@ -9685,7 +9687,12 @@ function encodeTabHash(tab: { view: View; recordId?: string }) {
 }
 
 function ZunionApp() {
-  const [session, setSession] = useState<Session | null>(() => loadSession());
+  const [session, setSession] = useState<Session | null>(() => { if(localStorage.getItem(logoutKey)&&!localStorage.getItem(sessionKey))clearAuthCaches(useServerAuth); return loadSession(); });
+  const logoutPending = useRef(false);
+  const authGeneration = useRef(0);
+  const authAbort = useRef<AbortController | null>(null);
+  const [logoutBusy,setLogoutBusy] = useState(false);
+  const [logoutError,setLogoutError] = useState("");
   const [sessionReady, setSessionReady] = useState(!useServerAuth);
   const [tabs, setTabs] = useState<ShellTab[]>([]);
   const [activeTabId, setActiveTabId] = useState("");
@@ -9778,15 +9785,18 @@ function ZunionApp() {
     let inFlight = false;
     let verified = false;
     const refresh = async () => {
-      if (inFlight) return;
+      if (inFlight || logoutPending.current) return;
+      if(localStorage.getItem(logoutKey)&&!localStorage.getItem(sessionKey)){setSession(null);setSessionReady(true);return;}
+      const generation=authGeneration.current;
+      const controller=new AbortController();authAbort.current=controller;
       inFlight = true;
       try {
-        const response = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
-        if (cancelled) return;
+        const response = await fetch("/api/auth/me", { credentials: "include", cache: "no-store", signal:controller.signal });
+        if (cancelled || logoutPending.current || generation!==authGeneration.current) return;
         if (response.status === 401) { localStorage.removeItem(sessionKey); setSession(null); return; }
         if (!response.ok) throw new Error("Session refresh failed");
         const payload = await response.json();
-        if (cancelled) return;
+        if (cancelled || logoutPending.current || generation!==authGeneration.current) return;
         if (!payload?.session?.email || !payload?.session?.role || !Array.isArray(payload.session.permissions)) throw new Error("Effective permissions unavailable");
         const nextSession = payload.session as Session;
         verified = true;
@@ -9794,14 +9804,22 @@ function ZunionApp() {
         setSession(current => JSON.stringify(current) === JSON.stringify(nextSession) ? current : nextSession);
       } catch {
         // Never display a cached role's navigation before server verification.
-        if (!cancelled && !verified) setSession(null);
+        if (!cancelled && !logoutPending.current && !verified && generation===authGeneration.current) setSession(null);
       } finally { inFlight = false; if (!cancelled) setSessionReady(true); }
     };
     void refresh();
     const timer = window.setInterval(refresh, 30000);
     window.addEventListener("focus", refresh);
-    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+    return () => { cancelled = true; authAbort.current?.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); };
   }, [session?.username, session?.email]);
+
+  useEffect(()=>{
+    const receive=(event:StorageEvent)=>{if(event.key!==logoutKey||!event.newValue)return;logoutPending.current=true;authGeneration.current++;authAbort.current?.abort();clearAuthCaches(useServerAuth);window.location.replace(window.location.pathname+window.location.search);};
+    window.addEventListener("storage",receive);
+    const restore=(event:PageTransitionEvent)=>{if(event.persisted && localStorage.getItem(logoutKey)&&!localStorage.getItem(sessionKey)){clearAuthCaches(useServerAuth);window.location.replace(window.location.pathname+window.location.search);}};
+    window.addEventListener("pageshow",restore);
+    return()=>{window.removeEventListener("storage",receive);window.removeEventListener("pageshow",restore);};
+  },[]);
 
   // Navigation model: the sidebar is the only navigator and exactly one page is
   // mounted at a time. "push" adds a browser-history entry (so Back/Forward work),
@@ -10299,14 +10317,20 @@ function ZunionApp() {
     if (window.innerWidth <= 1024) setDrawerOpen(false);
   }
 
-  function logout() {
-    if (useServerAuth) {
-      fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
-    }
-    localStorage.removeItem(sessionKey);
-    addAudit(session, "LOGOUT", "auth");
-    setSession(null);
+  async function logout() {
+    if(logoutPending.current)return;
+    logoutPending.current=true;authGeneration.current++;authAbort.current?.abort();setLogoutBusy(true);setLogoutError("");
+    try {
+      if(useServerAuth){const response=await fetch("/api/auth/logout",{method:"POST",credentials:"include",cache:"no-store"});if(!response.ok)throw new Error("تعذر تسجيل الخروج. حاول مرة أخرى.");}
+      clearAuthCaches(useServerAuth);
+      localStorage.setItem(logoutKey,JSON.stringify({at:Date.now(),nonce:Math.random()}));
+      // Full navigation destroys per-user in-memory queries/dialogs and removes protected hashes.
+      window.location.replace(window.location.pathname+window.location.search);
+    }catch(error){logoutPending.current=false;setLogoutBusy(false);setLogoutError(error instanceof Error?error.message:"تعذر تسجيل الخروج. حاول مرة أخرى.");}
   }
+
+  function login(nextSession:Session){localStorage.removeItem(logoutKey);logoutPending.current=false;authGeneration.current++;setLogoutError("");setSession(nextSession);}
+
 
   if (useServerAuth && !sessionReady) {
     return (
@@ -10319,7 +10343,7 @@ function ZunionApp() {
     );
   }
 
-  if (!session) return <Login onLogin={setSession} />;
+  if (!session) return <Login onLogin={login} />;
   const routeAllowed = canAccessView(session, view);
   const settingsCapabilities: SettingsCapabilities = {
     createUsers: hasPermission(session, "users.create"),
@@ -10456,9 +10480,11 @@ function ZunionApp() {
         onSelect={selectSidebarView}
         onOpenSection={openSectionMenu}
         onLogout={logout}
+        logoutBusy={logoutBusy}
         onCloseDrawer={() => setDrawerOpen(false)}
       />
       <main className="content">
+        {logoutError && <p className="notice error" role="alert">{logoutError}</p>}
         <header className="topbar">
           <button type="button" className="hamburger-btn" aria-label={drawerOpen ? "إغلاق القائمة" : "فتح القائمة"} aria-expanded={drawerOpen} aria-controls="zunion-sidebar" onClick={() => setDrawerOpen((open) => !open)}><Menu size={24} /></button>
           <div className="topbar-current">

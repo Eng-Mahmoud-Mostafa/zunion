@@ -1,3 +1,4 @@
+import { SESSION_REVOCATION_DDL } from "./sessionRevocation.js";
 import { WORKER_PROFILE_DDL } from "./workerProfile.js";
 import { reconcileMachineAssignments } from "./machines.js";
 import { MACHINE_SLOT_DDL } from "./machineAssignments.js";
@@ -572,6 +573,7 @@ export async function ensureSchema(log: (msg: string) => void = console.log) {
       }
     }
     await syncSchemaDrift(log);
+    await query(SESSION_REVOCATION_DDL);
     await query(PRODUCTION_DDL);
     await query(MACHINE_SLOT_DDL);
     await reconcileMachineAssignments(log, false);

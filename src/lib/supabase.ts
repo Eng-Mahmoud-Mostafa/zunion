@@ -8,4 +8,4 @@ export const hasSupabaseConfig = Boolean(supabaseUrl && supabaseKey);
 // Only construct the client when real values are configured. When no Supabase
 // project is wired up, consumers (src/services/statsService.ts) skip remote
 // reads and fall back to the backend/local data instead of hitting a fake URL.
-export const supabase: SupabaseClient | null = hasSupabaseConfig ? createClient(supabaseUrl!, supabaseKey!) : null;
+export const supabase: SupabaseClient | null = hasSupabaseConfig ? createClient(supabaseUrl!, supabaseKey!, {auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}}) : null;

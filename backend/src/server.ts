@@ -1,3 +1,4 @@
+import { checkSessionRevocation, revokeSession, sessionIdentity } from "./sessionRevocation.js";
 import { WORKER_DEPARTMENTS, WORKER_DEPARTMENT_LABELS } from "./workerProfile.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -44,6 +45,7 @@ app.use(cors({ origin: config.appOrigin, credentials: true }));
 app.use("/api/attendance", express.json({ limit: "25mb" }));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
+app.use(checkSessionRevocation);
 
 const serviceRoutedPrefixes = [
   "/auth",
@@ -84,14 +86,16 @@ app.get("/api/health", async (_req, res) => {
   let productionSchema = "unavailable";
   let machineSlots = false;
   let workerProfiles = false;
+  let sessionRevocations = false;
   if (!config.databaseConfigured) {
     dbStatus = "not_configured";
   } else {
     try {
-      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready, exists(select 1 from information_schema.columns where table_schema='public' and table_name='machine_assignments' and column_name='queue_position') as machine_slots, exists(select 1 from information_schema.columns where table_schema='public' and table_name='workers' and column_name='payment_method') as worker_profiles");
+      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready, exists(select 1 from information_schema.columns where table_schema='public' and table_name='machine_assignments' and column_name='queue_position') as machine_slots, exists(select 1 from information_schema.columns where table_schema='public' and table_name='workers' and column_name='payment_method') as worker_profiles, to_regclass('public.revoked_app_sessions') is not null as session_revocations");
       productionSchema = schema.rows[0]?.ready ? "ready" : "pending";
       machineSlots = schema.rows[0]?.machine_slots === true;
       workerProfiles = schema.rows[0]?.worker_profiles === true;
+      sessionRevocations = schema.rows[0]?.session_revocations === true;
       dbStatus = "ok";
     } catch (error) {
       dbStatus = error instanceof Error ? error.message : "error";
@@ -103,6 +107,7 @@ app.get("/api/health", async (_req, res) => {
     productionSchema,
     machineSlots,
     workerProfiles,
+    sessionRevocations,
     email: config.resend.apiKey ? "configured" : "not_configured",
     time: new Date().toISOString(),
   });
@@ -562,6 +567,7 @@ async function makeSession(user: AppUser, stayLoggedIn = true) {
   } catch (error) { console.warn("Role permissions lookup failed", error); }
   return {
     session: {
+      sessionId: String(crypto.randomUUID()),
       email: user.email,
       username: user.username,
       fullName: user.full_name,
@@ -577,6 +583,7 @@ async function makeSession(user: AppUser, stayLoggedIn = true) {
 }
 
 function loadAppSessionCookie(req: express.Request): AppSession | null {
+  if (req.sessionRevoked) return null;
   const raw = req.cookies?.zunion_app_session;
   if (typeof raw !== "string") return null;
   const session = verifyAppSession(raw);
@@ -584,10 +591,12 @@ function loadAppSessionCookie(req: express.Request): AppSession | null {
 }
 
 function setAppSessionCookie(res: express.Response, session: object, maxAge: number) {
+  res.set("Cache-Control", "no-store");
   res.cookie("zunion_app_session", signAppSession(session as AppSession), {
     httpOnly: true,
     sameSite: "lax",
     secure: config.nodeEnv === "production",
+    path: "/",
     maxAge,
   });
 }
@@ -957,9 +966,16 @@ app.post("/api/auth/mandatory-change-password", async (req, res) => {
   return res.json({ ok: true, session: nextSession });
 });
 
-app.post("/api/auth/logout", requireAuth, async (_req, res) => {
-  res.clearCookie("zunion_app_session");
-  res.clearCookie("zunion_password_code");
+app.post("/api/auth/logout", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const raw = req.cookies?.zunion_app_session;
+  const session = typeof raw === "string" ? verifyAppSession(raw) : null;
+  try { if (appSessionLive(session)) await revokeSession(session); }
+  catch { return res.status(503).json({message:"تعذر تسجيل الخروج. حاول مرة أخرى."}); }
+  const attributes = {path:"/",httpOnly:true,sameSite:"lax" as const,secure:config.nodeEnv === "production"};
+  res.set("Clear-Site-Data", '"cache"');
+  res.clearCookie("zunion_app_session",attributes);
+  res.clearCookie("zunion_password_code",attributes);
   return res.json({ ok: true });
 });
 
@@ -971,7 +987,7 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
     if (profile) {
       const session = (await makeSession(profile, true)).session;
       const previous = loadAppSessionCookie(req);
-      if (previous) { session.expiresAt = previous.expiresAt ?? session.expiresAt; session.loggedInAt = previous.loggedInAt ?? session.loggedInAt; }
+      if (previous) { session.sessionId = sessionIdentity(previous); session.expiresAt = previous.expiresAt ?? session.expiresAt; session.loggedInAt = previous.loggedInAt ?? session.loggedInAt; }
       setAppSessionCookie(res, session, Math.max(0, new Date(session.expiresAt).getTime() - Date.now()));
       return res.json({ user, session });
     }
@@ -2349,7 +2365,7 @@ app.get("/api/photos/:id", requireAuth, async (req, res) => {
     if (!rows[0]?.data) return res.status(404).json({ message: "Photo not found" });
     res.setHeader("Content-Type", rows[0].mime_type || "image/jpeg");
     res.setHeader("Content-Length", rows[0].size);
-    res.setHeader("Cache-Control", "private, max-age=31536000, immutable");
+    res.setHeader("Cache-Control", "no-store");
     res.send(rows[0].data);
   } catch {
     return res.status(404).json({ message: "Photo not found" });

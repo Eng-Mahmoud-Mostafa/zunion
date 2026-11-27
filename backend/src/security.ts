@@ -20,6 +20,7 @@ export function nextTokenVersion(current?: number | null) {
 }
 
 export type AppSession = {
+  sessionId?: string;
   email?: string;
   username?: string;
   fullName?: string;
@@ -77,6 +78,7 @@ export type AuthUser = {
 declare global {
   namespace Express {
     interface Request {
+      sessionRevoked?: boolean;
       user?: AuthUser;
     }
   }
@@ -87,7 +89,7 @@ const APP_SESSION_COOKIE = "zunion_app_session";
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const raw = req.cookies?.[APP_SESSION_COOKIE];
   const session = typeof raw === "string" ? verifyAppSession(raw) : null;
-  if (!appSessionLive(session)) return res.status(401).json({ message: "Unauthorized" });
+  if (req.sessionRevoked || !appSessionLive(session)) return res.status(401).json({ message: "Unauthorized" });
 
   const email = session.email || `${session.username || "user"}@zunion.local`;
   const role = session.role || "Worker";
