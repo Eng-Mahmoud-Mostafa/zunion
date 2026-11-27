@@ -7505,7 +7505,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           </table>
         </div>
         <div className="ws-lower"><ProductionTools stage="sewing" canReorder={hasPermission(session, "operation.update")} onOrderClick={onOrderClick} onSaved={() => setQueueRefresh(value => value + 1)} />{savedQueue.error && <span role="alert">{savedQueue.error}</span>}
-          <button type="button" className="ws-workers-open" onClick={() => openWorkersModal("sewing")}>العمال</button>
         </div>
       </div>
     );
@@ -7659,7 +7658,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           </table>
         </div>
         <div className="ws-lower"><ProductionTools stage="printing" canReorder={hasPermission(session, "operation.update")} onOrderClick={onOrderClick} onSaved={() => setQueueRefresh(value => value + 1)} />{savedQueue.error && <span role="alert">{savedQueue.error}</span>}
-          <button type="button" className="ws-workers-open" onClick={() => openWorkersModal("printing")}>العمال</button>
         </div>
       </div>
     );
@@ -8165,7 +8163,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
           </table>
         </div>
         <div className="ws-lower">
-          <button type="button" className="ws-workers-open" onClick={() => openWorkersModal("operation")}>العمال</button><ProductionTools stage="embroidery" canReorder={false} onOrderClick={onOrderClick} onSaved={() => setQueueRefresh(value => value + 1)} />
+          <ProductionTools stage="embroidery" canReorder={false} onOrderClick={onOrderClick} onSaved={() => setQueueRefresh(value => value + 1)} />
           {onDistribute && (
             <button type="button" className="ws-distribute-btn" onClick={onDistribute}>توزيع مكن</button>
           )}
