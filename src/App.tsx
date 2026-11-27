@@ -291,12 +291,7 @@ type MachineRecord = { id: string; name: string; position: number; active: boole
 
 type Party = { id: string; name: string; position: number; active: boolean };
 
-const defaultParties: Party[] = [
-  { id: "party-ahmed", name: "أحمد", position: 1, active: true },
-  { id: "party-hassan", name: "حسن", position: 2, active: true },
-  { id: "party-khalifa", name: "خليفة", position: 3, active: true },
-  { id: "party-other", name: "أخرى", position: 4, active: true },
-];
+const defaultParties: Party[] = [];
 
 function normalizeParty(row: Record<string, unknown>, index = 0): Party {
   return {
@@ -1358,71 +1353,7 @@ const emptyOrder: Order = {
   completedAt: "",
 };
 
-const demoOrders: Order[] = [
-  calculate({
-    ...emptyOrder,
-    id: createId(),
-    created_by: "mahmoudmostafa3104@gmail.com",
-    order_number: "26-6-8-000112",
-    source_person: "احمد",
-    client_name: "احمد عصام",
-    client_code: "115",
-    phone: "1111577055",
-    delivery_date: isoOffset(0),
-    price: 52,
-    quantity: 50,
-    paid: 1600,
-    old_balance: 2000,
-    order_type: "كتابة",
-    details: "أوردر مطابق لمثال Excel",
-    logo_place: "الصدر",
-    logo_status: "موجود",
-    order_status: "في التشغيل",
-    workStage: "operation",
-    workflow_stage: "التشغيل",
-    operation_status: "جاري التشغيل",
-    notes: "هنسلم بكره ان شاء الله",
-    items: [{
-      id: createId(),
-      product_name: "كتابة",
-      details: "هنسلم بكره ان شاء الله",
-      product_image_url: "",
-      logo_url: "",
-      logo_place: "الصدر",
-      quantity: 50,
-      price: 52,
-      total: 2600,
-      quality: "",
-      status: "جديد",
-    }],
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }),
-  calculate({
-    ...emptyOrder,
-    id: createId(),
-    created_by: "mahmoudelwensh2007@gmail.com",
-    order_number: "1002",
-    source_person: "واتساب",
-    client_name: "شركة النور",
-    client_code: "C-002",
-    phone: "01111111111",
-    delivery_date: isoOffset(1),
-    price: 220,
-    quantity: 15,
-    paid: 2000,
-    order_type: "تيشيرت",
-    details: "تيشيرتات شركة",
-    logo_place: "أمام",
-    logo_status: "غير موجود",
-    order_status: "جاهز",
-    workStage: "completed",
-    workflow_stage: "الشغل جاهز",
-    finishing_status: "تم التشطيب",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }),
-];
+const demoOrders: Order[] = [];
 
 function isoOffset(days: number) {
   const date = new Date();
@@ -1817,6 +1748,8 @@ function useOrders(session: Session | null) {
     (async () => {
       for (const order of needsMigration) {
         try {
+          // A browser cache must never recreate an order deleted from the server.
+          await backendJson(`/api/orders/${encodeURIComponent(order.id)}`);
           const migratedItems = await Promise.all((order.operationItems || []).map(async (item) => {
             const next = { ...item };
             if (next.logoImage.startsWith("data:")) {
@@ -1837,12 +1770,7 @@ function useOrders(session: Session | null) {
           }));
           const uploaded = { ...order, operationItems: migratedItems };
           const body = JSON.stringify(orderToApi(uploaded));
-          const exists = orders.some((o) => o.id === order.id);
-          if (exists) {
-            await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body }).catch(() => backendJson("/api/orders", { method: "POST", body }));
-          } else {
-            await backendJson("/api/orders", { method: "POST", body });
-          }
+          await backendJson(`/api/orders/${encodeURIComponent(order.id)}`, { method: "PUT", body });
         } catch (error) {
           console.warn("[Zunion] Legacy photo migration failed for order", order.id, error);
         }
@@ -2109,7 +2037,7 @@ function useParties(session: Session | null) {
     try {
       const stored = localStorage.getItem(partiesKey);
       const parsed = stored ? (JSON.parse(stored) as Party[]) : null;
-      setParties(Array.isArray(parsed) && parsed.length ? parsed : defaultParties);
+      setParties(Array.isArray(parsed) ? parsed : defaultParties);
     } catch {
       setParties(defaultParties);
     }

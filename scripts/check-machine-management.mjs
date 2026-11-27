@@ -19,6 +19,7 @@ try {
  const beforeMachines=(await api.listMachines()),beforeOrders=(await db.query('select * from orders order by id')).rows,beforeArchive=(await db.query('select * from production_stage_completions')).rows;
  assert.equal(await api.machineHasQueuedJobs('history'),false);assert.equal(await api.machineHasQueuedJobs('Active'),true);
  const snapshot=await api.machineDistributionSnapshot();assert.equal(snapshot.machines.length,5);assert.equal(snapshot.assignments.length,2);assert.equal(snapshot.assignments.find(a=>a.id===liveAssignment.id).machine_name,'Active','canonical configured machine name is visible');
+ const readOnly=await api.reconcileMachineAssignments(()=>{},false);assert.equal(readOnly.orphanAssignmentsFound,1);assert.equal(readOnly.orphanAssignmentsRemoved,0);
  const messages=[];const diagnosis=await api.reconcileMachineAssignments(message=>messages.push(message));assert.equal(diagnosis.orphanAssignmentsRemoved,1);assert.equal(diagnosis.machines.find(m=>m.id===history.id).active_orders,0);assert.equal(diagnosis.machines.find(m=>m.id===history.id).historical_assignments,1);
  assert.deepEqual(await api.listMachines(),beforeMachines,'repair never removes or changes machine configurations');assert.deepEqual((await db.query('select * from orders order by id')).rows,beforeOrders);
  for(const assignment of [liveAssignment,historyAssignment,inactiveAssignment])assert.deepEqual((await db.query('select * from machine_assignments where id=$1',[assignment.id])).rows[0],assignment);

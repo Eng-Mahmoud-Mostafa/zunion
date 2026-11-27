@@ -370,7 +370,7 @@ async function syncMachinesTable(log: (msg: string) => void) {
 /**
  * The parties (أطراف) list is created here as well so databases that predate
  * the feature self-heal on boot. Idempotent: creates the table/indexes and then
- * backfills the built-in parties plus any name already referenced by an order
+ * backfills only names already referenced by an order
  * or customer, so existing data keeps working and becomes manageable.
  */
 async function syncPartiesTable(log: (msg: string) => void) {
@@ -396,9 +396,7 @@ async function syncPartiesTable(log: (msg: string) => void) {
     () => query(`insert into parties (name, position)
       select name, row_number() over (order by name)
       from (
-        select name from (values ('أحمد'), ('حسن'), ('خليفة')) as seed(name)
-        union
-        select distinct btrim(source_party) from orders where source_party is not null and btrim(source_party) <> ''
+        select distinct btrim(source_party) as name from orders where source_party is not null and btrim(source_party) <> ''
         union
         select distinct btrim(source_party) from customers where source_party is not null and btrim(source_party) <> ''
       ) all_names
@@ -576,7 +574,7 @@ export async function ensureSchema(log: (msg: string) => void = console.log) {
     await syncSchemaDrift(log);
     await query(PRODUCTION_DDL);
     await query(MACHINE_SLOT_DDL);
-    await reconcileMachineAssignments(log);
+    await reconcileMachineAssignments(log, false);
     await reloadPostgrestSchema(log);
   } catch (error) {
     log(`[schema] bootstrap failed: ${error instanceof Error ? error.message : error}`);

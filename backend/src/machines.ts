@@ -101,23 +101,26 @@ export async function removeMachine(id: string, userId: string, deactivateOnly=f
 }
 
 /** A narrowly scoped repair: valid orders and machine configurations never change. */
-export async function reconcileMachineAssignments(log:(message:string)=>void=console.log) {
+export async function reconcileMachineAssignments(log:(message:string)=>void=console.log, repairOrphans=true) {
  return tx(async client=>{
   await lockEmbroidery(client);
   let orphans=(await client.query("select a.* from machine_assignments a where not exists(select 1 from orders o where o.id=a.order_id)")).rows;
-  if(orphans.length){
+  const orphanAssignmentsFound=orphans.length;
+  let orphanAssignmentsRemoved=0;
+  if(orphans.length && repairOrphans){
    // Prevent a concurrent restore/insert of an order while checking and removing
    // dangling references. Re-check under the lock, then preserve each row in audit.
    await client.query("lock table orders in share mode");
    await client.query("lock table machine_assignments in share row exclusive mode");
    orphans=(await client.query("delete from machine_assignments a where not exists(select 1 from orders o where o.id=a.order_id) returning a.*")).rows;
+   orphanAssignmentsRemoved=orphans.length;
    for(const row of orphans)await client.query("insert into audit_logs(action,entity_type,entity_id,old_value_json,new_value_json) values('ORPHAN_MACHINE_ASSIGNMENT_REMOVED','machine_assignments',$1,$2::jsonb,$3::jsonb)",[row.id,JSON.stringify(row),JSON.stringify({reason:"order_missing",order_id:row.order_id})]);
   }
   const machines=await client.query(`select m.id,m.name,m.active,
     (select count(*)::int from machine_assignments a join orders o on o.id=a.order_id where lower(btrim(a.machine_name))=lower(btrim(m.name)) and ${ACTIVE_EMBROIDERY_SQL}) as active_orders,
     (select count(*)::int from machine_assignments a join orders o on o.id=a.order_id where lower(btrim(a.machine_name))=lower(btrim(m.name)) and not (${ACTIVE_EMBROIDERY_SQL})) as historical_assignments
     from machines m order by m.position,m.created_at`);
-  const result={orphanAssignmentsRemoved:orphans.length,machines:machines.rows};
+  const result={orphanAssignmentsFound,orphanAssignmentsRemoved,machines:machines.rows};
   log("[machine-queue-reconciliation] "+JSON.stringify(result));return result;
  });
 }
