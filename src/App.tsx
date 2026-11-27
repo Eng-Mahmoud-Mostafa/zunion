@@ -2556,7 +2556,7 @@ function orderPieces(order: DbOrder) {
   return order.pieces_count ?? order.quantity ?? 0;
 }
 
-type OrdersListRecord = Partial<Record<keyof Order | keyof DbOrder | "added_by" | "creator_name" | "username" | "user_email" | "product_name_snapshot" | "message_text", unknown>>;
+type OrdersListRecord = Partial<Record<keyof Order | keyof DbOrder | "added_by" | "creator_name_snapshot" | "creator_name" | "username" | "user_email" | "product_name_snapshot" | "message_text", unknown>>;
 
 const ordersListHeaders = [
   "اكتب بواسطة",
@@ -2662,7 +2662,7 @@ function OrderHistoryDialog({ order, onClose }: { order: Order; onClose: () => v
         {!history && !error && <div className="attachment-loading"><Loader2 size={16} className="spin" /><span>جارٍ التحميل…</span></div>}
         {history && (
           <>
-            <p className="order-history-created">أنشأه <strong>{history.creator_name || "مستخدم غير معروف"}</strong> في {formatDateTimeCairo(history.created_at)}</p>
+            <p className="order-history-created">أنشأه <strong>{orderCreatedBy({creator_name:history.creator_name})}</strong> في {formatDateTimeCairo(history.created_at)}</p>
             {history.edits.length === 0 ? (
               <p className="muted">لا توجد تعديلات مسجلة على هذا الأوردر.</p>
             ) : (
@@ -2827,7 +2827,7 @@ function OrderDetailsReadView({ order, canEdit, onEdit, onPrint, onViewImage }: 
 
   // Grouped exactly as requested: customer row, product row, then dates row.
   const customerRow: Array<[string, string]> = [
-    ["أُضيف بواسطة", valueText(order.creator_name || order.created_by)],
+    ["أُضيف بواسطة", orderCreatedBy(order)],
     ["اسم العميل", valueText(order.client_name)],
     ["طرف", valueText(order.source_person)],
   ];
@@ -2964,9 +2964,9 @@ function valueText(value: unknown, fallback = "—") {
 }
 
 function orderCreatedBy(order: OrdersListRecord) {
-  // created_by is a user id; never show it raw when the readable name is unavailable.
-  const createdBy = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(order.created_by ?? "")) ? "" : order.created_by;
-  return valueText(order.creator_name || createdBy || order.added_by || order.username || order.user_email, "مستخدم غير معروف");
+  const uuid=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+  return [order.creator_name, order.creator_name_snapshot, order.created_by, order.added_by, order.username]
+    .map(value=>String(value??"").trim()).find(value=>value&&!uuid.test(value)) || "مستخدم غير معروف";
 }
 
 function orderDisplayNumber(order: OrdersListRecord) {
@@ -3348,7 +3348,7 @@ function OrderDetailsDrawer({ open, onClose, order, customers, setOrders, sessio
           <div className="od-header-meta">
             <span><Calendar size={13} /> التسليم: {formatDateArabic(order.delivery_date)}</span>
             <span><Clock size={13} /> الإنشاء: {formatDateTimeEnglish(order.created_at)}</span>
-            <span><User size={13} /> بواسطة: {order.created_by || "--"}</span>
+            <span><User size={13} /> بواسطة: {orderCreatedBy(order)}</span>
           </div>
         </div>
 
@@ -5981,7 +5981,7 @@ function workerRowFromDb(row: DbOrder, machine = ""): WorkerSpreadRow {
     id: String(row.id ?? ""),
     orderNumber: valueText(row.order_number),
     deliveryDate: formatDisplayDate(row.delivery_date),
-    addedBy: String(row.created_by ?? ""),
+    addedBy: orderCreatedBy(row as OrdersListRecord),
     client: orderClientName(row),
     party: orderParty(row) === "-" ? "" : orderParty(row),
     type: String(row.product_name_snapshot ?? row.order_type ?? row.service_type ?? ""),
@@ -6001,7 +6001,7 @@ function workerRowFromOrder(order: Order): WorkerSpreadRow {
     id: order.id,
     orderNumber: order.order_number,
     deliveryDate: formatDisplayDate(order.delivery_date),
-    addedBy: order.created_by || "",
+    addedBy: orderCreatedBy(order),
     client: order.client_name,
     party: order.source_person || "",
     type: order.order_type || order.productName || "",
@@ -6037,7 +6037,7 @@ function sewingRowFromRaw(row: Record<string, unknown>): SewingRow {
     id: String(row.id ?? ""),
     orderNumber: valueText(row.order_number),
     deliveryDate: formatDisplayDate(row.delivery_date),
-    addedBy: String(row.created_by ?? row.added_by ?? ""),
+    addedBy: orderCreatedBy(row as OrdersListRecord),
     client: orderDisplayClient(row as OrdersListRecord),
     party: String(row.source_party ?? row.party ?? row.source_person ?? ""),
     type: String(row.type ?? row.product_name_snapshot ?? ""),
@@ -6055,7 +6055,7 @@ function sewingRowFromOrder(order: Order): SewingRow {
     id: order.id,
     orderNumber: order.order_number,
     deliveryDate: formatDisplayDate(order.delivery_date),
-    addedBy: order.created_by || "",
+    addedBy: orderCreatedBy(order),
     client: order.client_name,
     party: order.source_person || "",
     type: order.order_type || order.productName || "",
@@ -6089,7 +6089,7 @@ function printingRowFromRaw(row: Record<string, unknown>): PrintingRow {
     id: String(row.id ?? ""),
     orderNumber: valueText(row.order_number),
     deliveryDate: formatDisplayDate(row.delivery_date),
-    addedBy: String(row.created_by ?? row.added_by ?? ""),
+    addedBy: orderCreatedBy(row as OrdersListRecord),
     client: orderDisplayClient(row as OrdersListRecord),
     party: String(row.source_party ?? row.party ?? row.source_person ?? ""),
     type: String(row.type ?? row.product_name_snapshot ?? ""),
@@ -6107,7 +6107,7 @@ function printingRowFromOrder(order: Order): PrintingRow {
     id: order.id,
     orderNumber: order.order_number,
     deliveryDate: formatDisplayDate(order.delivery_date),
-    addedBy: order.created_by || "",
+    addedBy: orderCreatedBy(order),
     client: order.client_name,
     party: order.source_person || "",
     type: order.order_type || order.productName || "",
@@ -6144,7 +6144,7 @@ function finishingRowFromRaw(row: Record<string, unknown>): FinishingRow {
     id: String(row.id ?? ""),
     orderNumber: valueText(row.order_number),
     deliveryDate: formatDisplayDate(row.delivery_date),
-    addedBy: String(row.created_by ?? row.added_by ?? ""),
+    addedBy: orderCreatedBy(row as OrdersListRecord),
     client: orderDisplayClient(row as OrdersListRecord),
     party: String(row.source_party ?? row.party ?? row.source_person ?? ""),
     type: String(row.type ?? row.product_name_snapshot ?? ""),
@@ -6934,13 +6934,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [staffWindows, setStaffWindows] = useState<Record<string, StaffWindowState>>({});
   const [highlightOrderId, setHighlightOrderId] = useState<string | null>(null);
   const [gotoNotice, setGotoNotice] = useState("");
-  const [userDisplayNames, setUserDisplayNames] = useState<Record<string, string>>({});
   const [workersRegistry, setWorkersRegistry] = useState<WorkerRecord[]>([]);
-  const [workersSaving, setWorkersSaving] = useState(false);
-  const [workersError, setWorkersError] = useState("");
-  const [workersFeedback, setWorkersFeedback] = useState("");
-  const [workersDept, setWorkersDept] = useState<string | null>(null);
-  const [workerForm, setWorkerForm] = useState<{ id: string | null; name: string; card_id: string; phone: string } | null>(null);
   const [sewingRows, setSewingRows] = useState<SewingRow[]>([]);
   const [sewingLoading, setSewingLoading] = useState(false);
   const [sewingError, setSewingError] = useState("");
@@ -6951,7 +6945,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   const [finishingLoading, setFinishingLoading] = useState(false);
   const [finishingError, setFinishingError] = useState("");
   const wsWrapRef = useRef<HTMLDivElement | null>(null);
-  const canManageWorkers = false;
   // Non-blocking success toast (e.g. after إنهاء in التشغيل); auto-dismisses.
   const [toast, setToast] = useState<string>("");
   useEffect(() => {
@@ -7031,19 +7024,8 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     if (!dept) return;
     let active = true;
     const loadDirectory = () => {
-      void Promise.all([
-        backendJson<{ users: Array<{ id: string; username: string; full_name?: string | null }> }>("/api/users").catch(() => null),
-        backendJson<{ workers: WorkerRecord[] }>(`/api/workers?department=${encodeURIComponent(dept)}`).catch(() => null),
-      ]).then(([users, workers]) => {
-        if (!active) return;
-        if (users) {
-          const map: Record<string, string> = {};
-          for (const user of users.users) map[user.id] = user.full_name || user.username || user.id;
-          for (const managed of loadManagedUsers()) map[managed.id] = map[managed.id] || managed.fullName || managed.username || managed.id;
-          setUserDisplayNames(map);
-        }
-        if (workers) setWorkersRegistry(workers.workers);
-      });
+      void backendJson<{ workers: WorkerRecord[] }>(`/api/workers?department=${encodeURIComponent(dept)}`)
+        .then(data=>{if(active)setWorkersRegistry(data.workers);}).catch(()=>undefined);
     };
     loadDirectory();
     return () => { active = false; };
@@ -7275,22 +7257,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       });
   }
 
-  function openWorkersModal(department: string) {
-    // Already open for this department: keep its form and messages as they are.
-    if (workersDept === department) return;
-    setWorkersError("");
-    setWorkersFeedback("");
-    setWorkerForm(null);
-    setWorkersDept(department);
-  }
-
-  function closeWorkersModal() {
-    setWorkersDept(null);
-    setWorkerForm(null);
-    setWorkersError("");
-    setWorkersFeedback("");
-  }
-
   function renderSewingSpread() {
     if (sewingLoading && sewingRows.length === 0 && !sewingError) return <LoadingPanel />;
     if (sewingError && sewingRows.length === 0) return <ErrorPanel message={sewingError || "تعذر تحميل البيانات."} />;
@@ -7300,7 +7266,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       const shared = ordersById.get(row.id);
       return {
         ...row,
-        addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+        addedBy: row.addedBy || "مستخدم غير معروف",
         color: shared?.color ?? row.color,
         party: shared?.source_person ?? row.party,
       };
@@ -7453,7 +7419,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       const shared = ordersById.get(row.id);
       return {
         ...row,
-        addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+        addedBy: row.addedBy || "مستخدم غير معروف",
         color: shared?.color ?? row.color,
         party: shared?.source_person ?? row.party,
       };
@@ -7606,7 +7572,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       const shared = ordersById.get(row.id);
       return {
         ...row,
-        addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+        addedBy: row.addedBy || "مستخدم غير معروف",
         color: shared?.color ?? row.color,
         party: shared?.source_person ?? row.party,
       };
@@ -7751,9 +7717,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
             </tbody>
           </table>
         </div>
-        <div className="ws-lower">
-          <button type="button" className="ws-workers-open" onClick={() => openWorkersModal("finishing")}>العمال</button>
-        </div>
       </div>
     );
   }
@@ -7771,7 +7734,7 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
       const shared = ordersById.get(row.id);
       return {
         ...row,
-        addedBy: row.addedBy && userDisplayNames[row.addedBy] ? userDisplayNames[row.addedBy] : row.addedBy || "—",
+        addedBy: row.addedBy || "مستخدم غير معروف",
         color: shared?.color ?? row.color,
         party: shared?.source_person ?? row.party,
         machine: machineOverrides[row.id] ?? row.machine,
@@ -8107,10 +8070,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
     );
   }
 
-  function renderWorkersModal() {
-    return <DraggableDialog dialogClassName="ws-modal" headClassName="ws-modal-head" ariaLabel="العمال" onClose={closeWorkersModal} title={<h2>العمال</h2>}><p>إدارة العمال من الإعدادات ← الأفراد ← العمال</p><ul>{workersRegistry.filter(w => w.department === workersDept).map(w => <li key={w.id}>{w.name} {w.active ? "" : "(متوقف)"}</li>)}</ul></DraggableDialog>;
-  }
-
   if (!body) {
     body = (
       <div className="stack orders-classic-list">
@@ -8156,7 +8115,6 @@ function OrdersPage({ orders, setOrders, session, queue, machines = [], onCustom
   return (
     <>
       {body}
-      {workersDept && renderWorkersModal()}
       {toast && <div className="ws-toast" role="status">{toast}</div>}
     </>
   );

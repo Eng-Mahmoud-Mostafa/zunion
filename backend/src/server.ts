@@ -1,3 +1,4 @@
+import { CREATOR_NAME_SQL, CREATOR_NAME_JOIN, resolveOrderCreators } from "./creatorNames.js";
 import { checkSessionRevocation, revokeSession, sessionIdentity } from "./sessionRevocation.js";
 import { WORKER_DEPARTMENTS, WORKER_DEPARTMENT_LABELS } from "./workerProfile.js";
 import crypto from "node:crypto";
@@ -87,15 +88,17 @@ app.get("/api/health", async (_req, res) => {
   let machineSlots = false;
   let workerProfiles = false;
   let sessionRevocations = false;
+  let creatorNames = false;
   if (!config.databaseConfigured) {
     dbStatus = "not_configured";
   } else {
     try {
-      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready, exists(select 1 from information_schema.columns where table_schema='public' and table_name='machine_assignments' and column_name='queue_position') as machine_slots, exists(select 1 from information_schema.columns where table_schema='public' and table_name='workers' and column_name='payment_method') as worker_profiles, to_regclass('public.revoked_app_sessions') is not null as session_revocations");
+      const schema = await query("select to_regclass('public.production_queues') is not null and to_regclass('public.production_stage_completions') is not null as ready, exists(select 1 from information_schema.columns where table_schema='public' and table_name='machine_assignments' and column_name='queue_position') as machine_slots, exists(select 1 from information_schema.columns where table_schema='public' and table_name='workers' and column_name='payment_method') as worker_profiles, to_regclass('public.revoked_app_sessions') is not null as session_revocations, to_regclass('public.order_creator_names') is not null and (select count(*)=2 from pg_trigger where tgname in ('orders_capture_creator_name','users_capture_order_creator_names') and not tgisinternal) as creator_names");
       productionSchema = schema.rows[0]?.ready ? "ready" : "pending";
       machineSlots = schema.rows[0]?.machine_slots === true;
       workerProfiles = schema.rows[0]?.worker_profiles === true;
       sessionRevocations = schema.rows[0]?.session_revocations === true;
+      creatorNames = schema.rows[0]?.creator_names === true;
       dbStatus = "ok";
     } catch (error) {
       dbStatus = error instanceof Error ? error.message : "error";
@@ -108,6 +111,7 @@ app.get("/api/health", async (_req, res) => {
     machineSlots,
     workerProfiles,
     sessionRevocations,
+    creatorNames,
     email: config.resend.apiKey ? "configured" : "not_configured",
     time: new Date().toISOString(),
   });
@@ -1489,8 +1493,8 @@ app.get("/api/orders", requireAuth, async (req, res) => {
   }
   const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
   const { rows } = await queryWithEditSummary((withEdits) =>
-    `select o.*, coalesce(u.full_name, u.username) as creator_name${withEdits ? `, ${ORDER_EDIT_SUMMARY_SELECT}` : ""}
-     from orders o left join users u on u.id=o.created_by ${withEdits ? ORDER_EDIT_SUMMARY_JOIN : ""} ${sqlWhere} order by created_at desc`, params);
+    `select o.*, ${CREATOR_NAME_SQL} as creator_name${withEdits ? `, ${ORDER_EDIT_SUMMARY_SELECT}` : ""}
+     from orders o ${CREATOR_NAME_JOIN} ${withEdits ? ORDER_EDIT_SUMMARY_JOIN : ""} ${sqlWhere} order by created_at desc`, params);
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
@@ -1528,8 +1532,8 @@ app.get("/api/orders/archive", requireAuth, async (req, res) => {
   }
   const sqlWhere = filters.length ? `where ${filters.join(" and ")}` : "";
   const { rows } = await queryWithEditSummary((withEdits) =>
-    `select o.*, coalesce(u.full_name, u.username) as creator_name${withEdits ? `, ${ORDER_EDIT_SUMMARY_SELECT}` : ""}
-     from orders o left join users u on u.id=o.created_by ${withEdits ? ORDER_EDIT_SUMMARY_JOIN : ""} ${sqlWhere} order by o.completed_at desc, o.created_at desc`, params);
+    `select o.*, ${CREATOR_NAME_SQL} as creator_name${withEdits ? `, ${ORDER_EDIT_SUMMARY_SELECT}` : ""}
+     from orders o ${CREATOR_NAME_JOIN} ${withEdits ? ORDER_EDIT_SUMMARY_JOIN : ""} ${sqlWhere} order by o.completed_at desc, o.created_at desc`, params);
   res.json({ orders: rows.map((row) => stripFinancial(row, req.user!.role)) });
 });
 
@@ -1851,7 +1855,7 @@ app.get("/api/production/:stage/queue", requireAuth, requireProductionPermission
  const stage=param(req.params.stage);
  if(stage!=="printing" && stage!=="sewing" && stage!=="embroidery") return res.sendStatus(400);
  const queue = await readProductionQueue(stage);
- res.json({...queue, orders:queue.orders.map(order => stripFinancial(order,req.user!.role))});
+ res.json({...queue, orders:(await resolveOrderCreators(queue.orders)).map(order => stripFinancial(order,req.user!.role))});
 });
 app.put("/api/production/:stage/queue", requireAuth, requireProductionPermission("operation.update"), async(req,res)=>{
  const stage=param(req.params.stage);
@@ -2440,7 +2444,7 @@ app.get("/api/customers/:id/details", requireAuth, requireRole("Master", "Helper
     [id],
   );
   const ordersResult = await query(
-    "select o.*, coalesce(u.full_name, u.username) as creator_name from orders o left join users u on u.id=o.created_by where customer_id=$1 order by created_at desc",
+    `select o.*, ${CREATOR_NAME_SQL} as creator_name from orders o ${CREATOR_NAME_JOIN} where customer_id=$1 order by created_at desc`,
     [id],
   );
   res.json({
@@ -2487,7 +2491,7 @@ app.delete("/api/customers/:id", requireAuth, requireAppPermission("customers.de
 
 app.get("/api/customers/:id/orders", requireAuth, requireRole("Master", "Helper", "Operator"), async (req, res) => {
   const id = param(req.params.id);
-  const { rows } = await query("select o.*, coalesce(u.full_name, u.username) as creator_name from orders o left join users u on u.id=o.created_by where customer_id=$1 order by created_at desc", [id]);
+  const { rows } = await query(`select o.*, ${CREATOR_NAME_SQL} as creator_name from orders o ${CREATOR_NAME_JOIN} where customer_id=$1 order by created_at desc`, [id]);
   res.json({ orders: rows });
 });
 

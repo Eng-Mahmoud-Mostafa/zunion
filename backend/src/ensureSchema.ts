@@ -1,9 +1,10 @@
+import { ORDER_CREATOR_DDL } from "./creatorNames.js";
 import { SESSION_REVOCATION_DDL } from "./sessionRevocation.js";
 import { WORKER_PROFILE_DDL } from "./workerProfile.js";
 import { reconcileMachineAssignments } from "./machines.js";
 import { MACHINE_SLOT_DDL } from "./machineAssignments.js";
 import { PRODUCTION_DDL } from "./productionCompletion.js";
-import { query, databaseAvailable } from "./db.js";
+import { query, tx, databaseAvailable } from "./db.js";
 import { schemaSql } from "./schema.js";
 import { PERIOD_DDL } from "./periodStore.js";
 
@@ -573,6 +574,10 @@ export async function ensureSchema(log: (msg: string) => void = console.log) {
       }
     }
     await syncSchemaDrift(log);
+    await tx(async client=>{
+      await client.query("select pg_advisory_xact_lock(hashtext('zunion-order-creator-names-v1'))");
+      await client.query(ORDER_CREATOR_DDL);
+    });
     await query(SESSION_REVOCATION_DDL);
     await query(PRODUCTION_DDL);
     await query(MACHINE_SLOT_DDL);

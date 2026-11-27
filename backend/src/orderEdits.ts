@@ -1,3 +1,4 @@
+import { CREATOR_NAME_SQL, CREATOR_NAME_JOIN } from "./creatorNames.js";
 import type { PoolClient } from "pg";
 import { query } from "./db.js";
 import type { AuthUser } from "./security.js";
@@ -127,8 +128,8 @@ export async function queryWithEditSummary<T extends Record<string, unknown>>(bu
 
 export async function loadOrderHistory(orderId: string) {
   const order = await query<{ created_at: string; creator_name: string | null }>(
-    `select o.created_at, coalesce(nullif(btrim(u.full_name), ''), u.username) as creator_name
-     from orders o left join users u on u.id = o.created_by where o.id = $1`,
+    `select o.created_at, ${CREATOR_NAME_SQL} as creator_name
+     from orders o ${CREATOR_NAME_JOIN} where o.id = $1`,
     [orderId],
   );
   if (!order.rows[0]) return null;

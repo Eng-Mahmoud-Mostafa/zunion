@@ -1,3 +1,4 @@
+import { CREATOR_NAME_SQL, CREATOR_NAME_JOIN } from "./creatorNames.js";
 import type { PoolClient } from "pg";
 import { query } from "./db.js";
 
@@ -66,6 +67,6 @@ export async function ensureCustomer(client: PoolClient, input: {
 }
 
 export async function loadOrder(id: string) {
-  const { rows } = await query<import("./notifications.js").OrderRecord>("select * from orders where id = $1", [id]);
+  const { rows } = await query<import("./notifications.js").OrderRecord>(`select o.*, ${CREATOR_NAME_SQL} as creator_name from orders o ${CREATOR_NAME_JOIN} where o.id = $1`, [id]);
   return rows[0] ?? null;
 }
